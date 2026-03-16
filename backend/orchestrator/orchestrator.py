@@ -176,13 +176,13 @@ class Orchestrator:
 
         # Initialize router LLM (fast model for routing decisions)
         self.router_llm = ChatAnthropic(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-6",
             temperature=0,
         )
 
         # Initialize response LLM (for combining results)
         self.response_llm = ChatAnthropic(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-6",
             temperature=0.7,
         )
 

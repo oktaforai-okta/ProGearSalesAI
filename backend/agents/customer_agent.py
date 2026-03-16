@@ -31,7 +31,7 @@ class CustomerAgent:
         self.scopes = ["customer:read", "customer:write"]
 
         self.llm = ChatAnthropic(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-6",
             temperature=0.5,
         )
 

@@ -31,7 +31,7 @@ class InventoryAgent:
         self.scopes = ["inventory:read", "inventory:write"]
 
         self.llm = ChatAnthropic(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-6",
             temperature=0.3,  # Lower temp for factual inventory data
         )
 
