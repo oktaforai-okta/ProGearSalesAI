@@ -5,8 +5,8 @@ This is a VISIBLE agent class - customers can see this code.
 The agent is registered as a first-class identity in Okta's AI Agent Directory.
 
 Security Model:
-- Agent ID: wlp8x5q7mvH86KvFJ0g7
-- App Client ID: 0oa8x5nsjp8aDUpB70g7
+- Agent ID: wlpuoor63yK6LYFEh1d7
+- App Client ID: 0oauoogbznnrX0Ory1d7
 - Scopes: mcp:read, mcp:inventory, mcp:pricing, mcp:customers (full orchestrator access)
 - Authentication: JWT Bearer with JWK private key
 """
@@ -38,11 +38,11 @@ class SalesAgent:
     """
 
     # Agent identity (from Okta AI Agent Directory)
-    AGENT_ID = "wlp8x5q7mvH86KvFJ0g7"
+    AGENT_ID = "wlpuoor63yK6LYFEh1d7"
     AGENT_NAME = "ProGear Sales Agent"
 
     # OAuth/OIDC app (linked to agent)
-    CLIENT_ID = "0oa8x5nsjp8aDUpB70g7"
+    CLIENT_ID = "0oauoogbznnrX0Ory1d7"
 
     # MCP scopes this agent can request (configured in Managed Connections)
     SCOPES = MCP_SCOPES  # ["mcp:read", "mcp:inventory", "mcp:pricing", "mcp:customers"]
@@ -64,7 +64,7 @@ class SalesAgent:
 
         # Initialize LLM (Claude)
         self.llm = ChatAnthropic(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-6",
             temperature=0.7,
         )
 
