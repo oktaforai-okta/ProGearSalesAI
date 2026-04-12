@@ -13,19 +13,24 @@ Key feature for demo: Shows which agents are accessible based on user's
 group membership, with clear success/denied visualization.
 """
 
+import os
 from typing import Dict, Any, List, Optional, TypedDict
 from langgraph.graph import StateGraph, END
-from langchain_anthropic import ChatAnthropic
+# from langchain_anthropic import ChatAnthropic
+from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 import logging
 import json
+
+# Load environment variables for OpenAI
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+X_GATEWAY_SECRET = os.getenv("X_GATEWAY_SECRET")
 
 from auth.multi_agent_auth import (
     get_multi_agent_exchange,
     AGENT_SALES, AGENT_INVENTORY, AGENT_CUSTOMER, AGENT_PRICING
 )
 from auth.agent_config import get_agent_config, DEMO_AGENTS
-from data.demo_store import demo_store
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +39,6 @@ class WorkflowState(TypedDict):
     """State passed through the LangGraph workflow."""
     messages: List[Any]
     user_message: str
-    conversation_context: str  # Previous conversation for context-aware routing
     user_info: Dict[str, Any]
     user_token: str
 
@@ -54,28 +58,11 @@ class WorkflowState(TypedDict):
 
 
 # Agent type to keywords mapping for fallback routing
-# NOTE: These must include both read AND write operation keywords for proper routing
 AGENT_KEYWORDS = {
-    AGENT_SALES: [
-        "order", "quote", "deal", "sale", "revenue", "pipeline", "opportunity",
-        "proposal", "estimate", "fulfill", "create order", "place order",
-        "ship", "deliver"
-    ],
-    AGENT_INVENTORY: [
-        "stock", "inventory", "product", "warehouse", "supply", "available", "in stock",
-        "add", "update", "increase", "decrease", "adjust", "restock", "replenish",
-        "reduce", "remove", "alert", "notify", "reorder", "low stock",
-        "basketball", "tennis", "racket", "uniform", "equipment"
-    ],
-    AGENT_CUSTOMER: [
-        "customer", "account", "client", "contact", "tier", "loyalty", "history",
-        "lookup", "find", "search", "purchased", "transactions"
-    ],
-    AGENT_PRICING: [
-        "price", "discount", "margin", "cost", "profit", "bulk", "wholesale", "retail",
-        "markup", "profitability", "volume", "special price",
-        "reduce", "cut", "lower", "mark down", "mark up"
-    ],
+    AGENT_SALES: ["order", "quote", "deal", "sale", "revenue", "pipeline", "opportunity"],
+    AGENT_INVENTORY: ["stock", "inventory", "product", "warehouse", "supply", "available", "in stock"],
+    AGENT_CUSTOMER: ["customer", "account", "client", "contact", "tier", "loyalty", "history"],
+    AGENT_PRICING: ["price", "discount", "margin", "cost", "profit", "bulk", "wholesale", "retail"],
 }
 
 # Scope definitions for each MCP - maps operation type to required scope
@@ -175,15 +162,33 @@ class Orchestrator:
         self.token_exchange = get_multi_agent_exchange()
 
         # Initialize router LLM (fast model for routing decisions)
-        self.router_llm = ChatAnthropic(
-            model="claude-sonnet-4-6",
-            temperature=0,
+        # self.router_llm = ChatAnthropic(
+        #     model="claude-sonnet-4-20250514",
+        #     temperature=0,
+        # )
+        self.router_llm = ChatOpenAI(
+            model="claude-sonnet-4-20250514",
+            api_key=OPENAI_API_KEY,
+
+            # Custom headers are passed here
+            default_headers={
+                "x-gateway-secret": X_GATEWAY_SECRET
+            }
         )
 
         # Initialize response LLM (for combining results)
-        self.response_llm = ChatAnthropic(
-            model="claude-sonnet-4-6",
-            temperature=0.7,
+        # self.response_llm = ChatAnthropic(
+        #     model="claude-sonnet-4-20250514",
+        #     temperature=0.7,
+        # )
+        self.response_llm = ChatOpenAI(
+            model="claude-sonnet-4-20250514",
+            api_key=OPENAI_API_KEY,
+
+            # Custom headers are passed here
+            default_headers={
+                "x-gateway-secret": X_GATEWAY_SECRET
+            }
         )
 
         # Build the workflow
@@ -216,26 +221,11 @@ class Orchestrator:
         CRITICAL: Detects intent to determine specific scopes needed.
         """
         message = state["user_message"]
-        conversation_context = state.get("conversation_context", "")
-
         state["agent_flow"].append({
             "step": "router",
             "action": "Analyzing request to determine relevant agents and required scopes",
             "status": "processing"
         })
-
-        # Build context section if we have conversation history
-        context_section = ""
-        if conversation_context:
-            context_section = f"""
-CONVERSATION HISTORY (for context):
-{conversation_context}
-
-NOTE: The user's current message may reference the conversation above.
-For example, "Yes", "Do it", "Go ahead" likely refers to the previous assistant suggestion.
-Consider this context when determining which agents and scopes are needed.
-
-"""
 
         # Use LLM to determine which agents are relevant AND what operations are needed
         try:
@@ -251,7 +241,7 @@ Available agents and their scopes:
 
 2. INVENTORY:
    - inventory:read - View stock levels, product availability (read-only queries like "what do we have", "check stock")
-   - inventory:write - Add/update/modify inventory (write operations like "add 5000 basketballs", "update stock", "increase stock")
+   - inventory:write - Add/update/modify inventory (write operations like "add 5000 basketballs", "update stock")
    - inventory:alert - Manage inventory alerts
 
 3. CUSTOMER:
@@ -263,8 +253,8 @@ Available agents and their scopes:
    - pricing:read - View prices (basic price queries)
    - pricing:margin - View profit margins (margin/profit queries)
    - pricing:discount - View/apply discounts (bulk/discount queries)
-{context_section}
-CURRENT USER REQUEST: "{message}"
+
+User request: "{message}"
 
 Return a JSON object with agents and their required scopes:
 {{
@@ -276,10 +266,9 @@ Return a JSON object with agents and their required scopes:
 
 IMPORTANT: Choose scopes based on the operation type:
 - READ operations (view, show, list, check, what, how many) -> use :read scopes
-- WRITE operations (add, update, modify, change, set, put, increase, decrease) -> use :write scopes
+- WRITE operations (add, update, modify, change, set, put) -> use :write scopes
 - For margin/profit queries -> use pricing:margin
 - For discount/bulk queries -> use pricing:discount
-- If the user says "yes", "do it", "go ahead", "confirm" - look at conversation history to determine the operation
 
 Return ONLY the JSON object, no other text."""
 
@@ -384,31 +373,20 @@ Return ONLY the JSON object, no other text."""
 
         # Record token exchanges - use "name" for Token Exchange card (MCP name)
         for agent_type, result in exchange_results.items():
-            # Always use agent_scopes as authoritative source for what was requested
-            requested_scopes = agent_scopes.get(agent_type, [])
-            # Fall back to result if agent_scopes is empty
-            if not requested_scopes:
-                requested_scopes = result.get("requested_scopes", [])
-
-            # Detect if this is a policy denial even if not explicitly marked
-            is_access_denied = result.get("access_denied", False)
-            error_msg = result.get("error", "").lower()
-            if not is_access_denied and error_msg:
-                policy_keywords = ["policy", "denied", "unauthorized", "forbidden"]
-                is_access_denied = any(kw in error_msg for kw in policy_keywords)
+            requested_scopes = result.get("requested_scopes", agent_scopes.get(agent_type, []))
 
             exchange_record = {
                 "agent": agent_type,
                 "agent_name": result["agent_info"]["name"],  # MCP name for Token Exchange card
                 "color": result["agent_info"]["color"],
                 "success": result["success"],
-                "access_denied": is_access_denied,
+                "access_denied": result.get("access_denied", False),
                 "scopes": result.get("scopes", []),
                 "requested_scopes": requested_scopes,  # What was requested
                 "demo_mode": result.get("demo_mode", False),
             }
 
-            if is_access_denied:
+            if result.get("access_denied"):
                 exchange_record["error"] = result.get("error", f"Access denied for scope(s): {', '.join(requested_scopes)}")
                 exchange_record["status"] = "denied"
             elif result["success"]:
@@ -466,8 +444,7 @@ Return ONLY the JSON object, no other text."""
                 agent_response = await self._invoke_agent(
                     agent_type,
                     state["user_message"],
-                    exchange_result,
-                    state.get("conversation_context", "")
+                    exchange_result
                 )
                 agent_results[agent_type]["response"] = agent_response
 
@@ -496,414 +473,121 @@ Return ONLY the JSON object, no other text."""
         self,
         agent_type: str,
         message: str,
-        exchange_result: Dict[str, Any],
-        conversation_context: str = ""
+        exchange_result: Dict[str, Any]
     ) -> str:
         """
-        Invoke a specific agent to process the request using real data.
+        Invoke a specific agent to process the request.
 
-        Uses the demo_store to get/modify actual data based on:
-        1. The agent type (inventory, pricing, customer, sales)
-        2. The user's message intent
-        3. The granted scopes (determines if writes are allowed)
+        In full implementation, this would:
+        1. Use the MCP token to call MCP tools
+        2. Have the agent LLM process with tool results
+        3. Return agent's response
+
+        For now, returns simulated responses based on agent type.
         """
+        # Get agent-specific data (will be replaced with MCP calls)
+        data = self._get_demo_data(agent_type, message)
+
         agent_name = exchange_result["agent_info"]["name"]
         scopes = exchange_result.get("scopes", [])
 
-        # Get real data based on agent type
-        data = self._execute_agent_action(agent_type, message, scopes, conversation_context)
+        return f"[{agent_name}]\n{data}\n(Scopes: {', '.join(scopes)})"
 
-        return f"[{agent_name}]\n{data}"
-
-    def _execute_agent_action(
-        self,
-        agent_type: str,
-        message: str,
-        scopes: List[str],
-        conversation_context: str = ""
-    ) -> str:
-        """Execute the appropriate action based on agent type and message intent."""
+    def _get_demo_data(self, agent_type: str, message: str) -> str:
+        """Get demo data for an agent based on message context."""
         message_lower = message.lower()
-        full_context = f"{conversation_context}\n{message}".lower()
 
-        if agent_type == AGENT_INVENTORY:
-            return self._handle_inventory_action(message_lower, scopes, full_context)
-        elif agent_type == AGENT_PRICING:
-            return self._handle_pricing_action(message_lower, scopes, full_context)
+        if agent_type == AGENT_SALES:
+            if "order" in message_lower or "recent" in message_lower:
+                return (
+                    "Recent Orders:\n"
+                    "- ORD-2024-001: State University Athletics - $7,109.53 (shipped)\n"
+                    "- ORD-2024-002: Metro High School District - $23,796.60 (processing)\n"
+                    "- ORD-2024-003: Riverside Youth League - $3,608.95 (pending)\n"
+                    "- ORD-2024-004: City Pro Basketball Academy - $5,669.69 (shipped)\n"
+                    "Pipeline Value: $40,184.77 this week"
+                )
+            return (
+                "Sales Summary:\n"
+                "- Active orders: 5 orders totaling $40,184.77\n"
+                "- Top customer: Metro High School District ($124,500 lifetime)\n"
+                "- Quote ready for 1,500 basketballs @ 20% bulk discount"
+            )
+
+        elif agent_type == AGENT_INVENTORY:
+            if "basketball" in message_lower:
+                return (
+                    "Basketball Inventory:\n"
+                    "- Pro Game Basketball: 2,847 units - GOOD\n"
+                    "- Pro Composite: 1,523 units - GOOD\n"
+                    "- Women's Official: 1,234 units - GOOD\n"
+                    "- Youth Size 5: 3,567 units - GOOD\n"
+                    "- Youth Size 4: 2,156 units - GOOD\n"
+                    "Total basketballs: 12,219 units available"
+                )
+            return (
+                "Inventory Summary:\n"
+                "- Basketballs: 12,219 units (6 SKUs)\n"
+                "- Hoops & Backboards: 769 units (4 SKUs)\n"
+                "- Uniforms: 21,120 units (4 SKUs)\n"
+                "- Training Equipment: 4,700 units (4 SKUs)\n"
+                "Low stock alert: Pro Arena Hoop System (45 units)"
+            )
+
         elif agent_type == AGENT_CUSTOMER:
-            return self._handle_customer_action(message_lower, scopes, full_context)
-        elif agent_type == AGENT_SALES:
-            return self._handle_sales_action(message_lower, scopes, full_context)
+            if "state" in message_lower or "university" in message_lower:
+                return (
+                    "Customer: State University Athletics\n"
+                    "- Tier: Platinum\n"
+                    "- Lifetime Value: $89,500 (156 orders)\n"
+                    "- Contact: Coach Williams\n"
+                    "- Territory: West | Payment: Net 45\n"
+                    "Note: Preferred for bulk basketball orders"
+                )
+            if "platinum" in message_lower or "tier" in message_lower:
+                return (
+                    "Platinum Tier Customers:\n"
+                    "1. Metro High School District - $124,500 lifetime\n"
+                    "2. State University Athletics - $89,500 lifetime\n"
+                    "3. City Pro Basketball Academy - $67,800 lifetime\n"
+                    "Platinum benefits: 5% discount, Net 45-60 terms"
+                )
+            return (
+                "Customer Overview:\n"
+                "- Platinum: 3 accounts ($281,800 combined)\n"
+                "- Gold: 3 accounts ($63,500 combined)\n"
+                "- Silver: 2 accounts ($15,200 combined)\n"
+                "Top: Metro High School District ($124,500)"
+            )
+
+        elif agent_type == AGENT_PRICING:
+            if "basketball" in message_lower or "margin" in message_lower:
+                return (
+                    "Basketball Pricing:\n"
+                    "- Pro Game: $149.99 (cost $62, margin 58.7%)\n"
+                    "- Pro Composite: $89.99 (cost $38, margin 57.8%)\n"
+                    "- Women's Official: $129.99 (cost $55, margin 57.7%)\n"
+                    "- Youth Size 5: $34.99 (cost $14, margin 60.0%)\n"
+                    "Average basketball margin: 58.8%"
+                )
+            if "bulk" in message_lower or "discount" in message_lower:
+                return (
+                    "Bulk Discounts:\n"
+                    "- 10+ units: 5% | 50+ units: 10%\n"
+                    "- 100+ units: 15% | 500+ units: 20%\n"
+                    "Customer Tier Bonuses:\n"
+                    "- Platinum: +5% | Gold: +3%\n"
+                    "Example: 1,500 units @ Platinum = 25% total discount"
+                )
+            return (
+                "Pricing Overview:\n"
+                "- Average margin: 58.2% across all products\n"
+                "- Highest: Youth basketballs (60%)\n"
+                "- Volume discounts: 5-20% based on quantity\n"
+                "- Tier discounts: 0-5% based on customer status"
+            )
 
         return "Data not available for this query."
-
-    def _handle_inventory_action(self, message: str, scopes: List[str], context: str) -> str:
-        """Handle inventory-related actions with real data."""
-
-        # Check for write operations (increase, decrease, update, add)
-        write_keywords = ["increase", "decrease", "update", "add", "set", "adjust", "reduce", "remove"]
-        is_write_operation = any(kw in context for kw in write_keywords)
-
-        if is_write_operation:
-            if "inventory:write" in scopes:
-                # Parse the operation from the message
-                return self._execute_inventory_write(message, context)
-            else:
-                # User wants to write but doesn't have permission
-                return (
-                    "⚠️ **Access Denied: Write Permission Required**\n\n"
-                    "You requested to modify inventory, but your account does not have "
-                    "`inventory:write` scope.\n\n"
-                    "**Your current permissions:** `inventory:read` (view only)\n\n"
-                    "To modify inventory levels, please contact your administrator "
-                    "or log in with a manager account that has write access."
-                )
-
-        # Check for low stock / alerts
-        if any(kw in message for kw in ["low stock", "alert", "reorder", "warning"]):
-            low_stock = demo_store.get_low_stock_items()
-            if not low_stock:
-                return "✅ No low stock alerts - all inventory levels are good!"
-            lines = [f"⚠️ **Low Stock Alert - {len(low_stock)} items need attention:**\n"]
-            for item in low_stock:
-                lines.append(f"- 🔴 **{item['name']}**: {item['quantity']} units (reorder point: {item['reorder_point']})")
-            return "\n".join(lines)
-
-        # Check for specific product search
-        product_keywords = ["basketball", "hoop", "net", "uniform", "jersey", "shoe", "training", "backboard", "rim"]
-        for keyword in product_keywords:
-            if keyword in message:
-                results = demo_store.search_inventory(keyword)
-                if results:
-                    lines = [f"**{keyword.title()} Inventory:**\n"]
-                    total_qty = 0
-                    for item in results:
-                        status_icon = "🔴" if item['status'] == 'low' else "🟢"
-                        lines.append(f"- {status_icon} {item['name']}: {item['quantity']:,} units")
-                        total_qty += item['quantity']
-                    lines.append(f"\n**Total: {total_qty:,} units across {len(results)} products**")
-                    return "\n".join(lines)
-
-        # Default: return inventory summary
-        summary = demo_store.get_inventory_summary()
-        lines = [
-            "**ProGear Basketball - Inventory Summary**\n",
-            f"Total Products: {summary['total_products']}",
-            f"Total Items in Stock: {summary['total_items']:,}",
-            f"Total Inventory Value: ${summary['total_value']:,.2f}",
-        ]
-        if summary['low_stock_count'] > 0:
-            lines.append(f"⚠️ Low Stock Alerts: {summary['low_stock_count']}")
-
-        lines.append("\n**By Category:**")
-        for category, data in summary['by_category'].items():
-            lines.append(f"- {category}: {data['total_quantity']:,} units")
-
-        return "\n".join(lines)
-
-    def _execute_inventory_write(self, message: str, context: str) -> str:
-        """Execute an inventory write operation."""
-        import re
-
-        # Try to find product name and quantity from context
-        # Look for patterns like "increase X by Y" or "add Y to X" or "increase X inventory by Y"
-
-        # Find quantity (look for numbers)
-        qty_match = re.search(r'(\d+)\s*(?:units?|%)?', context)
-        quantity = int(qty_match.group(1)) if qty_match else 100  # Default to 100 if not found
-
-        # Check if it's a percentage increase
-        is_percentage = '%' in context or 'percent' in context
-
-        # Determine operation
-        if any(kw in context for kw in ["decrease", "reduce", "remove", "subtract"]):
-            operation = "decrease"
-        elif any(kw in context for kw in ["increase", "add", "restock", "replenish"]):
-            operation = "increase"
-        else:
-            operation = "set"
-
-        # Try to identify the product
-        # Check common product references
-        product_mappings = {
-            "pro arena": "Pro Arena Hoop System",
-            "arena hoop": "Pro Arena Hoop System",
-            "pro game basketball": "Pro Game Basketball",
-            "pro game": "Pro Game Basketball",
-            "composite basketball": "Pro Composite Basketball",
-            "pro composite": "Pro Composite Basketball",
-            "women's basketball": "Women's Official Basketball",
-            "women's official": "Women's Official Basketball",
-            "youth size 5": "Youth Size 5 Basketball",
-            "youth size 4": "Youth Size 4 Basketball",
-            "indoor basketball": "Indoor Premium Basketball",
-            "indoor premium": "Indoor Premium Basketball",
-            "outdoor basketball": "Outdoor Rubber Basketball",
-            "outdoor rubber": "Outdoor Rubber Basketball",
-            "training basketball": "Training Heavy Basketball",
-            "training heavy": "Training Heavy Basketball",
-            "portable hoop": "Portable Hoop System",
-            "wall mount": "Wall-Mount Hoop",
-            "wall-mount": "Wall-Mount Hoop",
-            "youth hoop": "Youth Adjustable Hoop",
-            "breakaway rim": "Breakaway Rim Pro",
-            "backboard": "Replacement Backboard 72\"",
-            "replacement backboard": "Replacement Backboard 72\"",
-            "competition net": "Pro Competition Net (White)",
-            "chain net": "Heavy Duty Chain Net",
-            "ball pump": "Ball Pump Pro",
-            "ball bag": "Ball Bag (holds 10)",
-            "ball rack": "Ball Rack (holds 16)",
-            "game jersey": "Pro Game Jersey",
-            "pro jersey": "Pro Game Jersey",
-            "game shorts": "Pro Game Shorts",
-            "pro shorts": "Pro Game Shorts",
-            "practice jersey": "Reversible Practice Jersey",
-            "reversible jersey": "Reversible Practice Jersey",
-            "warm-up jacket": "Warm-Up Jacket",
-            "warmup jacket": "Warm-Up Jacket",
-            "warm-up pants": "Warm-Up Pants",
-            "warmup pants": "Warm-Up Pants",
-            "shooting shirt": "Shooting Shirt",
-            "team hoodie": "Team Hoodie",
-            "hoodie": "Team Hoodie",
-            "practice shorts": "Practice Shorts",
-            "agility cones": "Agility Cones (set of 20)",
-            "cones": "Agility Cones (set of 20)",
-            "agility ladder": "Agility Ladder",
-            "ladder": "Agility Ladder",
-            "dribble goggles": "Dribble Goggles",
-            "goggles": "Dribble Goggles",
-            "resistance bands": "Resistance Bands Set",
-            "shot arc": "Shot Arc Trainer",
-            "arc trainer": "Shot Arc Trainer",
-            "slide trainer": "Defensive Slide Trainer",
-            "defensive slide": "Defensive Slide Trainer",
-            "court shoe": "Pro Court Basketball Shoe",
-            "basketball shoe": "Pro Court Basketball Shoe",
-            "youth shoe": "Youth Basketball Shoe",
-            "training shoe": "Training Shoe",
-            "referee shoe": "Referee Shoe",
-        }
-
-        product_name = None
-        for pattern, name in product_mappings.items():
-            if pattern in context:
-                product_name = name
-                break
-
-        if not product_name:
-            # Try to find from the inventory
-            results = demo_store.search_inventory("")
-            for item in results:
-                if item['name'].lower() in context:
-                    product_name = item['name']
-                    break
-
-        if not product_name:
-            return "I couldn't identify which product to update. Please specify the product name."
-
-        # Get current quantity for percentage calculation
-        item = demo_store.get_inventory_by_name(product_name)
-        if not item:
-            return f"Product not found: {product_name}"
-
-        if is_percentage:
-            # Calculate percentage of current quantity
-            actual_quantity = int(item['quantity'] * quantity / 100)
-            quantity = actual_quantity
-
-        # Execute the update
-        result = demo_store.update_inventory_quantity(item['sku'], quantity, operation)
-
-        if "error" in result:
-            return f"Error: {result['error']}"
-
-        change_text = f"+{result['change']}" if result['change'] > 0 else str(result['change'])
-        status_icon = "🔴" if result['status'] == 'low' else "🟢"
-
-        return (
-            f"**✅ Inventory Updated Successfully**\n\n"
-            f"**{result['name']}** (SKU: {result['sku']})\n"
-            f"- Previous: {result['previous_quantity']:,} units\n"
-            f"- Change: {change_text} units\n"
-            f"- New: {result['new_quantity']:,} units\n"
-            f"- Status: {status_icon} {result['status'].upper()}"
-        )
-
-    def _handle_pricing_action(self, message: str, scopes: List[str], context: str) -> str:
-        """Handle pricing-related actions with real data."""
-
-        # Check for discount calculation
-        if any(kw in message for kw in ["discount", "calculate", "total"]):
-            # Try to find customer and quantity
-            customers = demo_store.get_all_customers()
-            for customer in customers.values():
-                if customer['name'].lower() in context:
-                    # Found a customer, look for quantity
-                    import re
-                    qty_match = re.search(r'(\d+)\s*(?:units?)?', context)
-                    quantity = int(qty_match.group(1)) if qty_match else 100
-
-                    discount_info = demo_store.calculate_total_discount(customer['tier'], quantity)
-                    return (
-                        f"**Discount Calculation for {customer['name']}**\n\n"
-                        f"- Customer Tier: {discount_info['tier']}\n"
-                        f"- Tier Discount: {discount_info['tier_discount']}%\n"
-                        f"- Order Quantity: {discount_info['quantity']:,} units\n"
-                        f"- Volume Discount: {discount_info['volume_discount']}%\n"
-                        f"- **Total Discount: {discount_info['total_discount']}%**"
-                    )
-
-        # Check for specific product pricing
-        product_keywords = ["basketball", "hoop", "net", "uniform", "jersey", "shoe", "training"]
-        for keyword in product_keywords:
-            if keyword in message:
-                pricing_list = demo_store.get_pricing_by_category(
-                    "Basketballs" if keyword == "basketball" else
-                    "Hoops & Backboards" if keyword in ["hoop", "backboard"] else
-                    "Nets & Accessories" if keyword == "net" else
-                    "Uniforms & Apparel" if keyword in ["uniform", "jersey"] else
-                    "Footwear" if keyword == "shoe" else
-                    "Training Equipment"
-                )
-                if pricing_list:
-                    lines = [f"**{keyword.title()} Pricing:**\n"]
-                    has_margin_access = "pricing:margin" in scopes
-                    total_margin = 0
-                    for item in pricing_list:
-                        if has_margin_access:
-                            lines.append(f"- {item['name']}: ${item['price']:.2f} (cost: ${item['cost']:.2f}, margin: {item['margin']}%)")
-                            total_margin += item['margin']
-                        else:
-                            lines.append(f"- {item['name']}: ${item['price']:.2f}")
-                    if has_margin_access:
-                        avg_margin = total_margin / len(pricing_list)
-                        lines.append(f"\n**Average margin: {avg_margin:.1f}%**")
-                    return "\n".join(lines)
-
-        # Check for margin queries - requires pricing:margin scope
-        if "margin" in message or "profit" in message:
-            if "pricing:margin" not in scopes:
-                return (
-                    "⚠️ **Access Denied: Margin Data Restricted**\n\n"
-                    "You requested profit margin information, but your account does not have "
-                    "`pricing:margin` scope.\n\n"
-                    "**Your current permissions:** `pricing:read` (prices only, no margins)\n\n"
-                    "Margin data is restricted to management accounts. "
-                    "I can still help you with product prices and discount structures."
-                )
-
-            # Get all pricing and calculate averages by category
-            inventory = demo_store.get_all_inventory()
-            pricing = demo_store.get_all_pricing()
-
-            categories = {}
-            for sku, item in inventory.items():
-                if sku in pricing:
-                    cat = item['category']
-                    if cat not in categories:
-                        categories[cat] = []
-                    categories[cat].append(pricing[sku]['margin'])
-
-            lines = ["**Margin Analysis by Category:**\n"]
-            for cat, margins in sorted(categories.items()):
-                avg = sum(margins) / len(margins)
-                lines.append(f"- {cat}: {avg:.1f}% average margin")
-
-            return "\n".join(lines)
-
-        # Default: return discount structure
-        discounts = demo_store.get_discount_structure()
-        return (
-            "**ProGear Basketball - Pricing & Discounts**\n\n"
-            "**Tier Discounts:**\n"
-            + "\n".join(f"- {tier}: {disc}%" for tier, disc in discounts.get('tier_discounts', {}).items())
-            + "\n\n**Volume Discounts:**\n"
-            + "\n".join(f"- {qty}+ units: {disc}%" for qty, disc in sorted(discounts.get('volume_discounts', {}).items(), key=lambda x: int(x[0])))
-            + "\n\n*Discounts are combinable (e.g., Platinum + 500 units = 25% off)*"
-        )
-
-    def _handle_customer_action(self, message: str, scopes: List[str], context: str) -> str:
-        """Handle customer-related actions with real data."""
-
-        # Check for specific customer lookup
-        customers = demo_store.get_all_customers()
-        for customer in customers.values():
-            if customer['name'].lower() in context or customer['contact'].lower() in context:
-                tier_emoji = {"Platinum": "💎", "Gold": "🥇", "Silver": "🥈", "Bronze": "🥉"}.get(customer['tier'], "")
-                return (
-                    f"**{customer['name']}** {tier_emoji}\n"
-                    f"- Customer ID: {customer['id']}\n"
-                    f"- Tier: {customer['tier']}\n"
-                    f"- Contact: {customer['contact']}\n"
-                    f"- Email: {customer['email']}\n"
-                    f"- Location: {customer['location']}\n"
-                    f"- Total Spent: ${customer['total_spent']:,}"
-                )
-
-        # Check for tier-based query
-        for tier in ["platinum", "gold", "silver", "bronze"]:
-            if tier in message:
-                tier_customers = demo_store.get_customers_by_tier(tier.title())
-                if tier_customers:
-                    tier_emoji = {"Platinum": "💎", "Gold": "🥇", "Silver": "🥈", "Bronze": "🥉"}.get(tier.title(), "")
-                    customers_sorted = sorted(tier_customers, key=lambda x: x['total_spent'], reverse=True)
-                    lines = [f"**{tier_emoji} {tier.title()} Tier Customers ({len(tier_customers)}):**\n"]
-                    total = 0
-                    for c in customers_sorted:
-                        lines.append(f"- **{c['name']}** - ${c['total_spent']:,} ({c['location']})")
-                        total += c['total_spent']
-                    lines.append(f"\n**Total {tier.title()} Revenue: ${total:,}**")
-                    return "\n".join(lines)
-
-        # Default: customer summary
-        summary = demo_store.get_customer_summary()
-        tier_emoji = {"Platinum": "💎", "Gold": "🥇", "Silver": "🥈", "Bronze": "🥉"}
-
-        lines = [
-            "**ProGear Basketball - Customer Summary**\n",
-            f"Total Customers: {summary['total_customers']}",
-            f"Total Revenue: ${summary['total_revenue']:,}",
-            "\n**By Tier:**"
-        ]
-
-        for tier in ["Platinum", "Gold", "Silver", "Bronze"]:
-            if tier in summary['by_tier']:
-                data = summary['by_tier'][tier]
-                emoji = tier_emoji.get(tier, "")
-                lines.append(f"- {emoji} {tier}: {data['count']} customers, ${data['total_spent']:,}")
-
-        return "\n".join(lines)
-
-    def _handle_sales_action(self, message: str, scopes: List[str], context: str) -> str:
-        """Handle sales-related actions."""
-        # Sales data is more complex - for now return summary with real customer/inventory context
-
-        summary = demo_store.get_customer_summary()
-        inv_summary = demo_store.get_inventory_summary()
-
-        # Get top customers for orders context
-        platinum = demo_store.get_customers_by_tier("Platinum")
-        top_customer = max(platinum, key=lambda x: x['total_spent']) if platinum else None
-
-        lines = [
-            "**ProGear Basketball - Sales Overview**\n",
-            f"Total Customer Base: {summary['total_customers']} customers",
-            f"Total Revenue: ${summary['total_revenue']:,}",
-            f"Inventory Value: ${inv_summary['total_value']:,.2f}",
-        ]
-
-        if top_customer:
-            lines.append(f"\n**Top Customer:** {top_customer['name']} (${top_customer['total_spent']:,})")
-
-        # Add discount info for context
-        discounts = demo_store.get_discount_structure()
-        lines.append("\n**Available Discounts:**")
-        lines.append(f"- Tier-based: up to {max(discounts.get('tier_discounts', {}).values() or [0])}%")
-        lines.append(f"- Volume-based: up to {max(discounts.get('volume_discounts', {}).values() or [0])}%")
-
-        return "\n".join(lines)
 
     async def _generate_response_node(self, state: WorkflowState) -> WorkflowState:
         """
@@ -912,32 +596,16 @@ Return ONLY the JSON object, no other text."""
         Clearly indicates which agents contributed and which were denied.
         """
         agent_results = state["agent_results"]
-        conversation_context = state.get("conversation_context", "")
 
-        # Collect successful responses and denied agents with their scopes
+        # Collect successful responses and denied agents
         responses = []
         denied_agents = []
-        denied_scopes_by_agent = {}
 
         for agent_type, result in agent_results.items():
             if result["success"] and "response" in result:
                 responses.append(result["response"])
             elif result.get("access_denied"):
-                agent_name = result["agent_info"]["name"]
-                denied_agents.append(agent_name)
-                # Get the scopes that were requested but denied
-                denied_scopes = result.get("requested_scopes", [])
-                if denied_scopes:
-                    denied_scopes_by_agent[agent_name] = denied_scopes
-
-        # Build context section for response synthesis
-        context_section = ""
-        if conversation_context:
-            context_section = f"""
-CONVERSATION HISTORY (for context - understand what "it", "that", "this" refers to):
-{conversation_context}
-
-"""
+                denied_agents.append(result["agent_info"]["name"])
 
         # Generate combined response
         if responses:
@@ -945,14 +613,13 @@ CONVERSATION HISTORY (for context - understand what "it", "that", "this" refers 
             combined_data = "\n\n".join(responses)
             synthesis_prompt = f"""Based on the following agent responses, provide a helpful, natural answer
 to the user's question: "{state['user_message']}"
-{context_section}
+
 Agent responses:
 {combined_data}
 
 {"Note: The user was denied access to these agents: " + ", ".join(denied_agents) if denied_agents else ""}
 
 Provide a concise, helpful response that combines the relevant information.
-If the user's message refers to something from the conversation history (like "it", "that", "yes"), use the context to understand what they mean.
 If some agents were denied, acknowledge what information is missing but focus on what IS available."""
 
             try:
@@ -966,20 +633,10 @@ If some agents were denied, acknowledge what information is missing but focus on
                 final_response = combined_data
 
         elif denied_agents:
-            # Build a clear message about which scopes the user doesn't have access to
-            scope_details = []
-            for agent_name in denied_agents:
-                scopes = denied_scopes_by_agent.get(agent_name, [])
-                if scopes:
-                    scope_details.append(f"  - {agent_name}: {', '.join(scopes)}")
-                else:
-                    scope_details.append(f"  - {agent_name}")
-
-            scope_info = "\n".join(scope_details)
             final_response = (
-                f"You do not have access to the following scopes required for this request:\n\n"
-                f"{scope_info}\n\n"
-                f"Your Okta administrator can grant access through group membership policies."
+                f"I apologize, but you don't have access to the agents needed for this request.\n\n"
+                f"Access denied for: {', '.join(denied_agents)}\n\n"
+                f"Please contact your administrator if you need access to this information."
             )
         else:
             final_response = (
@@ -989,6 +646,10 @@ If some agents were denied, acknowledge what information is missing but focus on
 
         state["final_response"] = final_response
 
+        # Add denied agents info if any
+        if denied_agents:
+            state["final_response"] += f"\n\n[Note: Limited access - denied agents: {', '.join(denied_agents)}]"
+
         state["agent_flow"].append({
             "step": "generate_response",
             "action": "Generated combined response",
@@ -997,13 +658,12 @@ If some agents were denied, acknowledge what information is missing but focus on
 
         return state
 
-    async def process(self, message: str, conversation_context: str = "") -> Dict[str, Any]:
+    async def process(self, message: str) -> Dict[str, Any]:
         """
         Process a user message through the orchestrator.
 
         Args:
             message: User's message
-            conversation_context: Previous conversation history for context-aware routing
 
         Returns:
             Dict with:
@@ -1015,7 +675,6 @@ If some agents were denied, acknowledge what information is missing but focus on
         initial_state: WorkflowState = {
             "messages": [],
             "user_message": message,
-            "conversation_context": conversation_context,
             "user_info": self.user_info,
             "user_token": self.user_token,
             "agents_to_invoke": [],

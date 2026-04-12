@@ -4,8 +4,14 @@ Pricing Agent - Handles pricing, discounts, and margins.
 Registered as a first-class identity in Okta.
 """
 
+import os
 from typing import Dict, Any, Optional
-from langchain_anthropic import ChatAnthropic
+# from langchain_anthropic import ChatAnthropic
+from langchain_openai import ChatOpenAI
+
+# Load environment variables for OpenAI
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+X_GATEWAY_SECRET = os.getenv("X_GATEWAY_SECRET")
 
 
 class PricingAgent:
@@ -30,9 +36,18 @@ class PricingAgent:
         self.agent_name = "pricing-agent"
         self.scopes = ["pricing:read", "pricing:write"]
 
-        self.llm = ChatAnthropic(
-            model="claude-sonnet-4-6",
-            temperature=0.2,  # Low temp for pricing accuracy
+        # self.llm = ChatAnthropic(
+        #     model="claude-sonnet-4-20250514",
+        #     temperature=0.2,  # Low temp for pricing accuracy
+        # )
+        self.llm = ChatOpenAI(
+            model="claude-sonnet-4-20250514",
+            api_key=OPENAI_API_KEY,
+
+            # Custom headers are passed here
+            default_headers={
+                "x-gateway-secret": X_GATEWAY_SECRET
+            }
         )
 
     async def get_agent_token(self) -> str:

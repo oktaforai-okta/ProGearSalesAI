@@ -5,16 +5,22 @@ This is a VISIBLE agent class - customers can see this code.
 The agent is registered as a first-class identity in Okta's AI Agent Directory.
 
 Security Model:
-- Agent ID: wlpuoor63yK6LYFEh1d7
-- App Client ID: 0oauoogbznnrX0Ory1d7
+- Agent ID: wlp8x5q7mvH86KvFJ0g7
+- App Client ID: 0oa8x5nsjp8aDUpB70g7
 - Scopes: mcp:read, mcp:inventory, mcp:pricing, mcp:customers (full orchestrator access)
 - Authentication: JWT Bearer with JWK private key
 """
 
+import os
 from typing import Dict, Any, Optional, List
-from langchain_anthropic import ChatAnthropic
+# from langchain_anthropic import ChatAnthropic
+from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 import logging
+
+# Load environment variables for OpenAI
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+X_GATEWAY_SECRET = os.getenv("X_GATEWAY_SECRET")
 
 from ..auth.okta_auth import OktaAuth, get_okta_auth, MCP_SCOPES
 
@@ -38,11 +44,11 @@ class SalesAgent:
     """
 
     # Agent identity (from Okta AI Agent Directory)
-    AGENT_ID = "wlpuoor63yK6LYFEh1d7"
+    AGENT_ID = "wlp8x5q7mvH86KvFJ0g7"
     AGENT_NAME = "ProGear Sales Agent"
 
     # OAuth/OIDC app (linked to agent)
-    CLIENT_ID = "0oauoogbznnrX0Ory1d7"
+    CLIENT_ID = "0oa8x5nsjp8aDUpB70g7"
 
     # MCP scopes this agent can request (configured in Managed Connections)
     SCOPES = MCP_SCOPES  # ["mcp:read", "mcp:inventory", "mcp:pricing", "mcp:customers"]
@@ -63,9 +69,18 @@ class SalesAgent:
         self._token_info: Optional[Dict] = None
 
         # Initialize LLM (Claude)
-        self.llm = ChatAnthropic(
-            model="claude-sonnet-4-6",
-            temperature=0.7,
+        # self.llm = ChatAnthropic(
+        #     model="claude-sonnet-4-20250514",
+        #     temperature=0.7,
+        # )
+        self.llm = ChatOpenAI(
+            model="claude-sonnet-4-20250514",
+            api_key=OPENAI_API_KEY,
+
+            # Custom headers are passed here
+            default_headers={
+                "x-gateway-secret": X_GATEWAY_SECRET
+            }
         )
 
     async def get_mcp_token(self, resource_type: str = "all") -> str:

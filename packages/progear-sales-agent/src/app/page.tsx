@@ -17,7 +17,7 @@ interface Message {
 }
 
 const exampleQuestions = [
-  { text: "Our customer State University wants to order 1500 basketballs. Can we fulfill that and what would the pricing look like?", icon: "🏀" },
+  { text: "Can we fulfill 1500 basketballs for State University?", icon: "🏀" },
   { text: "What basketball hoops do we have in stock?", icon: "🏀" },
   { text: "Look up State University's account", icon: "👥" },
   { text: "What's our margin on pro basketballs?", icon: "💰" },
@@ -25,10 +25,17 @@ const exampleQuestions = [
   { text: "Which customers have Platinum tier?", icon: "⭐" },
 ];
 
+// Predefined prompts for quick access in header
+const predefinedPrompts = [
+  { text: "Check inventory", icon: "📦", shortText: "Inventory" },
+  { text: "Show pricing", icon: "💰", shortText: "Pricing" },
+  { text: "Customer lookup", icon: "👥", shortText: "Customers" },
+  { text: "Recent orders", icon: "📋", shortText: "Orders" },
+];
+
 const CHAT_STORAGE_KEY = 'progear-chat-messages';
 const AGENT_FLOW_STORAGE_KEY = 'progear-agent-flow';
 const TOKEN_EXCHANGE_STORAGE_KEY = 'progear-token-exchanges';
-const SESSION_ID_STORAGE_KEY = 'progear-session-id';
 
 export default function Home() {
   const { data: session, status } = useSession();
@@ -38,18 +45,16 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(false);
   const [currentAgentFlow, setCurrentAgentFlow] = useState<any[]>([]);
   const [currentTokenExchanges, setCurrentTokenExchanges] = useState<any[]>([]);
-  const [sessionId, setSessionId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const isLoadingAuth = status === 'loading';
 
-  // Load chat history and session ID from sessionStorage on mount
+  // Load chat history from sessionStorage on mount
   useEffect(() => {
     try {
       const savedMessages = sessionStorage.getItem(CHAT_STORAGE_KEY);
       const savedAgentFlow = sessionStorage.getItem(AGENT_FLOW_STORAGE_KEY);
       const savedTokenExchanges = sessionStorage.getItem(TOKEN_EXCHANGE_STORAGE_KEY);
-      const savedSessionId = sessionStorage.getItem(SESSION_ID_STORAGE_KEY);
 
       if (savedMessages) {
         setChatMessages(JSON.parse(savedMessages));
@@ -59,9 +64,6 @@ export default function Home() {
       }
       if (savedTokenExchanges) {
         setCurrentTokenExchanges(JSON.parse(savedTokenExchanges));
-      }
-      if (savedSessionId) {
-        setSessionId(savedSessionId);
       }
     } catch (e) {
       console.error('Error loading chat history:', e);
@@ -96,6 +98,18 @@ export default function Home() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages]);
 
+  const handleGoHome = () => {
+    // Clear chat messages and reset to landing page with prompts
+    setChatMessages([]);
+    setCurrentAgentFlow([]);
+    setCurrentTokenExchanges([]);
+    setMessage('');
+    // Clear session storage
+    sessionStorage.removeItem(CHAT_STORAGE_KEY);
+    sessionStorage.removeItem(AGENT_FLOW_STORAGE_KEY);
+    sessionStorage.removeItem(TOKEN_EXCHANGE_STORAGE_KEY);
+  };
+
   const handleSignOut = async () => {
     // Get the idToken BEFORE signing out (session will be cleared after signOut)
     const idToken = session?.idToken;
@@ -103,11 +117,10 @@ export default function Home() {
     // Clear the NextAuth session
     await signOut({ redirect: false });
 
-    // Clear chat history and session on sign out
+    // Clear chat history on sign out
     sessionStorage.removeItem(CHAT_STORAGE_KEY);
     sessionStorage.removeItem(AGENT_FLOW_STORAGE_KEY);
     sessionStorage.removeItem(TOKEN_EXCHANGE_STORAGE_KEY);
-    sessionStorage.removeItem(SESSION_ID_STORAGE_KEY);
 
     // End Okta session using OIDC logout endpoint
     // Reference: https://developer.okta.com/docs/guides/sign-users-out/react/main/
@@ -156,19 +169,10 @@ export default function Home() {
       const response = await fetch(`${apiUrl}/api/chat`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({
-          message: userMessage,
-          session_id: sessionId  // Send session ID for conversation continuity
-        }),
+        body: JSON.stringify({ message: userMessage }),
       });
 
       const data = await response.json();
-
-      // Store session ID for future requests (enables conversation memory)
-      if (data.session_id) {
-        setSessionId(data.session_id);
-        sessionStorage.setItem(SESSION_ID_STORAGE_KEY, data.session_id);
-      }
 
       // Update agent flow and token exchanges
       setCurrentAgentFlow(data.agent_flow || []);
@@ -214,7 +218,7 @@ export default function Home() {
   }
 
   return (
-    <main className="h-screen bg-gradient-to-b from-neutral-bg to-primary flex flex-col overflow-hidden">
+    <main className="min-h-screen bg-gradient-to-b from-neutral-bg to-primary flex flex-col">
       {/* Header */}
       <header className="bg-gradient-to-r from-primary via-court-brown to-primary-light border-b-4 border-accent shadow-lg relative overflow-hidden">
         {/* Court pattern */}
@@ -227,6 +231,17 @@ export default function Home() {
 
         <div className="px-6 py-4 flex justify-between items-center relative z-10">
           <div className="flex items-center space-x-4">
+            {/* Home Button */}
+            <button
+              onClick={handleGoHome}
+              className="p-2 bg-white/10 hover:bg-accent/40 text-white rounded-lg transition border border-white/20 hover:border-accent/50 flex items-center justify-center"
+              title="Go to Home"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+              </svg>
+            </button>
+
             <div className="relative">
               <span className="text-5xl">🏀</span>
               <div className="absolute -top-1 -right-1 w-5 h-5 bg-okta-blue rounded-full border-2 border-white flex items-center justify-center">
@@ -239,6 +254,22 @@ export default function Home() {
               <h1 className="text-white text-2xl font-bold">CourtEdge ProGear</h1>
               <p className="text-gray-300 text-sm">AI-Powered Basketball Equipment Sales</p>
             </div>
+          </div>
+
+          {/* Predefined Prompts */}
+          <div className="flex items-center space-x-2">
+            {predefinedPrompts.map((prompt, idx) => (
+              <button
+                key={idx}
+                onClick={() => handleSendMessage(prompt.text)}
+                disabled={isLoading}
+                className="px-3 py-2 bg-white/10 hover:bg-accent/40 text-white rounded-lg transition border border-white/20 hover:border-accent/50 flex items-center space-x-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                title={prompt.text}
+              >
+                <span>{prompt.icon}</span>
+                <span className="hidden md:inline">{prompt.shortText}</span>
+              </button>
+            ))}
           </div>
 
           <div className="flex items-center space-x-3">
@@ -261,7 +292,7 @@ export default function Home() {
       {/* Dual Pane Layout */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left Pane - Chat Interface */}
-        <div className="flex-1 flex flex-col bg-gradient-to-b from-neutral-bg to-white overflow-hidden">
+        <div className="flex-1 flex flex-col bg-gradient-to-b from-neutral-bg to-white">
           {/* Messages Area */}
           <div className="flex-1 overflow-y-auto p-6 space-y-4">
             {chatMessages.length === 0 && (
@@ -386,6 +417,15 @@ export default function Home() {
 
         {/* Right Pane - Security Dashboard */}
         <div className="w-96 bg-gradient-to-b from-gray-50 to-white border-l-4 border-accent/30 overflow-y-auto p-4 space-y-4">
+          <div className="text-center pb-4 border-b-2 border-accent/20">
+            <h2 className="text-lg font-bold text-gray-800 flex items-center justify-center gap-2">
+              <svg className="w-5 h-5 text-okta-blue" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+              </svg>
+              Security Dashboard
+            </h2>
+          </div>
+
           {/* Agent Flow */}
           <AgentFlowCard steps={currentAgentFlow} isLoading={isLoading} />
 
