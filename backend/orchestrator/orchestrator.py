@@ -24,6 +24,7 @@ import json
 
 # Load environment variables for OpenAI
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+LLM_BASE_URL = os.getenv("LLM_BASE_URL")
 X_GATEWAY_SECRET = os.getenv("X_GATEWAY_SECRET")
 
 from auth.multi_agent_auth import (
@@ -170,8 +171,7 @@ class Orchestrator:
         self.router_llm = ChatOpenAI(
             model="claude-sonnet-4-20250514",
             api_key=OPENAI_API_KEY,
-
-            # Custom headers are passed here
+            base_url=LLM_BASE_URL,
             default_headers={
                 "x-gateway-secret": X_GATEWAY_SECRET
             }
@@ -185,8 +185,7 @@ class Orchestrator:
         self.response_llm = ChatOpenAI(
             model="claude-sonnet-4-20250514",
             api_key=OPENAI_API_KEY,
-
-            # Custom headers are passed here
+            base_url=LLM_BASE_URL,
             default_headers={
                 "x-gateway-secret": X_GATEWAY_SECRET
             }
