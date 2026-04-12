@@ -39,6 +39,7 @@ class WorkflowState(TypedDict):
     """State passed through the LangGraph workflow."""
     messages: List[Any]
     user_message: str
+    conversation_context: str  # Previous conversation for context-aware routing
     user_info: Dict[str, Any]
     user_token: str
 
@@ -221,11 +222,26 @@ class Orchestrator:
         CRITICAL: Detects intent to determine specific scopes needed.
         """
         message = state["user_message"]
+        conversation_context = state.get("conversation_context", "")
+
         state["agent_flow"].append({
             "step": "router",
             "action": "Analyzing request to determine relevant agents and required scopes",
             "status": "processing"
         })
+
+        # Build context section if we have conversation history
+        context_section = ""
+        if conversation_context:
+            context_section = f"""
+CONVERSATION HISTORY (for context):
+{conversation_context}
+
+NOTE: The user's current message may reference the conversation above.
+For example, "Yes", "Do it", "Go ahead" likely refers to the previous assistant suggestion.
+Consider this context when determining which agents and scopes are needed.
+
+"""
 
         # Use LLM to determine which agents are relevant AND what operations are needed
         try:
@@ -253,8 +269,8 @@ Available agents and their scopes:
    - pricing:read - View prices (basic price queries)
    - pricing:margin - View profit margins (margin/profit queries)
    - pricing:discount - View/apply discounts (bulk/discount queries)
-
-User request: "{message}"
+{context_section}
+CURRENT USER REQUEST: "{message}"
 
 Return a JSON object with agents and their required scopes:
 {{
@@ -269,6 +285,7 @@ IMPORTANT: Choose scopes based on the operation type:
 - WRITE operations (add, update, modify, change, set, put) -> use :write scopes
 - For margin/profit queries -> use pricing:margin
 - For discount/bulk queries -> use pricing:discount
+- If the user says "yes", "do it", "go ahead", "confirm" - look at conversation history to determine the operation
 
 Return ONLY the JSON object, no other text."""
 
@@ -596,6 +613,7 @@ Return ONLY the JSON object, no other text."""
         Clearly indicates which agents contributed and which were denied.
         """
         agent_results = state["agent_results"]
+        conversation_context = state.get("conversation_context", "")
 
         # Collect successful responses and denied agents
         responses = []
@@ -607,19 +625,29 @@ Return ONLY the JSON object, no other text."""
             elif result.get("access_denied"):
                 denied_agents.append(result["agent_info"]["name"])
 
+        # Build context section for response synthesis
+        context_section = ""
+        if conversation_context:
+            context_section = f"""
+CONVERSATION HISTORY (for context - understand what "it", "that", "this" refers to):
+{conversation_context}
+
+"""
+
         # Generate combined response
         if responses:
             # Use LLM to create natural combined response
             combined_data = "\n\n".join(responses)
             synthesis_prompt = f"""Based on the following agent responses, provide a helpful, natural answer
 to the user's question: "{state['user_message']}"
-
+{context_section}
 Agent responses:
 {combined_data}
 
 {"Note: The user was denied access to these agents: " + ", ".join(denied_agents) if denied_agents else ""}
 
 Provide a concise, helpful response that combines the relevant information.
+If the user's message refers to something from the conversation history (like "it", "that", "yes"), use the context to understand what they mean.
 If some agents were denied, acknowledge what information is missing but focus on what IS available."""
 
             try:
@@ -658,12 +686,13 @@ If some agents were denied, acknowledge what information is missing but focus on
 
         return state
 
-    async def process(self, message: str) -> Dict[str, Any]:
+    async def process(self, message: str, conversation_context: str = "") -> Dict[str, Any]:
         """
         Process a user message through the orchestrator.
 
         Args:
             message: User's message
+            conversation_context: Previous conversation history for context-aware routing
 
         Returns:
             Dict with:
@@ -675,6 +704,7 @@ If some agents were denied, acknowledge what information is missing but focus on
         initial_state: WorkflowState = {
             "messages": [],
             "user_message": message,
+            "conversation_context": conversation_context,
             "user_info": self.user_info,
             "user_token": self.user_token,
             "agents_to_invoke": [],
