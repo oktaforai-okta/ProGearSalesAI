@@ -641,7 +641,7 @@ If some agents were denied, acknowledge what information is missing but focus on
 
         return state
 
-    async def process(self, message: str) -> Dict[str, Any]:
+    async def process(self, message: str, conversation_context: Optional[str] = None) -> Dict[str, Any]:
         """
         Process a user message through the orchestrator.
 
