@@ -20,7 +20,6 @@ import logging
 
 # Load environment variables for OpenAI
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-LLM_BASE_URL = os.getenv("LLM_BASE_URL")
 X_GATEWAY_SECRET = os.getenv("X_GATEWAY_SECRET")
 
 from ..auth.okta_auth import OktaAuth, get_okta_auth, MCP_SCOPES
@@ -77,7 +76,8 @@ class SalesAgent:
         self.llm = ChatOpenAI(
             model="claude-sonnet-4-20250514",
             api_key=OPENAI_API_KEY,
-            base_url=LLM_BASE_URL,
+
+            # Custom headers are passed here
             default_headers={
                 "x-gateway-secret": X_GATEWAY_SECRET
             }
