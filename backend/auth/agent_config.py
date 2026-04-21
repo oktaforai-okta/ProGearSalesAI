@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 class AgentConfig:
     """Configuration for a single AI agent."""
     name: str  # MCP name for Token Exchange card (e.g., "Inventory MCP")
-    display_name: str  # Display name for Agent Flow card (e.g., "Inventory MCP")
+    display_name: str  # Agent name for Agent Flow card (e.g., "Inventory Agent")
     agent_type: str  # sales, inventory, customer, pricing
     agent_id: str  # wlp...
     private_key: Optional[Dict[str, Any]]  # JWK private key
@@ -70,7 +70,7 @@ def get_agent_config(agent_type: str) -> Optional[AgentConfig]:
     configs = {
         AGENT_SALES: AgentConfig(
             name="Sales MCP",
-            display_name="Sales MCP",
+            display_name="Sales Agent",
             agent_type=AGENT_SALES,
             agent_id=os.getenv("OKTA_AI_AGENT_SALES_ID", os.getenv("OKTA_AI_AGENT_ID", "")),
             private_key=_parse_private_key(
@@ -86,7 +86,7 @@ def get_agent_config(agent_type: str) -> Optional[AgentConfig]:
         ),
         AGENT_INVENTORY: AgentConfig(
             name="Inventory MCP",
-            display_name="Inventory MCP",
+            display_name="Inventory Agent",
             agent_type=AGENT_INVENTORY,
             agent_id=os.getenv("OKTA_AI_AGENT_INVENTORY_ID", os.getenv("OKTA_AI_AGENT_ID", "")),
             private_key=_parse_private_key(
@@ -102,7 +102,7 @@ def get_agent_config(agent_type: str) -> Optional[AgentConfig]:
         ),
         AGENT_CUSTOMER: AgentConfig(
             name="Customer MCP",
-            display_name="Customer MCP",
+            display_name="Customer Agent",
             agent_type=AGENT_CUSTOMER,
             agent_id=os.getenv("OKTA_AI_AGENT_CUSTOMER_ID", os.getenv("OKTA_AI_AGENT_ID", "")),
             private_key=_parse_private_key(
@@ -118,7 +118,7 @@ def get_agent_config(agent_type: str) -> Optional[AgentConfig]:
         ),
         AGENT_PRICING: AgentConfig(
             name="Pricing MCP",
-            display_name="Pricing MCP",
+            display_name="Pricing Agent",
             agent_type=AGENT_PRICING,
             agent_id=os.getenv("OKTA_AI_AGENT_PRICING_ID", os.getenv("OKTA_AI_AGENT_ID", "")),
             private_key=_parse_private_key(
@@ -168,25 +168,25 @@ def get_configured_agents() -> List[str]:
 DEMO_AGENTS = {
     AGENT_SALES: {
         "name": "Sales MCP",
-        "display_name": "Sales MCP",
+        "display_name": "Sales Agent",
         "scopes": ["sales:read", "sales:quote", "sales:order"],
         "color": "#3b82f6",
     },
     AGENT_INVENTORY: {
         "name": "Inventory MCP",
-        "display_name": "Inventory MCP",
+        "display_name": "Inventory Agent",
         "scopes": ["inventory:read", "inventory:write", "inventory:alert"],
         "color": "#10b981",
     },
     AGENT_CUSTOMER: {
         "name": "Customer MCP",
-        "display_name": "Customer MCP",
+        "display_name": "Customer Agent",
         "scopes": ["customer:read", "customer:lookup", "customer:history"],
         "color": "#8b5cf6",
     },
     AGENT_PRICING: {
         "name": "Pricing MCP",
-        "display_name": "Pricing MCP",
+        "display_name": "Pricing Agent",
         "scopes": ["pricing:read", "pricing:margin", "pricing:discount"],
         "color": "#f59e0b",
     },

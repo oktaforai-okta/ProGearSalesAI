@@ -14,6 +14,7 @@ import os
 import json
 from typing import Dict, Any, Optional, List
 from datetime import datetime
+from jose import jwt
 
 from .agent_config import (
     AgentConfig, get_agent_config, get_all_agent_configs,
@@ -139,6 +140,22 @@ class MultiAgentTokenExchange:
 
             logger.info(f"[{agent_type}] Step 1 SUCCESS: expires_in={id_jag_result.expires_in}s")
 
+            # Log ID-JAG token claims for debugging (deployed on Render)
+            try:
+                id_jag_claims = jwt.get_unverified_claims(id_jag_result.access_token)
+                logger.info(f"=== ID-JAG Token Claims [{agent_type}] ===")
+                logger.info(f"Subject (sub): {id_jag_claims.get('sub')}")
+                logger.info(f"Audience (aud): {id_jag_claims.get('aud')}")
+                logger.info(f"Issuer (iss): {id_jag_claims.get('iss')}")
+                logger.info(f"Scopes: {id_jag_claims.get('scp', id_jag_claims.get('scope', []))}")
+                logger.info(f"Vacation claim in ID-JAG: {id_jag_claims.get('Vacation', id_jag_claims.get('is_on_vacation', 'NOT PRESENT'))}")
+                logger.info(f"All ID-JAG claim keys: {list(id_jag_claims.keys())}")
+                # Full claims for debugging
+                logger.info(f"=== FULL ID-JAG TOKEN CLAIMS [{agent_type}] (DEBUG) ===")
+                logger.info(json.dumps(id_jag_claims, indent=2, default=str))
+            except Exception as decode_err:
+                logger.warning(f"[{agent_type}] Could not decode ID-JAG token: {decode_err}")
+
             # Step 2: Exchange ID-JAG for auth server token
             logger.info(f"[{agent_type}] Step 2: ID-JAG -> Auth Server Token")
 
@@ -154,6 +171,19 @@ class MultiAgentTokenExchange:
             )
 
             logger.info(f"[{agent_type}] Step 2 SUCCESS: expires_in={token_result.expires_in}s")
+
+            # Log Auth Server token claims for debugging (deployed on Render)
+            try:
+                auth_token_claims = jwt.get_unverified_claims(token_result.access_token)
+                logger.info(f"=== Auth Server Token Claims [{agent_type}] ===")
+                logger.info(f"Subject (sub): {auth_token_claims.get('sub')}")
+                logger.info(f"Scopes: {auth_token_claims.get('scp', auth_token_claims.get('scope', []))}")
+                logger.info(f"All Auth Token claim keys: {list(auth_token_claims.keys())}")
+                # Full claims for debugging
+                logger.info(f"=== FULL AUTH SERVER TOKEN CLAIMS [{agent_type}] (DEBUG) ===")
+                logger.info(json.dumps(auth_token_claims, indent=2, default=str))
+            except Exception as decode_err:
+                logger.warning(f"[{agent_type}] Could not decode Auth Server token: {decode_err}")
 
             return {
                 "success": True,
@@ -179,15 +209,8 @@ class MultiAgentTokenExchange:
         except Exception as e:
             error_str = str(e).lower()
 
-            # Check for access denied errors (various error messages from Okta)
-            policy_denied_keywords = [
-                "no_matching_policy",
-                "access_denied",
-                "policy evaluation failed",
-                "policy_evaluation_failed",
-                "authorization server token exchange failed"
-            ]
-            if any(keyword in error_str for keyword in policy_denied_keywords):
+            # Check for access denied errors
+            if "no_matching_policy" in error_str or "access_denied" in error_str:
                 logger.info(f"[{agent_type}] ACCESS DENIED for user - policy restriction. Requested scopes: {scopes}")
                 return {
                     "success": False,

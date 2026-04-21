@@ -14,10 +14,10 @@ group membership, with clear success/denied visualization.
 """
 
 import os
+import re
 from typing import Dict, Any, List, Optional, TypedDict
 from langgraph.graph import StateGraph, END
-from langchain_anthropic import ChatAnthropic
-from langchain_core.messages import HumanMessage, SystemMessage
+import anthropic
 import logging
 import json
 
@@ -30,6 +30,10 @@ from auth.multi_agent_auth import (
     AGENT_SALES, AGENT_INVENTORY, AGENT_CUSTOMER, AGENT_PRICING
 )
 from auth.agent_config import get_agent_config, DEMO_AGENTS
+from auth.fga_client import check_agent_access, is_fga_configured, FGACheckResult
+
+# Import agent classes
+from agents import SalesAgent, InventoryAgent, PricingAgent, CustomerAgent
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +55,9 @@ class WorkflowState(TypedDict):
     # Tracking for demo visibility
     agent_flow: List[Dict[str, Any]]
     token_exchanges: List[Dict[str, Any]]
+
+    # FGA (Fine-Grained Authorization) checks
+    fga_checks: List[Dict[str, Any]]
 
     # Final response
     final_response: Optional[str]
@@ -160,19 +167,9 @@ class Orchestrator:
         # Get multi-agent token exchange manager
         self.token_exchange = get_multi_agent_exchange()
 
-        # Initialize router LLM (fast model for routing decisions)
-        self.router_llm = ChatAnthropic(
-            model=LLM_MODEL_NAME,
-            api_key=ANTHROPIC_API_KEY,
-            temperature=0
-        )
-
-        # Initialize response LLM (for combining results)
-        self.response_llm = ChatAnthropic(
-            model=LLM_MODEL_NAME,
-            api_key=ANTHROPIC_API_KEY,
-            temperature=0.7
-        )
+        # Initialize Anthropic client (raw SDK for better control)
+        self.anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        logger.info(f"Anthropic client initialized with model: {LLM_MODEL_NAME}")
 
         # Build the workflow
         self.workflow = self._build_workflow()
@@ -184,13 +181,18 @@ class Orchestrator:
         # Add nodes
         workflow.add_node("router", self._router_node)
         workflow.add_node("exchange_tokens", self._exchange_tokens_node)
+        workflow.add_node("fga_check", self._fga_check_node)  # FGA gatekeeper
         workflow.add_node("process_agents", self._process_agents_node)
         workflow.add_node("generate_response", self._generate_response_node)
 
-        # Linear flow: router -> exchange -> process -> response
+        # Linear flow: router -> exchange -> fga_check -> process -> response
+        # Token exchange runs FIRST so we can extract Vacation claim from Auth Server token
+        # (Org Auth Server doesn't support custom claims, but custom Auth Servers do)
+        # FGA check uses Vacation claim from Auth Server token to build contextual tuples
         workflow.set_entry_point("router")
         workflow.add_edge("router", "exchange_tokens")
-        workflow.add_edge("exchange_tokens", "process_agents")
+        workflow.add_edge("exchange_tokens", "fga_check")
+        workflow.add_edge("fga_check", "process_agents")
         workflow.add_edge("process_agents", "generate_response")
         workflow.add_edge("generate_response", END)
 
@@ -255,8 +257,22 @@ IMPORTANT: Choose scopes based on the operation type:
 
 Return ONLY the JSON object, no other text."""
 
-            response = await self.router_llm.ainvoke([HumanMessage(content=routing_prompt)])
-            routing_json = json.loads(response.content)
+            # Use raw Anthropic SDK for routing
+            response = self.anthropic_client.messages.create(
+                model=LLM_MODEL_NAME,
+                max_tokens=500,
+                messages=[{"role": "user", "content": routing_prompt}]
+            )
+            response_text = response.content[0].text
+            logger.info(f"Router LLM raw response: {response_text[:500]}")
+
+            # Extract JSON from response (handle markdown code blocks)
+            json_text = response_text.strip()
+            if json_text.startswith("```"):
+                # Remove markdown code block
+                lines = json_text.split("\n")
+                json_text = "\n".join(lines[1:-1] if lines[-1] == "```" else lines[1:])
+            routing_json = json.loads(json_text)
 
             agents = []
             agent_scopes = {}
@@ -294,6 +310,148 @@ Return ONLY the JSON object, no other text."""
             "status": "completed",
             "agents": agents,
             "scopes": agent_scopes
+        })
+
+        return state
+
+    async def _fga_check_node(self, state: WorkflowState) -> WorkflowState:
+        """
+        Check FGA permissions AFTER token exchange.
+        Filters out agents the user cannot invoke based on fine-grained rules.
+
+        This is the "Okta + FGA Better Together" integration point:
+        - Extracts Vacation claim from Auth Server token (not ID token)
+        - Org Auth Server doesn't support custom claims, but custom Auth Servers do
+        - Passes is_on_vacation as contextual tuple to FGA API
+        - FGA checks against pre-seeded manager tuples + contextual vacation status
+        - If FGA denies, marks the token exchange result as denied
+
+        Currently checks:
+        - inventory agent -> FGA inventory_system with can_increase_inventory relation
+        - all other agents -> pass through (no FGA model yet)
+        """
+        agents = state["agents_to_invoke"]
+        agent_results = state.get("agent_results", {})
+
+        # Extract user email for FGA checks (more human-readable than sub)
+        user_email = self.user_info.get("email", "")
+
+        if not user_email or not agents:
+            return state
+
+        state["agent_flow"].append({
+            "step": "fga_check",
+            "action": "Checking fine-grained permissions (Auth0 FGA API)",
+            "status": "processing"
+        })
+
+        # Get vacation status from Auth Server token (since Org Auth Server doesn't support custom claims)
+        # We extract it from the inventory agent's token exchange result
+        is_on_vacation = False
+
+        # Try to get Vacation claim from inventory Auth Server token
+        inventory_result = agent_results.get(AGENT_INVENTORY, {})
+        if inventory_result.get("success") and inventory_result.get("access_token"):
+            try:
+                from jose import jwt as jose_jwt
+                auth_token_claims = jose_jwt.get_unverified_claims(inventory_result["access_token"])
+                # Check for Vacation claim in Auth Server token
+                vacation_claim = auth_token_claims.get("Vacation", auth_token_claims.get("is_on_vacation"))
+                if vacation_claim is not None:
+                    is_on_vacation = bool(vacation_claim)
+                    logger.info(f"Extracted Vacation claim from Auth Server token: {vacation_claim}")
+                logger.info(f"Auth Server token claims for FGA: {list(auth_token_claims.keys())}")
+            except Exception as e:
+                logger.warning(f"Could not extract Vacation claim from Auth Server token: {e}")
+
+        # Fallback to ID token claim (in case it's configured there)
+        if not is_on_vacation:
+            is_on_vacation = self.user_info.get("is_on_vacation", self.user_info.get("Vacation", False))
+
+        logger.info(f"FGA check for {user_email}: is_on_vacation={is_on_vacation}")
+
+        # Check each agent against FGA
+        allowed_agents = []
+        fga_checks = []
+
+        for agent_type in agents:
+            scopes = state["agent_scopes"].get(agent_type, [])
+
+            # Run FGA check using FGA API with contextual tuples
+            # - user_email: from token's email claim (human-readable)
+            # - is_on_vacation: passed as contextual tuple if true
+            result: FGACheckResult = await check_agent_access(
+                user_email=user_email,
+                agent_type=agent_type,
+                scopes=scopes,
+                is_on_vacation=is_on_vacation,
+            )
+
+            # Record the FGA check for UI visibility
+            fga_check_record = {
+                "agent": agent_type,
+                "allowed": result.allowed,
+                "relation": result.relation,
+                "object": result.object,
+                "user": result.user,
+                "context": result.context,
+                "reason": result.reason,
+                "requested_scopes": scopes,
+                "contextual_tuples": result.contextual_tuples or [],
+            }
+            fga_checks.append(fga_check_record)
+
+            if result.allowed:
+                allowed_agents.append(agent_type)
+            else:
+                # FGA denied - update the existing token_exchange record to show denial
+                # Token was already exchanged, but FGA blocks the action
+                for tx in state["token_exchanges"]:
+                    if tx.get("agent") == agent_type:
+                        tx["success"] = False
+                        tx["access_denied"] = True
+                        tx["status"] = "denied"
+                        tx["error"] = f"FGA: {result.reason}"
+                        tx["fga_denied"] = True  # Flag for UI to show FGA-specific styling
+                        break
+                else:
+                    # Fallback: add new record if not found (shouldn't happen)
+                    config = get_agent_config(agent_type)
+                    demo = DEMO_AGENTS.get(agent_type, {})
+                    state["token_exchanges"].append({
+                        "agent": agent_type,
+                        "agent_name": config.name if config else demo.get("name", ""),
+                        "color": config.color if config else demo.get("color", "#888"),
+                        "success": False,
+                        "access_denied": True,
+                        "status": "denied",
+                        "scopes": [],
+                        "requested_scopes": scopes,
+                        "error": f"FGA: {result.reason}",
+                        "demo_mode": False,
+                        "fga_denied": True,
+                    })
+
+                # Mark agent result as denied so process_agents skips it
+                if agent_type in agent_results:
+                    agent_results[agent_type]["access_denied"] = True
+                    agent_results[agent_type]["success"] = False
+
+        state["agents_to_invoke"] = allowed_agents
+        state["fga_checks"] = fga_checks
+
+        denied_count = len(agents) - len(allowed_agents)
+        fga_status = "API" if is_fga_configured() else "not configured"
+
+        state["agent_flow"].append({
+            "step": "fga_check",
+            "action": f"FGA ({fga_status}): {len(allowed_agents)} allowed, {denied_count} denied",
+            "status": "completed",
+            "details": {
+                "vacation_status": is_on_vacation,
+                "user_email": user_email,
+                "contextual_tuples_used": is_on_vacation,  # True if on_vacation tuple was passed
+            }
         })
 
         return state
@@ -461,24 +619,49 @@ Return ONLY the JSON object, no other text."""
         """
         Invoke a specific agent to process the request.
 
-        In full implementation, this would:
-        1. Use the MCP token to call MCP tools
-        2. Have the agent LLM process with tool results
-        3. Return agent's response
-
-        For now, returns simulated responses based on agent type.
+        Uses the actual agent classes (SalesAgent, InventoryAgent, etc.)
+        which use raw Anthropic SDK for LLM calls.
         """
-        # Get agent-specific data (will be replaced with MCP calls)
-        data = self._get_demo_data(agent_type, message)
-
-        agent_name = exchange_result["agent_info"]["name"]
         scopes = exchange_result.get("scopes", [])
+        agent_name = exchange_result["agent_info"]["name"]
 
-        return f"[{agent_name}]\n{data}\n(Scopes: {', '.join(scopes)})"
+        # Map agent type to agent class
+        agent_classes = {
+            AGENT_SALES: SalesAgent,
+            AGENT_INVENTORY: InventoryAgent,
+            AGENT_CUSTOMER: CustomerAgent,
+            AGENT_PRICING: PricingAgent,
+        }
 
-    def _get_demo_data(self, agent_type: str, message: str) -> str:
-        """Get demo data for an agent based on message context."""
+        agent_class = agent_classes.get(agent_type)
+        if not agent_class:
+            # Fallback to demo data if agent class not found
+            data = self._get_demo_data(agent_type, message, scopes)
+            return f"[{agent_name}]\n{data}\n(Scopes: {', '.join(scopes)})"
+
+        try:
+            # Instantiate and invoke the agent
+            agent = agent_class(user_token=self.user_token)
+            result = await agent.process(message, context={"scopes": scopes})
+
+            if result.get("success"):
+                return f"[{agent_name}]\n{result['result']}\n(Scopes: {', '.join(scopes)})"
+            else:
+                # Agent LLM call failed, use demo data as fallback
+                logger.warning(f"Agent {agent_type} LLM call failed: {result.get('error')}")
+                data = self._get_demo_data(agent_type, message, scopes)
+                return f"[{agent_name}]\n{data}\n(Scopes: {', '.join(scopes)})"
+
+        except Exception as e:
+            logger.error(f"Error invoking agent {agent_type}: {e}")
+            # Fallback to demo data
+            data = self._get_demo_data(agent_type, message, scopes)
+            return f"[{agent_name}]\n{data}\n(Scopes: {', '.join(scopes)})"
+
+    def _get_demo_data(self, agent_type: str, message: str, scopes: List[str] = None) -> str:
+        """Get demo data for an agent based on message context and scopes."""
         message_lower = message.lower()
+        scopes = scopes or []
 
         if agent_type == AGENT_SALES:
             if "order" in message_lower or "recent" in message_lower:
@@ -498,6 +681,27 @@ Return ONLY the JSON object, no other text."""
             )
 
         elif agent_type == AGENT_INVENTORY:
+            # Check if this is a WRITE operation (user has inventory:write scope)
+            has_write_scope = "inventory:write" in scopes
+            is_write_request = any(kw in message_lower for kw in ["add", "update", "increase", "set", "put", "remove", "decrease"])
+
+            if has_write_scope and is_write_request:
+                # Extract quantity from message (simple pattern matching)
+                qty_match = re.search(r'(\d+)\s*(basket|ball|unit)', message_lower)
+                quantity = qty_match.group(1) if qty_match else "30"
+
+                return (
+                    f"INVENTORY UPDATE SUCCESSFUL:\n"
+                    f"- Action: Added {quantity} basketballs to inventory\n"
+                    f"- Product: Pro Game Basketball (default SKU)\n"
+                    f"- Previous count: 2,847 units\n"
+                    f"- New count: {int(quantity) + 2847} units\n"
+                    f"- Status: CONFIRMED\n"
+                    f"- Transaction ID: INV-2026-{hash(message) % 10000:04d}\n"
+                    f"Total basketballs now: {12219 + int(quantity)} units"
+                )
+
+            # Read-only inventory data
             if "basketball" in message_lower:
                 return (
                     "Basketball Inventory:\n"
@@ -606,11 +810,14 @@ Provide a concise, helpful response that combines the relevant information.
 If some agents were denied, acknowledge what information is missing but focus on what IS available."""
 
             try:
-                response = await self.response_llm.ainvoke([
-                    SystemMessage(content="You are a helpful AI assistant for ProGear Sporting Goods."),
-                    HumanMessage(content=synthesis_prompt)
-                ])
-                final_response = response.content
+                # Use raw Anthropic SDK for response synthesis
+                response = self.anthropic_client.messages.create(
+                    model=LLM_MODEL_NAME,
+                    max_tokens=1024,
+                    system="You are a helpful AI assistant for ProGear Sporting Goods.",
+                    messages=[{"role": "user", "content": synthesis_prompt}]
+                )
+                final_response = response.content[0].text
             except Exception as e:
                 logger.error(f"Response synthesis failed: {e}")
                 final_response = combined_data
@@ -641,7 +848,7 @@ If some agents were denied, acknowledge what information is missing but focus on
 
         return state
 
-    async def process(self, message: str, conversation_context: Optional[str] = None) -> Dict[str, Any]:
+    async def process(self, message: str) -> Dict[str, Any]:
         """
         Process a user message through the orchestrator.
 
@@ -665,6 +872,7 @@ If some agents were denied, acknowledge what information is missing but focus on
             "agent_results": {},
             "agent_flow": [],
             "token_exchanges": [],
+            "fga_checks": [],  # FGA fine-grained authorization checks
             "final_response": None,
         }
 
@@ -675,4 +883,5 @@ If some agents were denied, acknowledge what information is missing but focus on
             "content": final_state["final_response"],
             "agent_flow": final_state["agent_flow"],
             "token_exchanges": final_state["token_exchanges"],
+            "fga_checks": final_state["fga_checks"],
         }

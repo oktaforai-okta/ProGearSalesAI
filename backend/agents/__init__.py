@@ -4,7 +4,7 @@ ProGear Sales AI - Agent Classes
 Each agent is a first-class identity registered in Okta.
 Agents handle specific domains:
 - SalesAgent: Orders, quotes, deals
-- InventoryAgent: Stock levels, products
+- InventoryAgent: Stock levels, products (with FGA check)
 - PricingAgent: Discounts, margins
 - CustomerAgent: Accounts, contacts
 """

@@ -21,9 +21,8 @@ from dotenv import load_dotenv
 
 from auth.okta_auth import get_okta_auth
 from auth.agent_config import get_all_agent_configs, DEMO_AGENTS
+from auth.fga_client import close_fga_client
 from orchestrator.orchestrator import Orchestrator
-from api.conversation_store import conversation_store
-from data.demo_store import demo_store
 
 # Load environment variables
 load_dotenv()
@@ -47,6 +46,16 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# --- Lifecycle Events ---
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Clean up resources on application shutdown."""
+    logger.info("Shutting down - closing FGA client...")
+    await close_fga_client()
+    logger.info("FGA client closed")
 
 
 # --- Request/Response Models ---
@@ -82,7 +91,6 @@ class TokenExchange(BaseModel):
     access_denied: bool = False
     status: str  # "granted", "denied", "error"
     scopes: List[str] = []
-    requested_scopes: List[str] = []  # What was requested (for denied cases)
     error: Optional[str] = None
     demo_mode: bool = False
 
@@ -162,42 +170,48 @@ async def chat(
     if user_token:
         try:
             user_claims = await okta_auth.validate_token(user_token)
+
+            # Extract vacation claim from Okta ID token
+            # Claim name in Okta: "Vacation" (maps to user.is_on_vacation)
+            is_on_vacation = user_claims.get("Vacation", user_claims.get("is_on_vacation", False))
+
             user_info = {
                 "sub": user_claims.get("sub"),
                 "email": user_claims.get("email"),
                 "name": user_claims.get("name"),
                 "groups": user_claims.get("groups", []),
+                "is_on_vacation": is_on_vacation,
             }
-            logger.info(f"User authenticated: {user_info.get('email')}")
+
+            # Log ID token claims for debugging (deployed on Render)
+            logger.info(f"=== ID Token Claims ===")
+            logger.info(f"User: {user_info.get('email')}")
+            logger.info(f"Subject (sub): {user_claims.get('sub')}")
+            logger.info(f"Groups: {user_claims.get('groups', [])}")
+            logger.info(f"Vacation claim (raw): {user_claims.get('Vacation')} | is_on_vacation: {user_claims.get('is_on_vacation')}")
+            logger.info(f"Resolved is_on_vacation: {is_on_vacation}")
+            logger.info(f"All claims keys: {list(user_claims.keys())}")
+            # Full claims for debugging
+            import json
+            logger.info(f"=== FULL ID TOKEN CLAIMS (DEBUG) ===")
+            logger.info(json.dumps(user_claims, indent=2, default=str))
         except Exception as e:
             logger.warning(f"Token validation failed: {e}")
             user_info = {"email": "anonymous", "groups": []}
     else:
         user_info = {"email": "anonymous", "groups": []}
 
-    # Get or create conversation session
-    session_id = conversation_store.get_or_create_session(request.session_id)
-
-    # Get conversation context for routing
-    conversation_context = conversation_store.get_context_summary(session_id, max_messages=6)
-
-    # Store the user's message
-    conversation_store.add_message(session_id, "user", request.message)
-
-    # Create orchestrator and process request with conversation context
+    # Create orchestrator and process request
     try:
         orchestrator = Orchestrator(
             user_token=user_token or "",
             user_info=user_info
         )
-        result = await orchestrator.process(request.message, conversation_context)
-
-        # Store the assistant's response
-        conversation_store.add_message(session_id, "assistant", result["content"])
+        result = await orchestrator.process(request.message)
 
         return ChatResponse(
             content=result["content"],
-            session_id=session_id,
+            session_id=request.session_id or "session-1",
             agent_flow=[AgentFlowStep(**step) for step in result["agent_flow"]],
             token_exchanges=[TokenExchange(**ex) for ex in result["token_exchanges"]],
             user_info=user_info
@@ -241,7 +255,7 @@ async def agent_status():
             # Use demo config
             demo = DEMO_AGENTS.get(agent_type, {})
             agents.append({
-                "name": demo.get("name", f"{agent_type.title()} MCP"),
+                "name": demo.get("name", f"{agent_type.title()} Agent"),
                 "type": agent_type,
                 "description": "Demo mode",
                 "color": demo.get("color", "#888"),
@@ -277,80 +291,39 @@ async def okta_config():
 
 @app.get("/api/agents/config")
 async def agent_config():
-    """Get MCP configuration for UI display."""
+    """Get agent configuration for UI display."""
     return {
         "agents": [
             {
                 "type": "sales",
-                "name": "Sales MCP",
+                "name": "ProGear Sales Agent",
                 "description": "Orders, quotes, and sales pipeline",
                 "color": "#3b82f6",
                 "icon": "ShoppingCart",
             },
             {
                 "type": "inventory",
-                "name": "Inventory MCP",
+                "name": "ProGear Inventory Agent",
                 "description": "Stock levels, products, and warehouse",
                 "color": "#10b981",
                 "icon": "Package",
             },
             {
                 "type": "customer",
-                "name": "Customer MCP",
+                "name": "ProGear Customer Agent",
                 "description": "Accounts, contacts, and purchase history",
                 "color": "#8b5cf6",
                 "icon": "Users",
             },
             {
                 "type": "pricing",
-                "name": "Pricing MCP",
+                "name": "ProGear Pricing Agent",
                 "description": "Pricing, margins, and discounts",
                 "color": "#f59e0b",
                 "icon": "DollarSign",
             },
         ]
     }
-
-
-# --- Demo Reset Endpoint ---
-
-@app.post("/api/demo/reset")
-async def reset_demo():
-    """
-    Reset all demo data to initial state.
-
-    This resets:
-    - Inventory quantities
-    - Pricing data
-    - Customer data
-    - Conversation history
-
-    Useful for demos to start fresh.
-    """
-    try:
-        # Reset data store
-        demo_store.reset_to_initial()
-
-        # Clear all conversation sessions
-        conversation_store.clear_all()
-
-        # Get summary for confirmation
-        inv_summary = demo_store.get_inventory_summary()
-        cust_summary = demo_store.get_customer_summary()
-
-        return {
-            "success": True,
-            "message": "Demo data reset to initial state",
-            "summary": {
-                "products": inv_summary['total_products'],
-                "total_items": inv_summary['total_items'],
-                "customers": cust_summary['total_customers'],
-                "low_stock_alerts": inv_summary['low_stock_count']
-            }
-        }
-    except Exception as e:
-        logger.error(f"Demo reset failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Reset failed: {str(e)}")
 
 
 # --- Okta System Logs Endpoint (for governance demo) ---
