@@ -6,11 +6,20 @@ This demonstrates "Okta + FGA Better Together":
 - Okta: Identity (ID-JAG), coarse-grained RBAC (group membership)
 - FGA: Fine-grained, contextual authorization (runtime conditions via API)
 
+Key Logic - Scope-Based FGA Check:
+- inventory:read  -> NO FGA check (read operations always allowed)
+- inventory:write -> FGA check (can_increase_inventory = manager but not on_vacation)
+- inventory:alert -> NO FGA check (alert operations always allowed)
+
+This means:
+- User on vacation can VIEW inventory (read scope) ✓
+- User on vacation CANNOT MODIFY inventory (write scope) ✗
+
 Approach:
-1. Extract `sub` (userId) and `is_on_vacation` from Okta ID token claims
-2. Build contextual tuples - if user is on vacation, pass as temporary fact
-3. Call FGA API check with contextual tuples
-4. FGA evaluates against pre-seeded manager tuples + contextual vacation status
+1. Router determines scopes based on user intent (read vs write)
+2. Token exchange retrieves Auth Server token with Vacation claim
+3. FGA check ONLY runs for inventory:write scope
+4. If FGA denies, user gets clear message about vacation status
 
 FGA Model:
   type user
@@ -221,13 +230,13 @@ async def check_agent_access(
     Other agents pass through (return allowed=True).
 
     For inventory:
-    - Write scopes (inventory:write) -> checks "can_increase_inventory"
-    - Read scopes -> checks "can_increase_inventory" (same check, manager must not be on vacation)
+    - Write scopes (inventory:write) -> checks "can_increase_inventory" (manager + not on vacation)
+    - Read scopes (inventory:read, inventory:alert) -> pass through (no FGA check needed)
 
     Args:
         user_email: User's email/login from Okta (e.g., "bob.manager@atko.email")
         agent_type: Agent type (sales, inventory, customer, pricing)
-        scopes: Requested scopes (used to determine relation check)
+        scopes: Requested scopes (used to determine if FGA check is needed)
         is_on_vacation: From Okta token claim (passed as contextual tuple)
 
     Returns:
@@ -247,17 +256,24 @@ async def check_agent_access(
             contextual_tuples=[],
         )
 
-    # Determine which relation to check based on requested scopes
-    # For inventory, we check can_increase_inventory for write operations
-    if scopes and "inventory:write" in scopes:
-        relation = "can_increase_inventory"
-    else:
-        relation = "can_increase_inventory"  # Same check for read - manager check
+    # FGA check only applies to WRITE operations on inventory
+    # Read operations (inventory:read, inventory:alert) pass through - no FGA check
+    if "inventory:write" not in scopes:
+        return FGACheckResult(
+            allowed=True,
+            relation="n/a",
+            object=AGENT_TO_FGA_OBJECT[agent_type],
+            user=f"user:{user_email}",
+            context={"is_on_vacation": is_on_vacation, "scopes": scopes},
+            reason=f"Read-only operation - FGA check not required (scopes: {', '.join(scopes)})",
+            contextual_tuples=[],
+        )
 
+    # Write operation - check can_increase_inventory (manager + not on vacation)
     return await check_inventory_access_via_fga(
         user_email=user_email,
         is_on_vacation=is_on_vacation,
-        relation=relation,
+        relation="can_increase_inventory",
     )
 
 
@@ -284,8 +300,14 @@ def get_fga_model_info() -> Dict[str, Any]:
                 "on_vacation": "Contextual tuple: passed dynamically from Okta claim",
                 "can_increase_inventory": "manager but not on_vacation"
             },
+            "scope_based_check": {
+                "description": "FGA check only runs for write operations",
+                "inventory:read": "No FGA check - read always allowed",
+                "inventory:write": "FGA check - can_increase_inventory (manager + not on vacation)",
+                "inventory:alert": "No FGA check - alerts always allowed",
+            },
             "contextual_tuple_logic": {
-                "description": "If is_on_vacation=true, pass on_vacation tuple to FGA",
+                "description": "If is_on_vacation=true AND scope=inventory:write, pass on_vacation tuple to FGA",
                 "tuple_format": {
                     "user": "user:{userId}",
                     "relation": "on_vacation",
@@ -295,7 +317,7 @@ def get_fga_model_info() -> Dict[str, Any]:
         },
         "claims_used": [
             {"name": "sub", "description": "User ID for FGA user identifier"},
-            {"name": "Vacation", "okta_attribute": "user.is_on_vacation", "description": "Passed as contextual tuple"},
+            {"name": "Vacation", "okta_attribute": "user.is_on_vacation", "description": "Passed as contextual tuple for write ops"},
         ]
     }
 
