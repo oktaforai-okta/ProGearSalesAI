@@ -175,8 +175,10 @@ async def chat(
         try:
             user_claims = await okta_auth.validate_token(user_token)
 
-            # Extract vacation claim from Okta ID token
-            # Claim name in Okta: "Vacation" (maps to user.is_on_vacation)
+            # Extract claims from Okta ID token
+            # Manager claim: "Manager" (maps to user.is_a_manager) - for FGA tuple management
+            # Vacation claim: "Vacation" (maps to user.is_on_vacation) - for contextual tuple
+            is_manager = user_claims.get("Manager", user_claims.get("is_a_manager", False))
             is_on_vacation = user_claims.get("Vacation", user_claims.get("is_on_vacation", False))
 
             user_info = {
@@ -184,7 +186,8 @@ async def chat(
                 "email": user_claims.get("email"),
                 "name": user_claims.get("name"),
                 "groups": user_claims.get("groups", []),
-                "is_on_vacation": is_on_vacation,
+                "is_manager": is_manager,  # For FGA manager tuple management
+                "is_on_vacation": is_on_vacation,  # For FGA vacation contextual tuple
             }
 
             # Log ID token for debugging (deployed on Render)
@@ -192,6 +195,8 @@ async def chat(
             logger.info(f"User: {user_info.get('email')}")
             logger.info(f"Subject (sub): {user_claims.get('sub')}")
             logger.info(f"Groups: {user_claims.get('groups', [])}")
+            logger.info(f"Manager claim (raw): {user_claims.get('Manager')} | is_a_manager: {user_claims.get('is_a_manager')}")
+            logger.info(f"Resolved is_manager: {is_manager}")
             logger.info(f"Vacation claim (raw): {user_claims.get('Vacation')} | is_on_vacation: {user_claims.get('is_on_vacation')}")
             logger.info(f"Resolved is_on_vacation: {is_on_vacation}")
             logger.info(f"All claims keys: {list(user_claims.keys())}")
@@ -204,9 +209,9 @@ async def chat(
             logger.info(json.dumps(user_claims, indent=2, default=str))
         except Exception as e:
             logger.warning(f"Token validation failed: {e}")
-            user_info = {"email": "anonymous", "groups": []}
+            user_info = {"email": "anonymous", "groups": [], "is_manager": False, "is_on_vacation": False}
     else:
-        user_info = {"email": "anonymous", "groups": []}
+        user_info = {"email": "anonymous", "groups": [], "is_manager": False, "is_on_vacation": False}
 
     # Create orchestrator and process request
     try:

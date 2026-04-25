@@ -3,7 +3,7 @@ Auth0 FGA Client for Agent Permission Gating
 
 Uses FGA API with contextual tuples for fine-grained authorization.
 This demonstrates "Okta + FGA Better Together":
-- Okta: Identity (ID-JAG), coarse-grained RBAC (group membership)
+- Okta: Identity (ID-JAG), coarse-grained RBAC (group membership), Manager claim
 - FGA: Fine-grained, contextual authorization (runtime conditions via API)
 
 Key Logic - Scope-Based FGA Check:
@@ -15,11 +15,18 @@ This means:
 - User on vacation can VIEW inventory (read scope) ✓
 - User on vacation CANNOT MODIFY inventory (write scope) ✗
 
+Dynamic Manager Tuple Management:
+1. Read "Manager" claim from Okta ID token
+2. If Manager=true, ensure manager tuple exists in FGA
+3. If Manager=false, delete manager tuple from FGA (if exists)
+4. Then run vacation check with contextual tuple
+
 Approach:
 1. Router determines scopes based on user intent (read vs write)
 2. Token exchange retrieves Auth Server token with Vacation claim
-3. FGA check ONLY runs for inventory:write scope
-4. If FGA denies, user gets clear message about vacation status
+3. ensure_manager_relationship() creates/deletes manager tuple based on Okta claim
+4. FGA check runs for inventory:write scope with vacation contextual tuple
+5. If FGA denies, user gets clear message about vacation status
 
 FGA Model:
   type user
@@ -29,8 +36,9 @@ FGA Model:
       define on_vacation: [user]
       define can_increase_inventory: manager but not on_vacation
 
-Pre-requisite: Users must have `manager` tuple pre-seeded in FGA store.
-Vacation status is passed dynamically via contextual tuples from Okta claims.
+Okta Claims Used:
+- Manager (user.is_a_manager): Determines if manager tuple should exist in FGA
+- Vacation (user.is_on_vacation): Passed as contextual tuple at check time
 """
 
 import os
@@ -39,7 +47,7 @@ from typing import Dict, Any, Optional
 from dataclasses import dataclass
 
 from openfga_sdk import ClientConfiguration, OpenFgaClient
-from openfga_sdk.client.models import ClientCheckRequest, ClientTuple
+from openfga_sdk.client.models import ClientCheckRequest, ClientTuple, ClientWriteRequest
 from openfga_sdk.credentials import Credentials, CredentialConfiguration
 
 logger = logging.getLogger(__name__)
@@ -111,6 +119,205 @@ def _get_fga_client() -> Optional[OpenFgaClient]:
         logger.error(f"Failed to initialize FGA client: {e}")
         return None
 
+
+# ============================================================================
+# Manager Tuple Management Functions
+# ============================================================================
+
+async def check_manager_tuple_exists(
+    user_email: str,
+    resource_id: str = "main_db"
+) -> bool:
+    """
+    Check if manager tuple exists in FGA store for a user.
+
+    Uses FGA check API to verify if the user has the manager relation.
+
+    Args:
+        user_email: User's email/login from Okta
+        resource_id: The inventory resource ID (default: main_db)
+
+    Returns:
+        True if tuple exists, False otherwise
+    """
+    fga_client = _get_fga_client()
+    if not fga_client:
+        logger.warning("FGA client not available - cannot check manager tuple")
+        return False
+
+    fga_user = f"user:{user_email}"
+    fga_object = f"inventory_system:{resource_id}"
+
+    try:
+        # Use check API to verify if the manager relation exists
+        check_request = ClientCheckRequest(
+            user=fga_user,
+            relation="manager",
+            object=fga_object
+        )
+        response = await fga_client.check(check_request)
+
+        exists = response.allowed
+        logger.info(f"FGA manager tuple check: {fga_user} -> manager -> {fga_object} exists={exists}")
+        return exists
+
+    except Exception as e:
+        logger.error(f"FGA manager tuple check failed: {e}")
+        return False
+
+
+async def write_manager_tuple(
+    user_email: str,
+    resource_id: str = "main_db"
+) -> bool:
+    """
+    Write manager tuple to FGA store.
+
+    Creates: user:{email} manager inventory_system:{resource_id}
+
+    Args:
+        user_email: User's email/login from Okta
+        resource_id: The inventory resource ID (default: main_db)
+
+    Returns:
+        True if successful, False otherwise
+    """
+    fga_client = _get_fga_client()
+    if not fga_client:
+        logger.warning("FGA client not available - cannot write manager tuple")
+        return False
+
+    fga_user = f"user:{user_email}"
+    fga_object = f"inventory_system:{resource_id}"
+
+    try:
+        write_request = ClientWriteRequest(
+            writes=[
+                ClientTuple(
+                    user=fga_user,
+                    relation="manager",
+                    object=fga_object
+                )
+            ]
+        )
+        await fga_client.write(write_request)
+        logger.info(f"FGA: Created manager tuple: {fga_user} -> manager -> {fga_object}")
+        return True
+
+    except Exception as e:
+        error_str = str(e).lower()
+        if "already exists" in error_str:
+            logger.info(f"FGA: Manager tuple already exists for {user_email}")
+            return True
+        logger.error(f"FGA write manager tuple failed: {e}")
+        return False
+
+
+async def delete_manager_tuple(
+    user_email: str,
+    resource_id: str = "main_db"
+) -> bool:
+    """
+    Delete manager tuple from FGA store.
+
+    Removes: user:{email} manager inventory_system:{resource_id}
+
+    Args:
+        user_email: User's email/login from Okta
+        resource_id: The inventory resource ID (default: main_db)
+
+    Returns:
+        True if successful (or tuple didn't exist), False on error
+    """
+    fga_client = _get_fga_client()
+    if not fga_client:
+        logger.warning("FGA client not available - cannot delete manager tuple")
+        return False
+
+    fga_user = f"user:{user_email}"
+    fga_object = f"inventory_system:{resource_id}"
+
+    try:
+        write_request = ClientWriteRequest(
+            deletes=[
+                ClientTuple(
+                    user=fga_user,
+                    relation="manager",
+                    object=fga_object
+                )
+            ]
+        )
+        await fga_client.write(write_request)
+        logger.info(f"FGA: Deleted manager tuple: {fga_user} -> manager -> {fga_object}")
+        return True
+
+    except Exception as e:
+        error_str = str(e).lower()
+        if "does not exist" in error_str or "not found" in error_str:
+            logger.info(f"FGA: Manager tuple didn't exist for {user_email} (nothing to delete)")
+            return True
+        logger.error(f"FGA delete manager tuple failed: {e}")
+        return False
+
+
+async def ensure_manager_relationship(
+    user_email: str,
+    is_manager: bool,
+    resource_id: str = "main_db"
+) -> dict:
+    """
+    Ensure manager relationship in FGA matches the Okta Manager claim.
+
+    - If is_manager=True and tuple doesn't exist -> create it
+    - If is_manager=False and tuple exists -> delete it
+    - Otherwise, no action needed
+
+    Args:
+        user_email: User's email/login from Okta
+        is_manager: Value of Manager claim from Okta ID token
+        resource_id: The inventory resource ID (default: main_db)
+
+    Returns:
+        Dict with action taken and success status
+    """
+    result = {
+        "user": user_email,
+        "is_manager_claim": is_manager,
+        "action": "none",
+        "success": True,
+    }
+
+    # Check current state in FGA
+    tuple_exists = await check_manager_tuple_exists(user_email, resource_id)
+    result["tuple_existed"] = tuple_exists
+
+    if is_manager and not tuple_exists:
+        # Manager claim is true but tuple doesn't exist -> create it
+        success = await write_manager_tuple(user_email, resource_id)
+        result["action"] = "created"
+        result["success"] = success
+        logger.info(f"FGA ensure_manager: Created tuple for {user_email} (Manager claim=true)")
+
+    elif not is_manager and tuple_exists:
+        # Manager claim is false but tuple exists -> delete it
+        success = await delete_manager_tuple(user_email, resource_id)
+        result["action"] = "deleted"
+        result["success"] = success
+        logger.info(f"FGA ensure_manager: Deleted tuple for {user_email} (Manager claim=false)")
+
+    else:
+        # No action needed - state is already correct
+        if is_manager and tuple_exists:
+            logger.info(f"FGA ensure_manager: Tuple already exists for {user_email} (no action)")
+        else:
+            logger.info(f"FGA ensure_manager: No tuple and not a manager for {user_email} (no action)")
+
+    return result
+
+
+# ============================================================================
+# FGA Check Functions
+# ============================================================================
 
 async def check_inventory_access_via_fga(
     user_email: str,

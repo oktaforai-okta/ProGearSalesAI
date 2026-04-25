@@ -30,7 +30,7 @@ from auth.multi_agent_auth import (
     AGENT_SALES, AGENT_INVENTORY, AGENT_CUSTOMER, AGENT_PRICING
 )
 from auth.agent_config import get_agent_config, DEMO_AGENTS
-from auth.fga_client import check_agent_access, is_fga_configured, FGACheckResult
+from auth.fga_client import check_agent_access, is_fga_configured, FGACheckResult, ensure_manager_relationship
 
 # Import agent classes
 from agents import SalesAgent, InventoryAgent, PricingAgent, CustomerAgent
@@ -320,11 +320,11 @@ Return ONLY the JSON object, no other text."""
         Filters out agents the user cannot invoke based on fine-grained rules.
 
         This is the "Okta + FGA Better Together" integration point:
-        - Extracts Vacation claim from Auth Server token (not ID token)
-        - Org Auth Server doesn't support custom claims, but custom Auth Servers do
-        - Passes is_on_vacation as contextual tuple to FGA API
-        - FGA checks against pre-seeded manager tuples + contextual vacation status
-        - If FGA denies, marks the token exchange result as denied
+        1. Reads Manager claim from ID token -> creates/deletes manager tuple in FGA
+        2. Extracts Vacation claim from Auth Server token
+        3. Passes is_on_vacation as contextual tuple to FGA API
+        4. FGA checks: can_increase_inventory = manager but not on_vacation
+        5. If FGA denies, marks the token exchange result as denied
 
         Currently checks:
         - inventory agent -> FGA inventory_system with can_increase_inventory relation
@@ -345,32 +345,47 @@ Return ONLY the JSON object, no other text."""
             "status": "processing"
         })
 
-        # Get vacation status from Auth Server token (since Org Auth Server doesn't support custom claims)
-        # We extract it from the inventory agent's token exchange result
+        # Extract Manager and Vacation claims from Auth Server token
+        # (Org Auth Server doesn't support custom claims, so we use Custom Auth Server token)
+        is_manager = False
         is_on_vacation = False
 
-        # Try to get Vacation claim from inventory Auth Server token
         inventory_result = agent_results.get(AGENT_INVENTORY, {})
         if inventory_result.get("success") and inventory_result.get("access_token"):
             try:
                 from jose import jwt as jose_jwt
                 auth_token_claims = jose_jwt.get_unverified_claims(inventory_result["access_token"])
-                # Check for Vacation claim in Auth Server token
+
+                # Extract Manager claim from Auth Server token
+                manager_claim = auth_token_claims.get("Manager", auth_token_claims.get("is_a_manager"))
+                if manager_claim is not None:
+                    is_manager = bool(manager_claim)
+                    logger.info(f"Extracted Manager claim from Auth Server token: {manager_claim}")
+
+                # Extract Vacation claim from Auth Server token
                 vacation_claim = auth_token_claims.get("Vacation", auth_token_claims.get("is_on_vacation"))
                 if vacation_claim is not None:
                     is_on_vacation = bool(vacation_claim)
                     logger.info(f"Extracted Vacation claim from Auth Server token: {vacation_claim}")
+
                 logger.info(f"Auth Server token claims for FGA: {list(auth_token_claims.keys())}")
             except Exception as e:
-                logger.warning(f"Could not extract Vacation claim from Auth Server token: {e}")
+                logger.warning(f"Could not extract claims from Auth Server token: {e}")
 
-        # Fallback to ID token claim (in case it's configured there)
+        # Fallback to ID token claims (in case Custom Auth Server not configured)
+        if not is_manager:
+            is_manager = self.user_info.get("is_manager", self.user_info.get("Manager", False))
         if not is_on_vacation:
             is_on_vacation = self.user_info.get("is_on_vacation", self.user_info.get("Vacation", False))
 
-        logger.info(f"FGA check for {user_email}: is_on_vacation={is_on_vacation}")
+        logger.info(f"FGA check for {user_email}: is_manager={is_manager}, is_on_vacation={is_on_vacation}")
 
-        # Check each agent against FGA
+        # Step 1: Ensure manager relationship in FGA based on Manager claim
+        # This dynamically creates/deletes the manager tuple
+        manager_result = await ensure_manager_relationship(user_email, is_manager)
+        logger.info(f"FGA manager tuple management: user={user_email}, is_manager={is_manager}, action={manager_result.get('action')}")
+
+        # Step 2: Check each agent against FGA
         allowed_agents = []
         fga_checks = []
 
