@@ -7,6 +7,7 @@ import Link from 'next/link';
 import AgentFlowCard from '@/components/AgentFlowCard';
 import TokenExchangeCard from '@/components/TokenExchangeCard';
 import FGAExplanationCard from '@/components/FGAExplanationCard';
+import RawTokensCard from '@/components/RawTokensCard';
 import { API_BASE_URL, OKTA_DOMAIN } from '@/lib/config';
 
 interface Message {
@@ -40,6 +41,19 @@ const CHAT_STORAGE_KEY = 'progear-chat-messages';
 const AGENT_FLOW_STORAGE_KEY = 'progear-agent-flow';
 const TOKEN_EXCHANGE_STORAGE_KEY = 'progear-token-exchanges';
 const FGA_CHECKS_STORAGE_KEY = 'progear-fga-checks';
+
+// Decode JWT payload (for display only, no validation)
+function decodeJwtPayload(token: string): Record<string, any> | null {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const payload = parts[1];
+    const decoded = atob(payload.replace(/-/g, '+').replace(/_/g, '/'));
+    return JSON.parse(decoded);
+  } catch {
+    return null;
+  }
+}
 
 export default function Home() {
   const { data: session, status } = useSession();
@@ -451,6 +465,12 @@ export default function Home() {
 
           {/* Token Exchanges */}
           <TokenExchangeCard exchanges={currentTokenExchanges} />
+
+          {/* Raw Tokens (Collapsed by default) */}
+          <RawTokensCard
+            exchanges={currentTokenExchanges}
+            idTokenClaims={session?.idToken ? decodeJwtPayload(session.idToken) ?? undefined : undefined}
+          />
 
           {/* Architecture Link */}
           <Link

@@ -93,6 +93,7 @@ class TokenExchange(BaseModel):
     scopes: List[str] = []
     error: Optional[str] = None
     demo_mode: bool = False
+    token_claims: Optional[Dict[str, Any]] = None  # Decoded JWT claims for display
 
 
 class AgentFlowStep(BaseModel):

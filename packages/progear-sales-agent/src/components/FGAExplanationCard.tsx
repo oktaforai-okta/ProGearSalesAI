@@ -21,15 +21,12 @@ interface Props {
 }
 
 export default function FGAExplanationCard({ checks, isLoading }: Props) {
-  // Only show if there are FGA checks with actual decisions
+  // Filter for FGA checks with actual decisions (not pass-through)
   const relevantChecks = checks.filter(c => c.relation !== 'n/a');
-
-  if (relevantChecks.length === 0 && !isLoading) {
-    return null;
-  }
 
   const allowed = relevantChecks.filter(c => c.allowed);
   const denied = relevantChecks.filter(c => !c.allowed);
+  const hasChecks = relevantChecks.length > 0;
 
   return (
     <div className="bg-white rounded-xl border-2 border-neutral-border shadow-sm overflow-hidden">
@@ -78,7 +75,7 @@ export default function FGAExplanationCard({ checks, isLoading }: Props) {
         </div>
 
         {/* Summary */}
-        {relevantChecks.length > 0 && (
+        {hasChecks ? (
           <div className="flex items-center gap-4 pb-3 border-b border-gray-100">
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 rounded-full bg-success-green/10 flex items-center justify-center">
@@ -101,6 +98,16 @@ export default function FGAExplanationCard({ checks, isLoading }: Props) {
                 </div>
               </div>
             )}
+          </div>
+        ) : !isLoading && (
+          <div className="flex items-center gap-3 pb-3 border-b border-gray-100 text-gray-500">
+            <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center">
+              <Shield className="w-4 h-4 text-gray-400" />
+            </div>
+            <div className="text-sm">
+              No FGA checks performed
+              <div className="text-[10px] text-gray-400">FGA applies to inventory:write operations only</div>
+            </div>
           </div>
         )}
 

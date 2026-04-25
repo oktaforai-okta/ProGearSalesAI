@@ -123,19 +123,17 @@ Three user groups with different access levels:
 | **ProGear-Warehouse** | No access | Full access | No access | No access |
 | **ProGear-Finance** | No access | No access | No access | Full access |
 
-## Token Exchange Flow (ID-JAG)
+## Token Exchange Flow
 
 ```
-1. User Login → Okta Org AS → ID Token
+1. User Login → Okta OIDC → ID Token
 2. Chat Query → LangGraph Router → Determine agents + scopes needed
 3. For each MCP:
-   a. Step 1: ID Token → Org AS (/oauth2/v1/token) → ID-JAG Token
-   b. Step 2: ID-JAG → Custom AS (/oauth2/{aus}/v1/token) → MCP Access Token (or DENIED)
+   a. ID Token → Okta (ID-JAG Exchange) → ID-JAG Token
+   b. ID-JAG Token → Auth Server → MCP Access Token (or DENIED)
 4. Process with authorized agents
 5. Generate unified response
 ```
-
-**Important**: The Okta AI SDK always performs Step 1 at the Org Authorization Server, not a Custom AS. This means users must log in via the Org AS (set `NEXT_PUBLIC_OKTA_ISSUER` to your org URL without an auth server ID).
 
 ## Deploy Your Own
 

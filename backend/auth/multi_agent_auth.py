@@ -172,7 +172,8 @@ class MultiAgentTokenExchange:
 
             logger.info(f"[{agent_type}] Step 2 SUCCESS: expires_in={token_result.expires_in}s")
 
-            # Log Auth Server token claims for debugging (deployed on Render)
+            # Decode Auth Server token claims for debugging and UI display
+            auth_token_claims = {}
             try:
                 auth_token_claims = jwt.get_unverified_claims(token_result.access_token)
                 logger.info(f"=== Auth Server Token Claims [{agent_type}] ===")
@@ -204,6 +205,7 @@ class MultiAgentTokenExchange:
                 "audience": config.audience,
                 "demo_mode": False,
                 "exchanged_at": datetime.now().isoformat(),
+                "token_claims": auth_token_claims,  # Include decoded claims for UI display
             }
 
         except Exception as e:
@@ -272,6 +274,12 @@ class MultiAgentTokenExchange:
             },
             "demo_mode": True,
             "exchanged_at": datetime.now().isoformat(),
+            "token_claims": {  # Demo claims for UI display
+                "sub": "demo-user",
+                "aud": demo_config.get("audience", f"api://progear-{agent_type}"),
+                "scope": " ".join(scopes),
+                "demo_mode": True,
+            },
         }
 
     def _error_result(
