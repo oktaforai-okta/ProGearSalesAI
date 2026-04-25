@@ -470,6 +470,7 @@ export default function Home() {
           <RawTokensCard
             exchanges={currentTokenExchanges}
             idTokenClaims={session?.idToken ? decodeJwtPayload(session.idToken) ?? undefined : undefined}
+            idTokenRaw={session?.idToken}
           />
 
           {/* Architecture Link */}
