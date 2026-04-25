@@ -140,18 +140,23 @@ class MultiAgentTokenExchange:
 
             logger.info(f"[{agent_type}] Step 1 SUCCESS: expires_in={id_jag_result.expires_in}s")
 
-            # Log ID-JAG token claims for debugging (deployed on Render)
+            # Decode and log ID-JAG token for debugging and UI display
+            id_jag_claims = {}
+            id_jag_token = id_jag_result.access_token
             try:
-                id_jag_claims = jwt.get_unverified_claims(id_jag_result.access_token)
-                logger.info(f"=== ID-JAG Token Claims [{agent_type}] ===")
+                id_jag_claims = jwt.get_unverified_claims(id_jag_token)
+                logger.info(f"=== ID-JAG Token [{agent_type.upper()}] ===")
                 logger.info(f"Subject (sub): {id_jag_claims.get('sub')}")
                 logger.info(f"Audience (aud): {id_jag_claims.get('aud')}")
                 logger.info(f"Issuer (iss): {id_jag_claims.get('iss')}")
                 logger.info(f"Scopes: {id_jag_claims.get('scp', id_jag_claims.get('scope', []))}")
-                logger.info(f"Vacation claim in ID-JAG: {id_jag_claims.get('Vacation', id_jag_claims.get('is_on_vacation', 'NOT PRESENT'))}")
-                logger.info(f"All ID-JAG claim keys: {list(id_jag_claims.keys())}")
-                # Full claims for debugging
-                logger.info(f"=== FULL ID-JAG TOKEN CLAIMS [{agent_type}] (DEBUG) ===")
+                logger.info(f"Vacation claim: {id_jag_claims.get('Vacation', id_jag_claims.get('is_on_vacation', 'NOT PRESENT'))}")
+                logger.info(f"All claim keys: {list(id_jag_claims.keys())}")
+                # Raw JWT for debugging
+                logger.info(f"=== RAW ID-JAG TOKEN [{agent_type.upper()}] (JWT) ===")
+                logger.info(f"{id_jag_token}")
+                # Full decoded claims for debugging
+                logger.info(f"=== DECODED ID-JAG TOKEN CLAIMS [{agent_type.upper()}] ===")
                 logger.info(json.dumps(id_jag_claims, indent=2, default=str))
             except Exception as decode_err:
                 logger.warning(f"[{agent_type}] Could not decode ID-JAG token: {decode_err}")
@@ -176,12 +181,17 @@ class MultiAgentTokenExchange:
             auth_token_claims = {}
             try:
                 auth_token_claims = jwt.get_unverified_claims(token_result.access_token)
-                logger.info(f"=== Auth Server Token Claims [{agent_type}] ===")
+                logger.info(f"=== Agent Access Token [{agent_type.upper()}] ===")
                 logger.info(f"Subject (sub): {auth_token_claims.get('sub')}")
+                logger.info(f"Audience (aud): {auth_token_claims.get('aud')}")
                 logger.info(f"Scopes: {auth_token_claims.get('scp', auth_token_claims.get('scope', []))}")
-                logger.info(f"All Auth Token claim keys: {list(auth_token_claims.keys())}")
-                # Full claims for debugging
-                logger.info(f"=== FULL AUTH SERVER TOKEN CLAIMS [{agent_type}] (DEBUG) ===")
+                logger.info(f"Vacation claim: {auth_token_claims.get('Vacation', 'not present')}")
+                logger.info(f"All claim keys: {list(auth_token_claims.keys())}")
+                # Raw JWT for debugging
+                logger.info(f"=== RAW ACCESS TOKEN [{agent_type.upper()}] (JWT) ===")
+                logger.info(f"{token_result.access_token}")
+                # Full decoded claims for debugging
+                logger.info(f"=== DECODED ACCESS TOKEN CLAIMS [{agent_type.upper()}] ===")
                 logger.info(json.dumps(auth_token_claims, indent=2, default=str))
             except Exception as decode_err:
                 logger.warning(f"[{agent_type}] Could not decode Auth Server token: {decode_err}")
@@ -205,7 +215,9 @@ class MultiAgentTokenExchange:
                 "audience": config.audience,
                 "demo_mode": False,
                 "exchanged_at": datetime.now().isoformat(),
-                "token_claims": auth_token_claims,  # Include decoded claims for UI display
+                "token_claims": auth_token_claims,  # Decoded access token claims for UI
+                "id_jag_token": id_jag_token,  # Raw ID-JAG token (intermediate)
+                "id_jag_claims": id_jag_claims,  # Decoded ID-JAG claims for UI
             }
 
         except Exception as e:

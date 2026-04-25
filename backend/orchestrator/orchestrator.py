@@ -525,7 +525,10 @@ Return ONLY the JSON object, no other text."""
                 "scopes": result.get("scopes", []),
                 "requested_scopes": requested_scopes,  # What was requested
                 "demo_mode": result.get("demo_mode", False),
-                "token_claims": result.get("token_claims"),  # Decoded JWT claims for display
+                "token_claims": result.get("token_claims"),  # Decoded access token claims
+                "access_token": result.get("access_token"),  # Raw access token JWT
+                "id_jag_token": result.get("id_jag_token"),  # Raw ID-JAG token (intermediate)
+                "id_jag_claims": result.get("id_jag_claims"),  # Decoded ID-JAG claims
             }
 
             if result.get("access_denied"):
