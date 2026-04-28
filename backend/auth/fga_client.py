@@ -1,44 +1,60 @@
 """
 Auth0 FGA Client for Agent Permission Gating
 
-Uses FGA API with contextual tuples for fine-grained authorization.
+Uses FGA API with full o4aa-fga-example model combining ReBAC + ABAC.
 This demonstrates "Okta + FGA Better Together":
-- Okta: Identity (ID-JAG), coarse-grained RBAC (group membership), Manager claim
-- FGA: Fine-grained, contextual authorization (runtime conditions via API)
+- Okta: Identity (ID-JAG), coarse-grained RBAC (group membership), claims (Manager, Vacation, Clearance)
+- FGA: Fine-grained ReBAC + ABAC (relationships, hierarchies, contextual conditions)
 
 Key Logic - Scope-Based FGA Check:
-- inventory:read  -> NO FGA check (read operations always allowed)
-- inventory:write -> FGA check (can_increase_inventory = manager but not on_vacation)
+- inventory:read  -> FGA check: can_view (active_manager)
+- inventory:write -> FGA check: can_update (active_manager + has_clearance)
 - inventory:alert -> NO FGA check (alert operations always allowed)
 
 This means:
-- User on vacation can VIEW inventory (read scope) ✓
-- User on vacation CANNOT MODIFY inventory (write scope) ✗
+- User on vacation CANNOT VIEW or UPDATE inventory (active_manager blocks both)
+- User with insufficient clearance can VIEW but CANNOT UPDATE high-sensitivity items
+- Users need both manager status AND adequate clearance to update items
 
-Dynamic Manager Tuple Management:
-1. Read "Manager" claim from Okta ID token
-2. If Manager=true, ensure manager tuple exists in FGA
-3. If Manager=false, delete manager tuple from FGA (if exists)
-4. Then run vacation check with contextual tuple
-
-Approach:
-1. Router determines scopes based on user intent (read vs write)
-2. Token exchange retrieves Auth Server token with Vacation claim
-3. ensure_manager_relationship() creates/deletes manager tuple based on Okta claim
-4. FGA check runs for inventory:write scope with vacation contextual tuple
-5. If FGA denies, user gets clear message about vacation status
-
-FGA Model:
+FGA Model (Store: ProGear New - 01KQ391VCMRKCD0G5XE92HVTQY):
   type user
+  type clearance_level
+    relations
+      define next_higher: [clearance_level]
+      define granted_to: [user]
+      define holder: granted_to or holder from next_higher
   type inventory_system
     relations
       define manager: [user]
       define on_vacation: [user]
-      define can_increase_inventory: manager but not on_vacation
+      define active_manager: manager but not on_vacation
+      define can_manage: active_manager
+  type inventory_item
+    relations
+      define parent: [inventory_system]
+      define required_clearance: [clearance_level]
+      define has_clearance: holder from required_clearance
+      define can_view: can_manage from parent
+      define can_update: has_clearance and can_manage from parent
 
-Okta Claims Used:
-- Manager (user.is_a_manager): Determines if manager tuple should exist in FGA
+Tuples:
+- Manager roles: Pre-seeded in FGA store (user:{email} -> manager -> inventory_system:warehouse)
+- Clearance grants: Pre-seeded (user:{email} -> granted_to -> clearance_level:N)
+- Vacation status: Passed as contextual tuple per request (NOT stored in FGA)
+
+Okta Claims Used (from Inventory Auth Server Access Token):
+- Manager (user.is_a_manager): User is a manager (tuple must be pre-seeded in FGA)
 - Vacation (user.is_on_vacation): Passed as contextual tuple at check time
+- Clearance (user.clearance_level): User's clearance level (tuple must be pre-seeded in FGA)
+
+Approach:
+1. Router determines scopes based on user intent (read vs write)
+2. Token exchange retrieves Auth Server token with Manager, Vacation, Clearance claims
+3. FGA check runs with:
+   - can_view for inventory:read
+   - can_update for inventory:write (checks clearance + active_manager)
+   - Vacation passed as contextual tuple if user is on vacation
+4. If FGA denies, user gets clear message about vacation or clearance
 """
 
 import os
@@ -58,7 +74,7 @@ FGA_STORE_ID = os.getenv("FGA_STORE_ID")
 FGA_MODEL_ID = os.getenv("FGA_MODEL_ID")
 FGA_CLIENT_ID = os.getenv("FGA_CLIENT_ID")
 FGA_CLIENT_SECRET = os.getenv("FGA_CLIENT_SECRET")
-FGA_API_TOKEN_ISSUER = os.getenv("FGA_API_TOKEN_ISSUER", "fga.us.auth0.com")
+FGA_API_TOKEN_ISSUER = os.getenv("FGA_API_TOKEN_ISSUER", "auth.fga.dev")
 FGA_API_AUDIENCE = os.getenv("FGA_API_AUDIENCE", "https://api.us1.fga.dev/")
 
 
@@ -121,21 +137,19 @@ def _get_fga_client() -> Optional[OpenFgaClient]:
 
 
 # ============================================================================
-# Manager Tuple Management Functions
+# Dynamic Tuple Management Functions
 # ============================================================================
 
 async def check_manager_tuple_exists(
     user_email: str,
-    resource_id: str = "main_db"
+    system_id: str = "warehouse"
 ) -> bool:
     """
     Check if manager tuple exists in FGA store for a user.
 
-    Uses FGA check API to verify if the user has the manager relation.
-
     Args:
         user_email: User's email/login from Okta
-        resource_id: The inventory resource ID (default: main_db)
+        system_id: The inventory system ID (default: warehouse)
 
     Returns:
         True if tuple exists, False otherwise
@@ -146,7 +160,7 @@ async def check_manager_tuple_exists(
         return False
 
     fga_user = f"user:{user_email}"
-    fga_object = f"inventory_system:{resource_id}"
+    fga_object = f"inventory_system:{system_id}"
 
     try:
         # Use check API to verify if the manager relation exists
@@ -168,16 +182,16 @@ async def check_manager_tuple_exists(
 
 async def write_manager_tuple(
     user_email: str,
-    resource_id: str = "main_db"
+    system_id: str = "warehouse"
 ) -> bool:
     """
     Write manager tuple to FGA store.
 
-    Creates: user:{email} manager inventory_system:{resource_id}
+    Creates: user:{email} manager inventory_system:{system_id}
 
     Args:
         user_email: User's email/login from Okta
-        resource_id: The inventory resource ID (default: main_db)
+        system_id: The inventory system ID (default: warehouse)
 
     Returns:
         True if successful, False otherwise
@@ -188,7 +202,7 @@ async def write_manager_tuple(
         return False
 
     fga_user = f"user:{user_email}"
-    fga_object = f"inventory_system:{resource_id}"
+    fga_object = f"inventory_system:{system_id}"
 
     try:
         write_request = ClientWriteRequest(
@@ -215,16 +229,16 @@ async def write_manager_tuple(
 
 async def delete_manager_tuple(
     user_email: str,
-    resource_id: str = "main_db"
+    system_id: str = "warehouse"
 ) -> bool:
     """
     Delete manager tuple from FGA store.
 
-    Removes: user:{email} manager inventory_system:{resource_id}
+    Removes: user:{email} manager inventory_system:{system_id}
 
     Args:
         user_email: User's email/login from Okta
-        resource_id: The inventory resource ID (default: main_db)
+        system_id: The inventory system ID (default: warehouse)
 
     Returns:
         True if successful (or tuple didn't exist), False on error
@@ -235,7 +249,7 @@ async def delete_manager_tuple(
         return False
 
     fga_user = f"user:{user_email}"
-    fga_object = f"inventory_system:{resource_id}"
+    fga_object = f"inventory_system:{system_id}"
 
     try:
         write_request = ClientWriteRequest(
@@ -263,7 +277,7 @@ async def delete_manager_tuple(
 async def ensure_manager_relationship(
     user_email: str,
     is_manager: bool,
-    resource_id: str = "main_db"
+    system_id: str = "warehouse"
 ) -> dict:
     """
     Ensure manager relationship in FGA matches the Okta Manager claim.
@@ -274,8 +288,8 @@ async def ensure_manager_relationship(
 
     Args:
         user_email: User's email/login from Okta
-        is_manager: Value of Manager claim from Okta ID token
-        resource_id: The inventory resource ID (default: main_db)
+        is_manager: Value of Manager claim from Okta token
+        system_id: The inventory system ID (default: warehouse)
 
     Returns:
         Dict with action taken and success status
@@ -288,29 +302,222 @@ async def ensure_manager_relationship(
     }
 
     # Check current state in FGA
-    tuple_exists = await check_manager_tuple_exists(user_email, resource_id)
+    tuple_exists = await check_manager_tuple_exists(user_email, system_id)
     result["tuple_existed"] = tuple_exists
 
     if is_manager and not tuple_exists:
         # Manager claim is true but tuple doesn't exist -> create it
-        success = await write_manager_tuple(user_email, resource_id)
+        success = await write_manager_tuple(user_email, system_id)
         result["action"] = "created"
         result["success"] = success
-        logger.info(f"FGA ensure_manager: Created tuple for {user_email} (Manager claim=true)")
+        logger.info(f"FGA: Manager tuple created for {user_email} (Manager claim=true)")
 
     elif not is_manager and tuple_exists:
         # Manager claim is false but tuple exists -> delete it
-        success = await delete_manager_tuple(user_email, resource_id)
+        success = await delete_manager_tuple(user_email, system_id)
         result["action"] = "deleted"
         result["success"] = success
-        logger.info(f"FGA ensure_manager: Deleted tuple for {user_email} (Manager claim=false)")
+        logger.info(f"FGA: Manager tuple deleted for {user_email} (Manager claim=false)")
 
     else:
         # No action needed - state is already correct
-        if is_manager and tuple_exists:
-            logger.info(f"FGA ensure_manager: Tuple already exists for {user_email} (no action)")
-        else:
-            logger.info(f"FGA ensure_manager: No tuple and not a manager for {user_email} (no action)")
+        logger.info(f"FGA: Manager tuple state correct for {user_email} (no action)")
+
+    return result
+
+
+async def check_clearance_tuple_exists(
+    user_email: str,
+    clearance_level: int
+) -> bool:
+    """
+    Check if clearance tuple exists in FGA store for a user at specific level.
+
+    Args:
+        user_email: User's email/login from Okta
+        clearance_level: The clearance level to check
+
+    Returns:
+        True if tuple exists, False otherwise
+    """
+    fga_client = _get_fga_client()
+    if not fga_client:
+        return False
+
+    fga_user = f"user:{user_email}"
+    fga_object = f"clearance_level:{clearance_level}"
+
+    try:
+        check_request = ClientCheckRequest(
+            user=fga_user,
+            relation="granted_to",
+            object=fga_object
+        )
+        response = await fga_client.check(check_request)
+        exists = response.allowed
+        logger.info(f"FGA clearance tuple check: {fga_user} -> granted_to -> {fga_object} exists={exists}")
+        return exists
+
+    except Exception as e:
+        logger.error(f"FGA clearance tuple check failed: {e}")
+        return False
+
+
+async def write_clearance_tuple(
+    user_email: str,
+    clearance_level: int
+) -> bool:
+    """
+    Write clearance tuple to FGA store.
+
+    Creates: user:{email} granted_to clearance_level:{level}
+
+    Args:
+        user_email: User's email/login from Okta
+        clearance_level: The clearance level to grant
+
+    Returns:
+        True if successful, False otherwise
+    """
+    fga_client = _get_fga_client()
+    if not fga_client:
+        logger.warning("FGA client not available - cannot write clearance tuple")
+        return False
+
+    fga_user = f"user:{user_email}"
+    fga_object = f"clearance_level:{clearance_level}"
+
+    try:
+        write_request = ClientWriteRequest(
+            writes=[
+                ClientTuple(
+                    user=fga_user,
+                    relation="granted_to",
+                    object=fga_object
+                )
+            ]
+        )
+        await fga_client.write(write_request)
+        logger.info(f"FGA: Created clearance tuple: {fga_user} -> granted_to -> {fga_object}")
+        return True
+
+    except Exception as e:
+        error_str = str(e).lower()
+        if "already exists" in error_str:
+            logger.info(f"FGA: Clearance tuple already exists for {user_email} at level {clearance_level}")
+            return True
+        logger.error(f"FGA write clearance tuple failed: {e}")
+        return False
+
+
+async def delete_clearance_tuple(
+    user_email: str,
+    clearance_level: int
+) -> bool:
+    """
+    Delete clearance tuple from FGA store.
+
+    Removes: user:{email} granted_to clearance_level:{level}
+
+    Args:
+        user_email: User's email/login from Okta
+        clearance_level: The clearance level to remove
+
+    Returns:
+        True if successful, False on error
+    """
+    fga_client = _get_fga_client()
+    if not fga_client:
+        return False
+
+    fga_user = f"user:{user_email}"
+    fga_object = f"clearance_level:{clearance_level}"
+
+    try:
+        write_request = ClientWriteRequest(
+            deletes=[
+                ClientTuple(
+                    user=fga_user,
+                    relation="granted_to",
+                    object=fga_object
+                )
+            ]
+        )
+        await fga_client.write(write_request)
+        logger.info(f"FGA: Deleted clearance tuple: {fga_user} -> granted_to -> {fga_object}")
+        return True
+
+    except Exception as e:
+        error_str = str(e).lower()
+        if "does not exist" in error_str or "not found" in error_str:
+            logger.info(f"FGA: Clearance tuple didn't exist for {user_email} at level {clearance_level}")
+            return True
+        logger.error(f"FGA delete clearance tuple failed: {e}")
+        return False
+
+
+async def ensure_clearance_tuple(
+    user_email: str,
+    clearance_level: int
+) -> dict:
+    """
+    Ensure ONLY the current clearance tuple exists in FGA for the user.
+
+    IMPORTANT: This function enforces single-clearance-per-user by:
+    1. Deleting ALL clearance tuples (levels 1-10) except the current level
+    2. Creating the current level tuple if it doesn't exist
+
+    This prevents tuple accumulation where a user could have multiple
+    clearance levels (e.g., 2, 5, 7) simultaneously in FGA.
+
+    Args:
+        user_email: User's email/login from Okta
+        clearance_level: Value of Clearance claim from Okta token (1-10)
+
+    Returns:
+        Dict with action taken and success status
+    """
+    result = {
+        "user": user_email,
+        "clearance_level": clearance_level,
+        "action": "none",
+        "success": True,
+        "deleted_levels": [],
+    }
+
+    # If no clearance, delete all clearance tuples for this user
+    if clearance_level <= 0:
+        logger.info(f"FGA: No clearance level for {user_email} - removing all clearance tuples")
+        for level in range(1, 11):
+            deleted = await delete_clearance_tuple(user_email, level)
+            if deleted:
+                result["deleted_levels"].append(level)
+        result["action"] = "cleared_all"
+        return result
+
+    # Delete all OTHER clearance levels (1-10 except current)
+    # This ensures only ONE clearance tuple exists per user
+    for level in range(1, 11):
+        if level != clearance_level:
+            # Try to delete - will succeed if exists or already doesn't exist
+            deleted = await delete_clearance_tuple(user_email, level)
+            # Note: delete_clearance_tuple returns True even if tuple didn't exist
+
+    logger.info(f"FGA: Cleaned up other clearance levels for {user_email} (keeping only level {clearance_level})")
+
+    # Check if tuple exists at the current level
+    tuple_exists = await check_clearance_tuple_exists(user_email, clearance_level)
+    result["tuple_existed"] = tuple_exists
+
+    if not tuple_exists:
+        # Clearance tuple doesn't exist -> create it
+        success = await write_clearance_tuple(user_email, clearance_level)
+        result["action"] = "created"
+        result["success"] = success
+        logger.info(f"FGA: Clearance tuple created for {user_email} at level {clearance_level}")
+    else:
+        result["action"] = "verified"
+        logger.info(f"FGA: Clearance tuple already exists for {user_email} at level {clearance_level}")
 
     return result
 
@@ -322,32 +529,36 @@ async def ensure_manager_relationship(
 async def check_inventory_access_via_fga(
     user_email: str,
     is_on_vacation: bool,
-    resource_id: str = "main_db",
-    relation: str = "can_increase_inventory",
+    item_id: str = "widget-a",
+    relation: str = "can_view",
+    system_id: str = "warehouse",
 ) -> FGACheckResult:
     """
-    Check inventory access using FGA API with contextual tuples.
+    Check inventory access using FGA API with new o4aa-fga-example model.
 
     Args:
         user_email: User's email/login from Okta (e.g., bob.manager@atko.email)
         is_on_vacation: From Okta 'Vacation' claim (user.is_on_vacation)
-        resource_id: The inventory resource ID (default: main_db)
-        relation: FGA relation to check (default: can_increase_inventory)
+        item_id: The inventory item ID (default: widget-a)
+        relation: FGA relation to check (can_view or can_update)
+        system_id: The inventory system ID (default: warehouse)
 
     Returns:
         FGACheckResult with allowed status and explanation
     """
     fga_user = f"user:{user_email}"
-    fga_object = f"inventory_system:{resource_id}"
+    fga_object = f"inventory_item:{item_id}"
+    fga_system = f"inventory_system:{system_id}"
 
     # Build contextual tuples - only add on_vacation if user is on vacation
+    # Vacation is checked at inventory_system level (not item level)
     contextual_tuples = []
     if is_on_vacation:
         contextual_tuples.append(
             ClientTuple(
                 user=fga_user,
                 relation="on_vacation",
-                object=fga_object
+                object=fga_system  # vacation applies to system, not item
             )
         )
 
@@ -390,9 +601,11 @@ async def check_inventory_access_via_fga(
             reason = f"Access granted: {user_email} has {relation} on {fga_object}"
         else:
             if is_on_vacation:
-                reason = f"Access denied: {user_email} is on vacation (on_vacation tuple blocked access)"
+                reason = f"Access denied: {user_email} is on vacation (active_manager exclusion)"
+            elif relation == "can_update":
+                reason = f"Access denied: {user_email} lacks clearance or manager status for {fga_object}"
             else:
-                reason = f"Access denied: {user_email} does not have {relation} on {fga_object} (not a manager in FGA)"
+                reason = f"Access denied: {user_email} does not have {relation} on {fga_object}"
 
         logger.info(
             f"FGA API check: {fga_user} {relation} {fga_object} "
@@ -407,7 +620,7 @@ async def check_inventory_access_via_fga(
             context=context,
             reason=reason,
             contextual_tuples=[
-                {"user": fga_user, "relation": "on_vacation", "object": fga_object}
+                {"user": fga_user, "relation": "on_vacation", "object": fga_system}
             ] if is_on_vacation else [],
         )
 
@@ -429,22 +642,25 @@ async def check_agent_access(
     agent_type: str,
     scopes: list = None,
     is_on_vacation: bool = False,
+    item_id: str = "widget-a",
 ) -> FGACheckResult:
     """
-    Check if a user can access a specific agent using FGA API.
+    Check if a user can access a specific agent using FGA API with new model.
 
-    Currently only inventory_system has FGA checks.
+    Currently only inventory has FGA checks.
     Other agents pass through (return allowed=True).
 
-    For inventory:
-    - Write scopes (inventory:write) -> checks "can_increase_inventory" (manager + not on vacation)
-    - Read scopes (inventory:read, inventory:alert) -> pass through (no FGA check needed)
+    For inventory with new model:
+    - inventory:read -> checks "can_view" on inventory_item (active_manager)
+    - inventory:write -> checks "can_update" on inventory_item (active_manager + has_clearance)
+    - inventory:alert -> pass through (no FGA check)
 
     Args:
         user_email: User's email/login from Okta (e.g., "bob.manager@atko.email")
         agent_type: Agent type (sales, inventory, customer, pricing)
-        scopes: Requested scopes (used to determine if FGA check is needed)
+        scopes: Requested scopes (used to determine which permission to check)
         is_on_vacation: From Okta token claim (passed as contextual tuple)
+        item_id: The inventory item to check (default: widget-a)
 
     Returns:
         FGACheckResult with allowed status and explanation
@@ -452,7 +668,7 @@ async def check_agent_access(
     scopes = scopes or []
 
     # Only inventory has FGA checks - others pass through
-    if agent_type not in AGENT_TO_FGA_OBJECT:
+    if agent_type != "inventory":
         return FGACheckResult(
             allowed=True,
             relation="n/a",
@@ -463,24 +679,33 @@ async def check_agent_access(
             contextual_tuples=[],
         )
 
-    # FGA check only applies to WRITE operations on inventory
-    # Read operations (inventory:read, inventory:alert) pass through - no FGA check
-    if "inventory:write" not in scopes:
+    # Alert operations pass through - no FGA check
+    if "inventory:alert" in scopes and "inventory:read" not in scopes and "inventory:write" not in scopes:
         return FGACheckResult(
             allowed=True,
             relation="n/a",
-            object=AGENT_TO_FGA_OBJECT[agent_type],
+            object=f"inventory_system:warehouse",
             user=f"user:{user_email}",
             context={"is_on_vacation": is_on_vacation, "scopes": scopes},
-            reason=f"Read-only operation - FGA check not required (scopes: {', '.join(scopes)})",
+            reason=f"Alert operation - no FGA check required",
             contextual_tuples=[],
         )
 
-    # Write operation - check can_increase_inventory (manager + not on vacation)
+    # Determine FGA permission based on scope
+    # inventory:write -> can_update (requires active_manager + has_clearance)
+    # inventory:read -> can_view (requires active_manager only)
+    if "inventory:write" in scopes:
+        relation = "can_update"
+    else:
+        relation = "can_view"
+
+    # Perform FGA check on inventory_item
     return await check_inventory_access_via_fga(
         user_email=user_email,
         is_on_vacation=is_on_vacation,
-        relation="can_increase_inventory",
+        item_id=item_id,
+        relation=relation,
+        system_id="warehouse",
     )
 
 
@@ -496,35 +721,48 @@ def is_fga_configured() -> bool:
 def get_fga_model_info() -> Dict[str, Any]:
     """Get FGA model information for UI display."""
     return {
-        "mode": "contextual-tuples",
-        "description": "FGA API check with contextual tuples from Okta claims",
+        "mode": "rebac-abac",
+        "description": "Full o4aa-fga-example model with clearance hierarchy and delegation",
+        "store_name": "ProGear New",
         "api_url": FGA_API_URL,
         "store_id": FGA_STORE_ID,
-        "model_description": {
-            "type": "inventory_system",
-            "relations": {
-                "manager": "Pre-seeded tuple: user has manager role in FGA",
-                "on_vacation": "Contextual tuple: passed dynamically from Okta claim",
-                "can_increase_inventory": "manager but not on_vacation"
+        "model_types": {
+            "user": "Human principals (managers)",
+            "clearance_level": "Hierarchical clearance tiers (1-10)",
+            "inventory_system": "Top-level resource (warehouse)",
+            "inventory_item": "Items with parent system and required clearance"
+        },
+        "key_relations": {
+            "active_manager": "manager but not on_vacation",
+            "has_clearance": "holder from required_clearance (hierarchy walk)",
+            "can_view": "can_manage from parent (active_manager)",
+            "can_update": "has_clearance and can_manage from parent"
+        },
+        "scope_to_permission": {
+            "inventory:read": {
+                "fga_permission": "can_view",
+                "requirements": "active_manager (not on vacation)"
             },
-            "scope_based_check": {
-                "description": "FGA check only runs for write operations",
-                "inventory:read": "No FGA check - read always allowed",
-                "inventory:write": "FGA check - can_increase_inventory (manager + not on vacation)",
-                "inventory:alert": "No FGA check - alerts always allowed",
+            "inventory:write": {
+                "fga_permission": "can_update",
+                "requirements": "active_manager + has_clearance"
             },
-            "contextual_tuple_logic": {
-                "description": "If is_on_vacation=true AND scope=inventory:write, pass on_vacation tuple to FGA",
-                "tuple_format": {
-                    "user": "user:{userId}",
-                    "relation": "on_vacation",
-                    "object": "inventory_system:main_db"
-                }
+            "inventory:alert": {
+                "fga_permission": "n/a",
+                "requirements": "No FGA check"
             }
         },
+        "tuples_seeded": {
+            "manager": "Pre-seeded in FGA store",
+            "clearance_grants": "Pre-seeded (user -> granted_to -> clearance_level:N)",
+            "clearance_hierarchy": "Pre-seeded (level chains)",
+            "inventory_hierarchy": "Pre-seeded (system -> parent -> item)",
+            "vacation": "Contextual tuple per request (NOT stored)"
+        },
         "claims_used": [
-            {"name": "sub", "description": "User ID for FGA user identifier"},
-            {"name": "Vacation", "okta_attribute": "user.is_on_vacation", "description": "Passed as contextual tuple for write ops"},
+            {"name": "Manager", "okta_attribute": "user.is_a_manager", "description": "Manager tuple must be pre-seeded"},
+            {"name": "Vacation", "okta_attribute": "user.is_on_vacation", "description": "Passed as contextual tuple"},
+            {"name": "Clearance", "okta_attribute": "user.clearance_level", "description": "Clearance grant tuple must be pre-seeded"}
         ]
     }
 

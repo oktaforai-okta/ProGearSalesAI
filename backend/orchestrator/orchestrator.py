@@ -30,7 +30,7 @@ from auth.multi_agent_auth import (
     AGENT_SALES, AGENT_INVENTORY, AGENT_CUSTOMER, AGENT_PRICING
 )
 from auth.agent_config import get_agent_config, DEMO_AGENTS
-from auth.fga_client import check_agent_access, is_fga_configured, FGACheckResult, ensure_manager_relationship
+from auth.fga_client import check_agent_access, is_fga_configured, FGACheckResult, ensure_manager_relationship, ensure_clearance_tuple
 
 # Import agent classes
 from agents import SalesAgent, InventoryAgent, PricingAgent, CustomerAgent
@@ -345,10 +345,11 @@ Return ONLY the JSON object, no other text."""
             "status": "processing"
         })
 
-        # Extract Manager and Vacation claims from Auth Server token
+        # Extract Manager, Vacation, and Clearance claims from Auth Server token
         # (Org Auth Server doesn't support custom claims, so we use Custom Auth Server token)
         is_manager = False
         is_on_vacation = False
+        clearance_level = 0
 
         inventory_result = agent_results.get(AGENT_INVENTORY, {})
         if inventory_result.get("success") and inventory_result.get("access_token"):
@@ -368,6 +369,15 @@ Return ONLY the JSON object, no other text."""
                     is_on_vacation = bool(vacation_claim)
                     logger.info(f"Extracted Vacation claim from Auth Server token: {vacation_claim}")
 
+                # Extract Clearance claim from Auth Server token
+                clearance_claim = auth_token_claims.get("Clearance", auth_token_claims.get("clearance_level"))
+                if clearance_claim is not None:
+                    try:
+                        clearance_level = int(clearance_claim)
+                        logger.info(f"Extracted Clearance claim from Auth Server token: {clearance_claim}")
+                    except (ValueError, TypeError):
+                        logger.warning(f"Invalid Clearance claim value: {clearance_claim}")
+
                 logger.info(f"Auth Server token claims for FGA: {list(auth_token_claims.keys())}")
             except Exception as e:
                 logger.warning(f"Could not extract claims from Auth Server token: {e}")
@@ -377,32 +387,48 @@ Return ONLY the JSON object, no other text."""
             is_manager = self.user_info.get("is_manager", self.user_info.get("Manager", False))
         if not is_on_vacation:
             is_on_vacation = self.user_info.get("is_on_vacation", self.user_info.get("Vacation", False))
+        if clearance_level == 0:
+            clearance_level = int(self.user_info.get("clearance_level", self.user_info.get("Clearance", 0)))
 
-        logger.info(f"FGA check for {user_email}: is_manager={is_manager}, is_on_vacation={is_on_vacation}")
+        logger.info(f"FGA check for {user_email}: is_manager={is_manager}, is_on_vacation={is_on_vacation}, clearance={clearance_level}")
 
-        # Step 1: Ensure manager relationship in FGA based on Manager claim
-        # This dynamically creates/deletes the manager tuple
-        manager_result = await ensure_manager_relationship(user_email, is_manager)
-        logger.info(f"FGA manager tuple management: user={user_email}, is_manager={is_manager}, action={manager_result.get('action')}")
+        # Step 1: Ensure manager tuple in FGA matches Manager claim
+        manager_result = await ensure_manager_relationship(user_email, is_manager, system_id="warehouse")
+        logger.info(f"FGA: Manager tuple management result: {manager_result}")
 
-        # Step 2: Check each agent against FGA
+        # Step 2: Ensure clearance tuple in FGA matches Clearance claim
+        if clearance_level > 0:
+            clearance_result = await ensure_clearance_tuple(user_email, clearance_level)
+            logger.info(f"FGA: Clearance tuple management result: {clearance_result}")
+
+        # Step 3: Check each agent against FGA with vacation as contextual tuple
         allowed_agents = []
         fga_checks = []
 
         for agent_type in agents:
             scopes = state["agent_scopes"].get(agent_type, [])
 
-            # Run FGA check using FGA API with contextual tuples
-            # - user_email: from token's email claim (human-readable)
+            # Run FGA check using FGA API with new model
+            # - user_email: from token's email claim
             # - is_on_vacation: passed as contextual tuple if true
+            # - item_id: default to "widget-a" (general inventory item)
+            # Note: In a real app, you'd map the user's request to specific items
             result: FGACheckResult = await check_agent_access(
                 user_email=user_email,
                 agent_type=agent_type,
                 scopes=scopes,
                 is_on_vacation=is_on_vacation,
+                item_id="widget-a",  # Default item for demo
             )
 
-            # Record the FGA check for UI visibility
+            # Determine required clearance for the item (for UI display)
+            item_id = "widget-a"  # Default item
+            item_required_clearance = 3  # widget-a requires clearance 3
+            if "classified" in state["user_message"].lower():
+                item_id = "classified-part"
+                item_required_clearance = 7  # classified-part requires clearance 7
+
+            # Record the FGA check for UI visibility with real values
             fga_check_record = {
                 "agent": agent_type,
                 "allowed": result.allowed,
@@ -413,6 +439,22 @@ Return ONLY the JSON object, no other text."""
                 "reason": result.reason,
                 "requested_scopes": scopes,
                 "contextual_tuples": result.contextual_tuples or [],
+                # Real values from Okta claims
+                "user_claims": {
+                    "is_manager": is_manager,
+                    "is_on_vacation": is_on_vacation,
+                    "clearance_level": clearance_level,
+                },
+                # Item info for clearance comparison
+                "item_info": {
+                    "item_id": item_id,
+                    "required_clearance": item_required_clearance,
+                },
+                # Tuple summary for display
+                "stored_tuples": {
+                    "manager": f"inventory_system:warehouse" if is_manager else None,
+                    "clearance": f"clearance_level:{clearance_level}" if clearance_level > 0 else None,
+                },
             }
             fga_checks.append(fga_check_record)
 

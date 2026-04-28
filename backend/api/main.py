@@ -176,18 +176,26 @@ async def chat(
             user_claims = await okta_auth.validate_token(user_token)
 
             # Extract claims from Okta ID token
-            # Manager claim: "Manager" (maps to user.is_a_manager) - for FGA tuple management
-            # Vacation claim: "Vacation" (maps to user.is_on_vacation) - for contextual tuple
+            # Note: Custom claims (Manager, Vacation, Clearance) come from Custom Auth Server, not ID token
+            # ID token is used for initial authentication only
             is_manager = user_claims.get("Manager", user_claims.get("is_a_manager", False))
             is_on_vacation = user_claims.get("Vacation", user_claims.get("is_on_vacation", False))
+            clearance_level = 0
+            clearance_claim = user_claims.get("Clearance", user_claims.get("clearance_level"))
+            if clearance_claim is not None:
+                try:
+                    clearance_level = int(clearance_claim)
+                except (ValueError, TypeError):
+                    logger.warning(f"Invalid Clearance claim in ID token: {clearance_claim}")
 
             user_info = {
                 "sub": user_claims.get("sub"),
                 "email": user_claims.get("email"),
                 "name": user_claims.get("name"),
                 "groups": user_claims.get("groups", []),
-                "is_manager": is_manager,  # For FGA manager tuple management
-                "is_on_vacation": is_on_vacation,  # For FGA vacation contextual tuple
+                "is_manager": is_manager,  # Fallback from ID token
+                "is_on_vacation": is_on_vacation,  # Fallback from ID token
+                "clearance_level": clearance_level,  # Fallback from ID token
             }
 
             # Log ID token for debugging (deployed on Render)
@@ -199,6 +207,8 @@ async def chat(
             logger.info(f"Resolved is_manager: {is_manager}")
             logger.info(f"Vacation claim (raw): {user_claims.get('Vacation')} | is_on_vacation: {user_claims.get('is_on_vacation')}")
             logger.info(f"Resolved is_on_vacation: {is_on_vacation}")
+            logger.info(f"Clearance claim (raw): {user_claims.get('Clearance')} | clearance_level: {user_claims.get('clearance_level')}")
+            logger.info(f"Resolved clearance_level: {clearance_level}")
             logger.info(f"All claims keys: {list(user_claims.keys())}")
             # Raw JWT for debugging
             logger.info(f"=== RAW ID TOKEN (JWT) ===")
@@ -209,9 +219,9 @@ async def chat(
             logger.info(json.dumps(user_claims, indent=2, default=str))
         except Exception as e:
             logger.warning(f"Token validation failed: {e}")
-            user_info = {"email": "anonymous", "groups": [], "is_manager": False, "is_on_vacation": False}
+            user_info = {"email": "anonymous", "groups": [], "is_manager": False, "is_on_vacation": False, "clearance_level": 0}
     else:
-        user_info = {"email": "anonymous", "groups": [], "is_manager": False, "is_on_vacation": False}
+        user_info = {"email": "anonymous", "groups": [], "is_manager": False, "is_on_vacation": False, "clearance_level": 0}
 
     # Create orchestrator and process request
     try:
