@@ -30,7 +30,7 @@ from auth.multi_agent_auth import (
     AGENT_SALES, AGENT_INVENTORY, AGENT_CUSTOMER, AGENT_PRICING
 )
 from auth.agent_config import get_agent_config, DEMO_AGENTS
-from auth.fga_client import check_agent_access, is_fga_configured, FGACheckResult, ensure_manager_relationship, ensure_clearance_tuple
+from auth.fga_client import check_agent_access, is_fga_configured, FGACheckResult, ensure_manager_relationship, ensure_clearance_tuple, ensure_viewer_relationship
 
 # Import agent classes
 from agents import SalesAgent, InventoryAgent, PricingAgent, CustomerAgent
@@ -396,12 +396,18 @@ Return ONLY the JSON object, no other text."""
         manager_result = await ensure_manager_relationship(user_email, is_manager, system_id="warehouse")
         logger.info(f"FGA: Manager tuple management result: {manager_result}")
 
-        # Step 2: Ensure clearance tuple in FGA matches Clearance claim
+        # Step 2: Ensure viewer tuple for non-managers who need inventory read access
+        # Viewer = non-manager who has inventory agent access (can read but not manage)
+        is_viewer = not is_manager and AGENT_INVENTORY in agents
+        viewer_result = await ensure_viewer_relationship(user_email, is_viewer, system_id="warehouse")
+        logger.info(f"FGA: Viewer tuple management result: {viewer_result}")
+
+        # Step 3: Ensure clearance tuple in FGA matches Clearance claim
         if clearance_level > 0:
             clearance_result = await ensure_clearance_tuple(user_email, clearance_level)
             logger.info(f"FGA: Clearance tuple management result: {clearance_result}")
 
-        # Step 3: Check each agent against FGA with vacation as contextual tuple
+        # Step 4: Check each agent against FGA with vacation as contextual tuple
         allowed_agents = []
         fga_checks = []
 

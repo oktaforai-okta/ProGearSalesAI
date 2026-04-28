@@ -326,6 +326,195 @@ async def ensure_manager_relationship(
     return result
 
 
+# ============================================================================
+# Viewer Tuple Management Functions
+# ============================================================================
+
+async def check_viewer_tuple_exists(
+    user_email: str,
+    system_id: str = "warehouse"
+) -> bool:
+    """
+    Check if viewer tuple exists in FGA store for a user.
+
+    Args:
+        user_email: User's email/login from Okta
+        system_id: The inventory system ID (default: warehouse)
+
+    Returns:
+        True if tuple exists, False otherwise
+    """
+    fga_client = _get_fga_client()
+    if not fga_client:
+        logger.warning("FGA client not available - cannot check viewer tuple")
+        return False
+
+    fga_user = f"user:{user_email}"
+    fga_object = f"inventory_system:{system_id}"
+
+    try:
+        check_request = ClientCheckRequest(
+            user=fga_user,
+            relation="viewer",
+            object=fga_object
+        )
+        response = await fga_client.check(check_request)
+
+        exists = response.allowed
+        logger.info(f"FGA viewer tuple check: {fga_user} -> viewer -> {fga_object} exists={exists}")
+        return exists
+
+    except Exception as e:
+        logger.error(f"FGA viewer tuple check failed: {e}")
+        return False
+
+
+async def write_viewer_tuple(
+    user_email: str,
+    system_id: str = "warehouse"
+) -> bool:
+    """
+    Write viewer tuple to FGA store.
+
+    Creates: user:{email} viewer inventory_system:{system_id}
+
+    Args:
+        user_email: User's email/login from Okta
+        system_id: The inventory system ID (default: warehouse)
+
+    Returns:
+        True if successful, False otherwise
+    """
+    fga_client = _get_fga_client()
+    if not fga_client:
+        logger.warning("FGA client not available - cannot write viewer tuple")
+        return False
+
+    fga_user = f"user:{user_email}"
+    fga_object = f"inventory_system:{system_id}"
+
+    try:
+        write_request = ClientWriteRequest(
+            writes=[
+                ClientTuple(
+                    user=fga_user,
+                    relation="viewer",
+                    object=fga_object
+                )
+            ]
+        )
+        await fga_client.write(write_request)
+        logger.info(f"FGA: Created viewer tuple: {fga_user} -> viewer -> {fga_object}")
+        return True
+
+    except Exception as e:
+        error_str = str(e).lower()
+        if "already exists" in error_str:
+            logger.info(f"FGA: Viewer tuple already exists for {user_email}")
+            return True
+        logger.error(f"FGA write viewer tuple failed: {e}")
+        return False
+
+
+async def delete_viewer_tuple(
+    user_email: str,
+    system_id: str = "warehouse"
+) -> bool:
+    """
+    Delete viewer tuple from FGA store.
+
+    Removes: user:{email} viewer inventory_system:{system_id}
+
+    Args:
+        user_email: User's email/login from Okta
+        system_id: The inventory system ID (default: warehouse)
+
+    Returns:
+        True if successful (or tuple didn't exist), False on error
+    """
+    fga_client = _get_fga_client()
+    if not fga_client:
+        logger.warning("FGA client not available - cannot delete viewer tuple")
+        return False
+
+    fga_user = f"user:{user_email}"
+    fga_object = f"inventory_system:{system_id}"
+
+    try:
+        write_request = ClientWriteRequest(
+            deletes=[
+                ClientTuple(
+                    user=fga_user,
+                    relation="viewer",
+                    object=fga_object
+                )
+            ]
+        )
+        await fga_client.write(write_request)
+        logger.info(f"FGA: Deleted viewer tuple: {fga_user} -> viewer -> {fga_object}")
+        return True
+
+    except Exception as e:
+        error_str = str(e).lower()
+        if "does not exist" in error_str or "not found" in error_str or "cannot delete" in error_str:
+            logger.info(f"FGA: Viewer tuple didn't exist for {user_email} (nothing to delete)")
+            return True
+        logger.error(f"FGA delete viewer tuple failed: {e}")
+        return False
+
+
+async def ensure_viewer_relationship(
+    user_email: str,
+    is_viewer: bool,
+    system_id: str = "warehouse"
+) -> dict:
+    """
+    Ensure viewer relationship in FGA for non-manager users who need read access.
+
+    - If is_viewer=True and tuple doesn't exist -> create it
+    - If is_viewer=False and tuple exists -> delete it
+    - Otherwise, no action needed
+
+    Args:
+        user_email: User's email/login from Okta
+        is_viewer: Whether user should have viewer access
+        system_id: The inventory system ID (default: warehouse)
+
+    Returns:
+        Dict with action taken and success status
+    """
+    result = {
+        "user": user_email,
+        "is_viewer": is_viewer,
+        "action": "none",
+        "success": True,
+    }
+
+    # Check current state in FGA
+    tuple_exists = await check_viewer_tuple_exists(user_email, system_id)
+    result["tuple_existed"] = tuple_exists
+
+    if is_viewer and not tuple_exists:
+        # Should be viewer but tuple doesn't exist -> create it
+        success = await write_viewer_tuple(user_email, system_id)
+        result["action"] = "created"
+        result["success"] = success
+        logger.info(f"FGA: Viewer tuple created for {user_email}")
+
+    elif not is_viewer and tuple_exists:
+        # Should not be viewer but tuple exists -> delete it
+        success = await delete_viewer_tuple(user_email, system_id)
+        result["action"] = "deleted"
+        result["success"] = success
+        logger.info(f"FGA: Viewer tuple deleted for {user_email}")
+
+    else:
+        # No action needed - state is already correct
+        logger.info(f"FGA: Viewer tuple state correct for {user_email} (no action)")
+
+    return result
+
+
 async def check_clearance_tuple_exists(
     user_email: str,
     clearance_level: int
@@ -722,26 +911,29 @@ def get_fga_model_info() -> Dict[str, Any]:
     """Get FGA model information for UI display."""
     return {
         "mode": "rebac-abac",
-        "description": "Full o4aa-fga-example model with clearance hierarchy and delegation",
+        "description": "Full o4aa-fga-example model with clearance hierarchy, viewer role, and delegation",
         "store_name": "ProGear New",
         "api_url": FGA_API_URL,
         "store_id": FGA_STORE_ID,
+        "model_id": FGA_MODEL_ID,
         "model_types": {
-            "user": "Human principals (managers)",
+            "user": "Human principals (managers, viewers)",
             "clearance_level": "Hierarchical clearance tiers (1-10)",
-            "inventory_system": "Top-level resource (warehouse)",
+            "inventory_system": "Top-level resource (warehouse) with manager and viewer roles",
             "inventory_item": "Items with parent system and required clearance"
         },
         "key_relations": {
             "active_manager": "manager but not on_vacation",
+            "active_viewer": "viewer but not on_vacation",
+            "can_read": "active_manager or active_viewer",
             "has_clearance": "holder from required_clearance (hierarchy walk)",
-            "can_view": "can_manage from parent (active_manager)",
-            "can_update": "has_clearance and can_manage from parent"
+            "can_view": "can_read from parent (manager OR viewer, not on vacation)",
+            "can_update": "has_clearance and can_manage from parent (manager only)"
         },
         "scope_to_permission": {
             "inventory:read": {
                 "fga_permission": "can_view",
-                "requirements": "active_manager (not on vacation)"
+                "requirements": "active_manager OR active_viewer (not on vacation)"
             },
             "inventory:write": {
                 "fga_permission": "can_update",
@@ -753,17 +945,23 @@ def get_fga_model_info() -> Dict[str, Any]:
             }
         },
         "tuples_seeded": {
-            "manager": "Pre-seeded in FGA store",
-            "clearance_grants": "Pre-seeded (user -> granted_to -> clearance_level:N)",
+            "manager": "Dynamic based on Okta Manager claim",
+            "viewer": "Dynamic for non-managers with inventory access",
+            "clearance_grants": "Dynamic based on Okta Clearance claim",
             "clearance_hierarchy": "Pre-seeded (level chains)",
             "inventory_hierarchy": "Pre-seeded (system -> parent -> item)",
             "vacation": "Contextual tuple per request (NOT stored)"
         },
         "claims_used": [
-            {"name": "Manager", "okta_attribute": "user.is_a_manager", "description": "Manager tuple must be pre-seeded"},
+            {"name": "Manager", "okta_attribute": "user.is_a_manager", "description": "Creates manager tuple if true"},
             {"name": "Vacation", "okta_attribute": "user.is_on_vacation", "description": "Passed as contextual tuple"},
-            {"name": "Clearance", "okta_attribute": "user.clearance_level", "description": "Clearance grant tuple must be pre-seeded"}
-        ]
+            {"name": "Clearance", "okta_attribute": "user.clearance_level", "description": "Creates clearance grant tuple"}
+        ],
+        "viewer_role": {
+            "description": "Non-managers who need read access get viewer role automatically",
+            "logic": "If Manager=false and user requests inventory agent, viewer tuple is created",
+            "permissions": "can_view only (cannot update even with clearance)"
+        }
     }
 
 
