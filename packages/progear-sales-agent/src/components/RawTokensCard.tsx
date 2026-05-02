@@ -260,7 +260,7 @@ export default function RawTokensCard({ exchanges, idTokenClaims, idTokenRaw }: 
       >
         <h3 className="text-white font-semibold flex items-center gap-2">
           <Key className="w-5 h-5" />
-          Raw Tokens
+          Step-by-Step Token Flow
         </h3>
         <div className="flex items-center gap-2">
           {!isExpanded && hasAnyTokens && (
@@ -281,7 +281,7 @@ export default function RawTokensCard({ exchanges, idTokenClaims, idTokenRaw }: 
         <div className="p-4 space-y-3 max-h-[500px] overflow-y-auto">
           {/* ID Token (User's original token) */}
           <TokenSection
-            title="1. ID Token (User)"
+            title="Step 1: User Authenticated to Okta for Chat Bot Interface"
             claims={idTokenClaims}
             rawToken={idTokenRaw}
             defaultOpen={true}
@@ -293,7 +293,7 @@ export default function RawTokensCard({ exchanges, idTokenClaims, idTokenRaw }: 
               {/* ID-JAG Token (intermediate) */}
               {(exchange.id_jag_token || exchange.id_jag_claims) && (
                 <TokenSection
-                  title={`2. ID-JAG Token → ${exchange.agent_name}`}
+                  title={`Step 2: Cross-App Access Ticket Issued for ${exchange.agent_name}`}
                   claims={exchange.id_jag_claims}
                   rawToken={exchange.id_jag_token}
                   color="#6366f1"  // Indigo for ID-JAG
@@ -304,7 +304,7 @@ export default function RawTokensCard({ exchanges, idTokenClaims, idTokenRaw }: 
               {/* Access Token (final) */}
               {(exchange.access_token || exchange.token_claims) && (
                 <TokenSection
-                  title={`3. Access Token (${exchange.agent_name})`}
+                  title={`Step 3: ${exchange.agent_name} Granted Access to Business Data`}
                   claims={exchange.token_claims}
                   rawToken={exchange.access_token}
                   color={exchange.color}

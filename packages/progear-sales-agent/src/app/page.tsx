@@ -323,7 +323,7 @@ export default function Home() {
       {/* Dual Pane Layout */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left Pane - Chat Interface */}
-        <div className="flex-1 flex flex-col bg-gradient-to-b from-neutral-bg to-white">
+        <div className="w-2/5 flex flex-col bg-gradient-to-b from-neutral-bg to-white">
           {/* Messages Area */}
           <div className="flex-1 overflow-y-auto p-6 space-y-4">
             {chatMessages.length === 0 && (
@@ -447,7 +447,7 @@ export default function Home() {
         </div>
 
         {/* Right Pane - Security Dashboard */}
-        <div className="w-96 bg-gradient-to-b from-gray-50 to-white border-l-4 border-accent/30 overflow-y-auto p-4 space-y-4">
+        <div className="w-3/5 bg-gradient-to-b from-gray-50 to-white border-l-4 border-accent/30 overflow-y-auto p-4 space-y-4">
           <div className="text-center pb-4 border-b-2 border-accent/20">
             <h2 className="text-lg font-bold text-gray-800 flex items-center justify-center gap-2">
               <svg className="w-5 h-5 text-okta-blue" fill="currentColor" viewBox="0 0 20 20">
