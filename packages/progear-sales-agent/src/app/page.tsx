@@ -249,7 +249,7 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-neutral-bg to-primary flex flex-col">
+    <main className="h-screen bg-gradient-to-b from-neutral-bg to-primary flex flex-col">
       {/* Header */}
       <header className="bg-gradient-to-r from-primary via-court-brown to-primary-light border-b-4 border-accent shadow-lg relative overflow-hidden">
         {/* Court pattern */}
@@ -460,9 +460,6 @@ export default function Home() {
           {/* Agent Flow */}
           <AgentFlowCard steps={currentAgentFlow} isLoading={isLoading} />
 
-          {/* FGA Fine-Grained Authorization */}
-          <FGAExplanationCard checks={currentFGAChecks} isLoading={isLoading} />
-
           {/* Token Exchanges */}
           <TokenExchangeCard exchanges={currentTokenExchanges} />
 
@@ -472,6 +469,9 @@ export default function Home() {
             idTokenClaims={session?.idToken ? decodeJwtPayload(session.idToken) ?? undefined : undefined}
             idTokenRaw={session?.idToken}
           />
+
+          {/* FGA Fine-Grained Authorization */}
+          <FGAExplanationCard checks={currentFGAChecks} isLoading={isLoading} />
 
           {/* Architecture Link */}
           <Link

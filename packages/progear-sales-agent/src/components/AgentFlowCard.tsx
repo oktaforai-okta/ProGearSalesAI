@@ -132,7 +132,7 @@ export default function AgentFlowCard({ steps, isLoading }: Props) {
               };
 
               return (
-                <div key={agent} className="flex flex-col items-center">
+                <div key={agent} className="flex flex-col items-center min-w-[72px]">
                   <div
                     className={`w-10 h-10 rounded-lg flex items-center justify-center text-sm font-bold transition-all ${
                       status === 'completed' ? 'text-white shadow-lg' :
@@ -149,7 +149,7 @@ export default function AgentFlowCard({ steps, isLoading }: Props) {
                     {status === 'pending' && <Clock className="w-5 h-5" />}
                     {status === 'inactive' && agentIcons[agent]}
                   </div>
-                  <span className="text-[10px] text-gray-500 mt-1 capitalize">{agent}</span>
+                  <span className="text-[10px] text-gray-500 mt-1 capitalize whitespace-nowrap">{agent} MCP</span>
                 </div>
               );
             })}
@@ -170,65 +170,6 @@ export default function AgentFlowCard({ steps, isLoading }: Props) {
           </div>
         </div>
 
-        {/* Step Details */}
-        <div className="space-y-2 max-h-48 overflow-y-auto">
-          {steps.map((step, idx) => {
-            const techBadge = getTechBadge(step.step);
-            const shortAction = shortenAction(step.step, step.action);
-
-            return (
-              <div
-                key={idx}
-                className={`flex items-start gap-3 p-2 rounded-lg text-sm ${
-                  step.status === 'completed' ? 'bg-green-50' :
-                  step.status === 'denied' ? 'bg-red-50' :
-                  step.status === 'processing' ? 'bg-blue-50' :
-                  'bg-gray-50'
-                }`}
-              >
-                <div className={`mt-0.5 ${
-                  step.status === 'completed' ? 'text-success-green' :
-                  step.status === 'denied' ? 'text-error-red' :
-                  step.status === 'processing' ? 'text-okta-blue' :
-                  'text-gray-400'
-                }`}>
-                  {step.status === 'completed' && <CheckCircle className="w-4 h-4" />}
-                  {step.status === 'denied' && <XCircle className="w-4 h-4" />}
-                  {step.status === 'processing' && <Clock className="w-4 h-4 animate-spin" />}
-                  {step.status === 'error' && <XCircle className="w-4 h-4" />}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-gray-700 capitalize">
-                      {step.step.replace(/_/g, ' ')}
-                    </span>
-                    {techBadge && (
-                      <span
-                        className="px-1.5 py-0.5 text-[10px] font-semibold rounded"
-                        style={{
-                          backgroundColor: techBadge.bg,
-                          color: techBadge.color
-                        }}
-                      >
-                        {techBadge.label}
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-xs text-gray-500">
-                    {shortAction}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-
-          {isLoading && (
-            <div className="flex items-center gap-3 p-2 rounded-lg bg-blue-50">
-              <Clock className="w-4 h-4 text-okta-blue animate-spin" />
-              <span className="text-sm text-gray-600">Processing...</span>
-            </div>
-          )}
-        </div>
       </div>
     </div>
   );

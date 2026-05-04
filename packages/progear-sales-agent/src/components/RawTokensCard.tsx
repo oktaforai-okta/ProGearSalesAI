@@ -162,9 +162,7 @@ function TokenSection({
               Encoded (JWT)
             </button>
             {rawToken && showRaw && (
-              <div className="ml-auto">
-                <CopyButton text={rawToken} label="JWT" />
-              </div>
+              <CopyButton text={rawToken} label="JWT" />
             )}
           </div>
 
@@ -281,7 +279,7 @@ export default function RawTokensCard({ exchanges, idTokenClaims, idTokenRaw }: 
         <div className="p-4 space-y-3 max-h-[500px] overflow-y-auto">
           {/* ID Token (User's original token) */}
           <TokenSection
-            title="Step 1: User Authenticated to Okta for Chat Bot Interface"
+            title="Step 1: User Authenticated to Okta for AI Agent Interface"
             claims={idTokenClaims}
             rawToken={idTokenRaw}
             defaultOpen={true}
