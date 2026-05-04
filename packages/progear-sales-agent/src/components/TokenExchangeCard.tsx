@@ -1,6 +1,7 @@
 'use client';
 
-import { CheckCircle, XCircle, Shield, Key } from 'lucide-react';
+import { useState } from 'react';
+import { CheckCircle, ChevronDown, ChevronUp, XCircle, Shield, Key } from 'lucide-react';
 
 interface TokenExchange {
   agent: string;
@@ -33,18 +34,35 @@ const isPolicyDenial = (exchange: TokenExchange): boolean => {
 };
 
 export default function TokenExchangeCard({ exchanges }: Props) {
+  const [isExpanded, setIsExpanded] = useState(false);
   const granted = exchanges.filter(e => e.success && !isPolicyDenial(e));
   const denied = exchanges.filter(e => isPolicyDenial(e));
 
   return (
     <div className="bg-white rounded-xl border-2 border-neutral-border shadow-sm overflow-hidden">
-      <div className="bg-gradient-to-r from-okta-blue to-okta-blue-light px-4 py-3 border-b border-neutral-border">
+      <button
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="w-full bg-gradient-to-r from-okta-blue to-okta-blue-light px-4 py-3 border-b border-neutral-border flex items-center justify-between hover:brightness-110 transition"
+      >
         <h3 className="text-white font-semibold flex items-center gap-2">
           <Key className="w-5 h-5" />
           Token Exchanges
         </h3>
-      </div>
+        <div className="flex items-center gap-2">
+          {!isExpanded && exchanges.length > 0 && (
+            <span className="text-xs text-white/80">
+              {exchanges.length} exchange{exchanges.length === 1 ? '' : 's'}
+            </span>
+          )}
+          {isExpanded ? (
+            <ChevronUp className="w-5 h-5 text-white" />
+          ) : (
+            <ChevronDown className="w-5 h-5 text-white" />
+          )}
+        </div>
+      </button>
 
+      {isExpanded && (
       <div className="p-4">
         {/* Summary */}
         <div className="flex items-center gap-4 mb-4 pb-3 border-b border-gray-100">
@@ -172,6 +190,7 @@ export default function TokenExchangeCard({ exchanges }: Props) {
           )}
         </div>
       </div>
+      )}
     </div>
   );
 }
