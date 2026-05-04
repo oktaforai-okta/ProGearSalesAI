@@ -138,7 +138,7 @@ function TokenSection({
       {isOpen && (
         <div className="bg-white">
           {/* Toggle between Raw and Decoded */}
-          <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-100 bg-gray-50/50">
+          <div className="flex items-center justify-end gap-2 px-3 py-2 border-b border-gray-100 bg-gray-50/50">
             <button
               onClick={() => setShowRaw(false)}
               className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition ${
