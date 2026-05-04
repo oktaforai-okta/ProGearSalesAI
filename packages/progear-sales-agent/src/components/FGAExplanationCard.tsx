@@ -1,6 +1,7 @@
 'use client';
 
-import { CheckCircle, XCircle, Shield, Palmtree, User, Database, ArrowRight, Info, Key, Package, Link2, UserCheck, Clock } from 'lucide-react';
+import { useState } from 'react';
+import { CheckCircle, ChevronDown, ChevronUp, XCircle, Shield, Palmtree, User, Database, ArrowRight, Info, Key, Package, Link2, UserCheck, Clock } from 'lucide-react';
 
 interface FGACheck {
   agent: string;
@@ -35,6 +36,7 @@ interface Props {
 }
 
 export default function FGAExplanationCard({ checks, isLoading }: Props) {
+  const [isExpanded, setIsExpanded] = useState(false);
   // Filter for FGA checks with actual decisions (not pass-through)
   const relevantChecks = checks.filter(c => c.relation !== 'n/a');
 
@@ -50,16 +52,34 @@ export default function FGAExplanationCard({ checks, isLoading }: Props) {
   return (
     <div className="bg-white rounded-xl border-2 border-neutral-border shadow-sm overflow-hidden">
       {/* Header */}
-      <div className="bg-gradient-to-r from-purple-600 to-indigo-600 px-4 py-3 border-b border-neutral-border">
-        <h3 className="text-white font-semibold flex items-center gap-2">
-          <Shield className="w-5 h-5" />
-          Fine-Grained Authorization (FGA)
-        </h3>
-        <p className="text-white/80 text-xs mt-1">
-          Okta + Auth0 FGA Better Together
-        </p>
-      </div>
+      <button
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 px-4 py-3 border-b border-neutral-border flex items-center justify-between hover:brightness-110 transition text-left"
+      >
+        <div>
+          <h3 className="text-white font-semibold flex items-center gap-2">
+            <Shield className="w-5 h-5" />
+            Fine-Grained Authorization (FGA)
+          </h3>
+          <p className="text-white/80 text-xs mt-1">
+            Okta + Auth0 FGA Better Together
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          {!isExpanded && hasChecks && (
+            <span className="text-xs text-white/80">
+              {allowed.length} allowed{denied.length > 0 ? `, ${denied.length} denied` : ''}
+            </span>
+          )}
+          {isExpanded ? (
+            <ChevronUp className="w-5 h-5 text-white" />
+          ) : (
+            <ChevronDown className="w-5 h-5 text-white" />
+          )}
+        </div>
+      </button>
 
+      {isExpanded && (
       <div className="p-4 space-y-4">
         {/* Explainer */}
         <div className="bg-gradient-to-r from-purple-50 to-indigo-50 rounded-lg p-3 border border-purple-100">
@@ -385,6 +405,7 @@ export default function FGAExplanationCard({ checks, isLoading }: Props) {
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 }
