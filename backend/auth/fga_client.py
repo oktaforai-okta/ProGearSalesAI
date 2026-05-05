@@ -63,10 +63,36 @@ from typing import Dict, Any, Optional
 from dataclasses import dataclass
 
 from openfga_sdk import ClientConfiguration, OpenFgaClient
-from openfga_sdk.client.models import ClientCheckRequest, ClientTuple, ClientWriteRequest
+from openfga_sdk.client.models import (
+    ClientCheckRequest,
+    ClientListObjectsRequest,
+    ClientTuple,
+    ClientWriteRequest,
+)
 from openfga_sdk.credentials import Credentials, CredentialConfiguration
 
 logger = logging.getLogger(__name__)
+
+
+def _is_missing_tuple_error(e: Exception) -> bool:
+    """
+    Detect FGA "tuple does not exist" errors on delete.
+
+    The openfga-sdk ApiException's str() only exposes status/reason; the
+    descriptive message ("cannot delete a tuple which does not exist") is
+    in e.body. Check both so harmless "already gone" deletes don't log ERROR.
+    """
+    text = str(e).lower()
+    body = getattr(e, "body", None)
+    if body:
+        text += " " + str(body).lower()
+    return (
+        "does not exist" in text
+        or "not found" in text
+        or "cannot delete" in text
+        or "write_failed_due_to_invalid_input" in text
+    )
+
 
 # FGA Configuration from environment
 FGA_API_URL = os.getenv("FGA_API_URL", "https://api.us1.fga.dev")
@@ -266,8 +292,7 @@ async def delete_manager_tuple(
         return True
 
     except Exception as e:
-        error_str = str(e).lower()
-        if "does not exist" in error_str or "not found" in error_str:
+        if _is_missing_tuple_error(e):
             logger.info(f"FGA: Manager tuple didn't exist for {user_email} (nothing to delete)")
             return True
         logger.error(f"FGA delete manager tuple failed: {e}")
@@ -455,8 +480,7 @@ async def delete_viewer_tuple(
         return True
 
     except Exception as e:
-        error_str = str(e).lower()
-        if "does not exist" in error_str or "not found" in error_str or "cannot delete" in error_str:
+        if _is_missing_tuple_error(e):
             logger.info(f"FGA: Viewer tuple didn't exist for {user_email} (nothing to delete)")
             return True
         logger.error(f"FGA delete viewer tuple failed: {e}")
@@ -637,12 +661,42 @@ async def delete_clearance_tuple(
         return True
 
     except Exception as e:
-        error_str = str(e).lower()
-        if "does not exist" in error_str or "not found" in error_str:
-            logger.info(f"FGA: Clearance tuple didn't exist for {user_email} at level {clearance_level}")
+        if _is_missing_tuple_error(e):
+            logger.debug(f"FGA: Clearance tuple didn't exist for {user_email} at level {clearance_level}")
             return True
         logger.error(f"FGA delete clearance tuple failed: {e}")
         return False
+
+
+async def list_existing_clearance_levels(user_email: str) -> Optional[list]:
+    """
+    Return the clearance levels the user currently has granted_to tuples for.
+
+    Uses FGA list_objects in a single call instead of probing all 10 levels.
+    Returns None if the FGA client is unavailable or the call fails.
+    """
+    fga_client = _get_fga_client()
+    if not fga_client:
+        return None
+
+    try:
+        response = await fga_client.list_objects(ClientListObjectsRequest(
+            user=f"user:{user_email}",
+            relation="granted_to",
+            type="clearance_level",
+        ))
+        levels = []
+        for obj in response.objects or []:
+            # obj looks like "clearance_level:5"
+            _, _, level_str = obj.partition(":")
+            try:
+                levels.append(int(level_str))
+            except ValueError:
+                continue
+        return levels
+    except Exception as e:
+        logger.warning(f"FGA list_objects for clearance levels failed: {e}")
+        return None
 
 
 async def ensure_clearance_tuple(
@@ -652,19 +706,9 @@ async def ensure_clearance_tuple(
     """
     Ensure ONLY the current clearance tuple exists in FGA for the user.
 
-    IMPORTANT: This function enforces single-clearance-per-user by:
-    1. Deleting ALL clearance tuples (levels 1-10) except the current level
-    2. Creating the current level tuple if it doesn't exist
-
-    This prevents tuple accumulation where a user could have multiple
-    clearance levels (e.g., 2, 5, 7) simultaneously in FGA.
-
-    Args:
-        user_email: User's email/login from Okta
-        clearance_level: Value of Clearance claim from Okta token (1-10)
-
-    Returns:
-        Dict with action taken and success status
+    Enforces single-clearance-per-user: deletes any level that isn't the
+    current one, then creates the current level if it's missing. Uses
+    list_objects to see what already exists, so we don't probe all 10 levels.
     """
     result = {
         "user": user_email,
@@ -674,32 +718,28 @@ async def ensure_clearance_tuple(
         "deleted_levels": [],
     }
 
-    # If no clearance, delete all clearance tuples for this user
+    existing = await list_existing_clearance_levels(user_email)
+    # Fall back to the old behavior if list_objects failed, so FGA-down
+    # doesn't silently skip cleanup.
+    if existing is None:
+        existing_to_delete = [lvl for lvl in range(1, 11) if lvl != max(clearance_level, 0)]
+    else:
+        existing_to_delete = [lvl for lvl in existing if lvl != clearance_level]
+
+    for level in existing_to_delete:
+        if await delete_clearance_tuple(user_email, level):
+            result["deleted_levels"].append(level)
+
     if clearance_level <= 0:
-        logger.info(f"FGA: No clearance level for {user_email} - removing all clearance tuples")
-        for level in range(1, 11):
-            deleted = await delete_clearance_tuple(user_email, level)
-            if deleted:
-                result["deleted_levels"].append(level)
         result["action"] = "cleared_all"
+        if existing:
+            logger.info(f"FGA: Removed clearance levels {result['deleted_levels']} for {user_email}")
         return result
 
-    # Delete all OTHER clearance levels (1-10 except current)
-    # This ensures only ONE clearance tuple exists per user
-    for level in range(1, 11):
-        if level != clearance_level:
-            # Try to delete - will succeed if exists or already doesn't exist
-            deleted = await delete_clearance_tuple(user_email, level)
-            # Note: delete_clearance_tuple returns True even if tuple didn't exist
-
-    logger.info(f"FGA: Cleaned up other clearance levels for {user_email} (keeping only level {clearance_level})")
-
-    # Check if tuple exists at the current level
-    tuple_exists = await check_clearance_tuple_exists(user_email, clearance_level)
+    tuple_exists = existing is not None and clearance_level in existing
     result["tuple_existed"] = tuple_exists
 
     if not tuple_exists:
-        # Clearance tuple doesn't exist -> create it
         success = await write_clearance_tuple(user_email, clearance_level)
         result["action"] = "created"
         result["success"] = success
