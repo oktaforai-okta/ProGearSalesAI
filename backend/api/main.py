@@ -11,21 +11,28 @@ Features:
 
 import os
 import logging
+from pathlib import Path
+
+# Load environment variables BEFORE importing modules that read env at import time
+# (fga_client reads FGA_STORE_ID etc. at module level). The repo-root .env is one
+# directory above backend/, so find it explicitly so cwd doesn't matter.
+from dotenv import load_dotenv
+load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent.parent / ".env")
+
 import httpx
 from datetime import datetime, timedelta
 from fastapi import FastAPI, HTTPException, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
-from dotenv import load_dotenv
 
 from auth.okta_auth import get_okta_auth
 from auth.agent_config import get_all_agent_configs, DEMO_AGENTS
 from auth.fga_client import close_fga_client
 from orchestrator.orchestrator import Orchestrator
-
-# Load environment variables
-load_dotenv()
+from dataclasses import asdict
+from data.demo_store import demo_store
+from services.factory import build_approval_service
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -48,11 +55,91 @@ app.add_middleware(
 )
 
 
+# --- Approval Service (lazy; constructed on first use) ---
+
+_approval_service_singleton = None
+
+
+def _get_approval_service():
+    """Return the process-wide ApprovalService, constructing on first call."""
+    global _approval_service_singleton
+    if _approval_service_singleton is None:
+        _approval_service_singleton = build_approval_service(demo_store)
+    return _approval_service_singleton
+
+
+def _approval_status_to_json(status) -> Dict[str, Any]:
+    """Serialize an ApprovalStatus dataclass (including nested dataclasses) to a JSON-safe dict."""
+    data = asdict(status)
+    # asdict() already recurses into nested dataclasses (Intent, ExecutionResult),
+    # so this is primarily just converting to a plain dict. Explicit round-trip
+    # keeps the shape stable even if ApprovalStatus grows new nested fields.
+    return data
+
+
+# --- Background Approval Poller ---
+
+import asyncio as _approval_asyncio
+
+_approval_poll_task: Optional[_approval_asyncio.Task] = None
+
+
+async def _approval_poller_loop():
+    """Periodically drain newly-approved OIG requests.
+
+    Only resolves; idempotency is enforced inside ApprovalService.execute_if_approved.
+    Never raises — swallows every error so the loop body can't take down the task.
+    """
+    interval = int(os.getenv("APPROVAL_POLL_INTERVAL_SECONDS", "60"))
+    req_type_id = os.environ.get("OKTA_OIG_INVENTORY_REQUEST_TYPE_ID")
+    if not req_type_id:
+        logger.warning("OKTA_OIG_INVENTORY_REQUEST_TYPE_ID not set; approval poller disabled")
+        return
+    while True:
+        try:
+            svc = _get_approval_service()
+            # Okta filters server-side only by requeststatus. A freshly-approved
+            # request can appear as either OPEN (approvals done but workflow
+            # still transitioning) or RESOLVED (terminal). Poll both to avoid
+            # missing either. Filter by requestTypeId + decision client-side.
+            raw_open = await svc._oig.list_requests(request_status="OPEN")
+            raw_resolved = await svc._oig.list_requests(request_status="RESOLVED")
+            raw_list = raw_open + raw_resolved
+            for raw in raw_list:
+                if raw.get("requestTypeId") != req_type_id:
+                    continue
+                rid = raw.get("id")
+                if not rid:
+                    continue
+                try:
+                    await svc.execute_if_approved(rid)
+                except Exception as exc:
+                    logger.warning(f"Approval poller: execute failed for {rid}: {exc}")
+        except Exception as exc:
+            logger.warning(f"Approval poller: loop error: {exc}")
+        await _approval_asyncio.sleep(interval)
+
+
+@app.on_event("startup")
+async def _start_approval_poller():
+    global _approval_poll_task
+    _approval_poll_task = _approval_asyncio.create_task(_approval_poller_loop())
+    logger.info("Approval poller started")
+
+
 # --- Lifecycle Events ---
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Clean up resources on application shutdown."""
+    global _approval_poll_task
+    if _approval_poll_task is not None:
+        _approval_poll_task.cancel()
+        try:
+            await _approval_poll_task
+        except _approval_asyncio.CancelledError:
+            pass
+        logger.info("Approval poller stopped")
     logger.info("Shutting down - closing FGA client...")
     await close_fga_client()
     logger.info("FGA client closed")
@@ -115,6 +202,9 @@ class ChatResponse(BaseModel):
     agent_flow: List[AgentFlowStep]
     token_exchanges: List[TokenExchange]
     user_info: Optional[Dict[str, Any]] = None
+    # Populated by the OIG approval gate when a high-quantity inventory write
+    # is awaiting manager approval. Null for normal responses.
+    pending_approval: Optional[Dict[str, Any]] = None
 
 
 # --- Health Check ---
@@ -227,7 +317,8 @@ async def chat(
     try:
         orchestrator = Orchestrator(
             user_token=user_token or "",
-            user_info=user_info
+            user_info=user_info,
+            approval_service=_get_approval_service(),
         )
         result = await orchestrator.process(request.message)
 
@@ -236,7 +327,8 @@ async def chat(
             session_id=request.session_id or "session-1",
             agent_flow=[AgentFlowStep(**step) for step in result["agent_flow"]],
             token_exchanges=[TokenExchange(**ex) for ex in result["token_exchanges"]],
-            user_info=user_info
+            user_info=user_info,
+            pending_approval=result.get("pending_approval"),
         )
 
     except Exception as e:
@@ -475,6 +567,54 @@ async def okta_system_logs(
             "logs": [],
             "error": str(e)
         }
+
+
+# --- Approval Resolver Endpoint ---
+
+@app.get("/api/approvals/{request_id}")
+async def get_approval(request_id: str):
+    """Resolve an OIG approval request.
+
+    Foreground fast-path: if the request is APPROVED and not yet executed,
+    the call synchronously executes the inventory write. Otherwise returns
+    current status without side effects.
+    """
+    try:
+        svc = _get_approval_service()
+        status = await svc.execute_if_approved(request_id)
+        return _approval_status_to_json(status)
+    except Exception as exc:
+        logger.error(f"Approval resolve failed for {request_id}: {exc}")
+        # Return a JSON error rather than leak a stack trace to the client.
+        raise HTTPException(status_code=502, detail=f"Approval service error: {exc}")
+
+
+# --- Approval List Endpoint ---
+
+@app.get("/api/approvals")
+async def list_approvals(user: Optional[str] = None):
+    """List OIG approval requests of the inventory-write type.
+
+    Filters by `intent.user_email == user` when the query param is supplied.
+    Returns items in OIG's native order; caller may sort/paginate client-side.
+    """
+    svc = _get_approval_service()
+    req_type_id = os.environ["OKTA_OIG_INVENTORY_REQUEST_TYPE_ID"]
+    try:
+        raw_list = await svc._oig.list_requests(request_status=None)
+    except Exception as exc:
+        logger.warning(f"OIG list_requests failed: {exc}")
+        return {"items": [], "error": str(exc)}
+
+    items: List[Dict[str, Any]] = []
+    for raw in raw_list:
+        if raw.get("requestTypeId") != req_type_id:
+            continue
+        status = svc._status_from_raw(raw.get("id") or "", raw)
+        if user and status.intent and status.intent.user_email != user:
+            continue
+        items.append(_approval_status_to_json(status))
+    return {"items": items}
 
 
 if __name__ == "__main__":

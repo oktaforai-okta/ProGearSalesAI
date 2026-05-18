@@ -1,0 +1,122 @@
+{
+  "6a02a4e34a68e3f85b79008a": {
+    "executed": false,
+    "executed_at": null,
+    "txn_id": null,
+    "previous_quantity": null,
+    "new_quantity": null,
+    "failed_attempts": 1,
+    "abandoned": true,
+    "last_error": "intent could not be decoded from justification"
+  },
+  "6a02a7384a68e3f85b790101": {
+    "executed": true,
+    "executed_at": "2026-05-12T14:10:05.240547Z",
+    "txn_id": "inv_txn_5b790101_1",
+    "previous_quantity": 2847,
+    "new_quantity": 3347,
+    "failed_attempts": 0,
+    "abandoned": false,
+    "last_error": null
+  },
+  "6a02b5324a68e3f85b792595": {
+    "executed": true,
+    "executed_at": "2026-05-12T14:10:05.689863Z",
+    "txn_id": "inv_txn_5b792595_1",
+    "previous_quantity": 3471,
+    "new_quantity": 4471,
+    "failed_attempts": 0,
+    "abandoned": false,
+    "last_error": null
+  },
+  "6a02b8714a68e3f85b793ea2": {
+    "executed": true,
+    "executed_at": "2026-05-12T14:10:06.139848Z",
+    "txn_id": "inv_txn_5b793ea2_1",
+    "previous_quantity": 4471,
+    "new_quantity": 5471,
+    "failed_attempts": 0,
+    "abandoned": false,
+    "last_error": null
+  },
+  "6a03283c4a68e3f85b7f8a0a": {
+    "executed": true,
+    "executed_at": "2026-05-12T14:10:06.352801Z",
+    "txn_id": "inv_txn_5b7f8a0a_1",
+    "previous_quantity": 5471,
+    "new_quantity": 6471,
+    "failed_attempts": 0,
+    "abandoned": false,
+    "last_error": null
+  },
+  "6a0332174a68e3f85b7fc959": {
+    "executed": true,
+    "executed_at": "2026-05-12T14:10:06.818205Z",
+    "txn_id": "inv_txn_5b7fc959_1",
+    "previous_quantity": 6471,
+    "new_quantity": 7121,
+    "failed_attempts": 0,
+    "abandoned": false,
+    "last_error": null
+  },
+  "6a03354d4a68e3f85b7ff533": {
+    "executed": true,
+    "executed_at": "2026-05-12T14:12:50.573386Z",
+    "txn_id": "inv_txn_5b7ff533_1",
+    "previous_quantity": 7171,
+    "new_quantity": 7821,
+    "failed_attempts": 0,
+    "abandoned": false,
+    "last_error": null
+  },
+  "6a0336264a68e3f85b7ffc4d": {
+    "executed": true,
+    "executed_at": "2026-05-12T14:18:42.924688Z",
+    "txn_id": "inv_txn_5b7ffc4d_1",
+    "previous_quantity": 7871,
+    "new_quantity": 8871,
+    "failed_attempts": 0,
+    "abandoned": false,
+    "last_error": null
+  },
+  "6a0615087e7826cf1f8e8332": {
+    "executed": true,
+    "executed_at": "2026-05-14T18:44:26.881690Z",
+    "txn_id": "inv_txn_1f8e8332_1",
+    "previous_quantity": 3447,
+    "new_quantity": 4097,
+    "failed_attempts": 0,
+    "abandoned": false,
+    "last_error": null
+  },
+  "6a07487b7e7826cf1f99381f": {
+    "executed": true,
+    "executed_at": "2026-05-15T16:24:05.072903Z",
+    "txn_id": "inv_txn_1f99381f_1",
+    "previous_quantity": 4097,
+    "new_quantity": 4727,
+    "failed_attempts": 0,
+    "abandoned": false,
+    "last_error": null
+  },
+  "6a07655672767b6ae0ed8e92": {
+    "executed": true,
+    "executed_at": "2026-05-15T18:27:46.218309Z",
+    "txn_id": "inv_txn_e0ed8e92_1",
+    "previous_quantity": 4777,
+    "new_quantity": 5427,
+    "failed_attempts": 0,
+    "abandoned": false,
+    "last_error": null
+  },
+  "6a0a7ebbafc5acaae106796c": {
+    "executed": true,
+    "executed_at": "2026-05-18T02:53:05.623527Z",
+    "txn_id": "inv_txn_e106796c_1",
+    "previous_quantity": 5427,
+    "new_quantity": 6057,
+    "failed_attempts": 0,
+    "abandoned": false,
+    "last_error": null
+  }
+}

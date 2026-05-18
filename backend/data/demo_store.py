@@ -138,7 +138,13 @@ class DemoStore:
             if item.get("status") == "low" or item.get("quantity", 0) <= item.get("reorder_point", 0)
         ]
 
-    def update_inventory_quantity(self, sku: str, quantity_change: int, operation: str = "set") -> Dict[str, Any]:
+    def update_inventory_quantity(
+        self,
+        sku: str,
+        quantity_change: int,
+        operation: str = "set",
+        idempotency_key: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
         Update inventory quantity.
 
@@ -146,10 +152,20 @@ class DemoStore:
             sku: Product SKU
             quantity_change: Amount to change (or absolute value for 'set')
             operation: 'increase', 'decrease', or 'set'
+            idempotency_key: optional key; if the same key was already used, the
+                stored result is returned and inventory is NOT modified again.
 
         Returns:
             Updated item info with previous and new quantities
         """
+        if idempotency_key is not None:
+            cache = getattr(self, "_idempotency_cache", None)
+            if cache is None:
+                self._idempotency_cache = {}
+                cache = self._idempotency_cache
+            if idempotency_key in cache:
+                return cache[idempotency_key]
+
         inventory = self._data.get("inventory", {})
         if sku not in inventory:
             # Try to find by name
@@ -157,7 +173,10 @@ class DemoStore:
             if item:
                 sku = item.get("sku")
             else:
-                return {"error": f"Product not found: {sku}"}
+                result = {"error": f"Product not found: {sku}"}
+                if idempotency_key is not None:
+                    self._idempotency_cache[idempotency_key] = result
+                return result
 
         item = inventory[sku]
         previous_qty = item["quantity"]
@@ -169,7 +188,10 @@ class DemoStore:
         elif operation == "set":
             item["quantity"] = quantity_change
         else:
-            return {"error": f"Unknown operation: {operation}"}
+            result = {"error": f"Unknown operation: {operation}"}
+            if idempotency_key is not None:
+                self._idempotency_cache[idempotency_key] = result
+            return result
 
         # Update status based on quantity vs reorder point
         reorder_point = item.get("reorder_point", 100)
@@ -180,7 +202,7 @@ class DemoStore:
 
         self._save_data()
 
-        return {
+        result = {
             "sku": sku,
             "name": item["name"],
             "previous_quantity": previous_qty,
@@ -188,6 +210,9 @@ class DemoStore:
             "change": item["quantity"] - previous_qty,
             "status": item["status"]
         }
+        if idempotency_key is not None:
+            self._idempotency_cache[idempotency_key] = result
+        return result
 
     # ==================== PRICING ====================
 

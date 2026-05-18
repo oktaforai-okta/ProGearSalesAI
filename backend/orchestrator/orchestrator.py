@@ -62,6 +62,10 @@ class WorkflowState(TypedDict):
     # Final response
     final_response: Optional[str]
 
+    # Approval gate (populated by approval_gate node; None when gate is not triggered)
+    pending_approval: Optional[Dict[str, Any]]
+    parsed_intent: Optional[Dict[str, Any]]
+
 
 # Agent type to keywords mapping for fallback routing
 AGENT_KEYWORDS = {
@@ -153,16 +157,23 @@ class Orchestrator:
     complex multi-agent workflows with proper access control.
     """
 
-    def __init__(self, user_token: str, user_info: Optional[Dict[str, Any]] = None):
+    def __init__(
+        self,
+        user_token: str,
+        user_info: Optional[Dict[str, Any]] = None,
+        approval_service=None,
+    ):
         """
         Initialize the orchestrator with user context.
 
         Args:
             user_token: User's ID token (for token exchange)
             user_info: Optional user info from token validation
+            approval_service: Optional ApprovalService (inject from api/main.py)
         """
         self.user_token = user_token
         self.user_info = user_info or {}
+        self.approval_service = approval_service
 
         # Get multi-agent token exchange manager
         self.token_exchange = get_multi_agent_exchange()
@@ -181,18 +192,38 @@ class Orchestrator:
         # Add nodes
         workflow.add_node("router", self._router_node)
         workflow.add_node("exchange_tokens", self._exchange_tokens_node)
-        workflow.add_node("fga_check", self._fga_check_node)  # FGA gatekeeper
+        workflow.add_node("fga_check", self._fga_check_node)
+        workflow.add_node("approval_gate", self._approval_gate_node)
         workflow.add_node("process_agents", self._process_agents_node)
         workflow.add_node("generate_response", self._generate_response_node)
 
-        # Linear flow: router -> exchange -> fga_check -> process -> response
+        # Linear flow: router -> exchange -> fga_check -> approval_gate -> process/response
         # Token exchange runs FIRST so we can extract Vacation claim from Auth Server token
         # (Org Auth Server doesn't support custom claims, but custom Auth Servers do)
         # FGA check uses Vacation claim from Auth Server token to build contextual tuples
         workflow.set_entry_point("router")
         workflow.add_edge("router", "exchange_tokens")
         workflow.add_edge("exchange_tokens", "fga_check")
-        workflow.add_edge("fga_check", "process_agents")
+        workflow.add_edge("fga_check", "approval_gate")
+
+        def _route_after_approval(state: WorkflowState) -> str:
+            # Gate fired (pending or error) → skip process_agents, go straight to response.
+            if state.get("pending_approval") is not None:
+                return "generate_response"
+            last_flow = state.get("agent_flow", [])
+            if last_flow and last_flow[-1].get("step") == "approval_gate" and last_flow[-1].get("status") == "error":
+                return "generate_response"
+            return "process_agents"
+
+        workflow.add_conditional_edges(
+            "approval_gate",
+            _route_after_approval,
+            {
+                "generate_response": "generate_response",
+                "process_agents": "process_agents",
+            },
+        )
+
         workflow.add_edge("process_agents", "generate_response")
         workflow.add_edge("generate_response", END)
 
@@ -517,6 +548,109 @@ Return ONLY the JSON object, no other text."""
             }
         })
 
+        return state
+
+    async def _approval_gate_node(self, state: WorkflowState) -> WorkflowState:
+        """Insert an OIG Access Request gate for high-quantity inventory writes.
+
+        Fires only when:
+          - inventory:write is among the requested scopes, AND
+          - the parsed quantity_delta >= APPROVAL_QUANTITY_THRESHOLD.
+
+        When triggered, creates an OIG Access Request and sets
+        state["pending_approval"]. Routing downstream reads that value
+        to decide whether to execute agents or short-circuit.
+        """
+        from services.intent import parse_inventory_intent  # local import — same style as existing backend modules
+
+        agent_scopes = state.get("agent_scopes", {}) or {}
+        inv_scopes = agent_scopes.get(AGENT_INVENTORY, []) or []
+
+        if "inventory:write" not in inv_scopes:
+            state["agent_flow"].append({
+                "step": "approval_gate",
+                "action": "No inventory:write scope in request; skipping approval check",
+                "status": "skipped",
+            })
+            return state
+
+        # Respect FGA's decision: if the inventory agent was denied upstream
+        # (e.g., manager on vacation, insufficient clearance), do NOT create an
+        # OIG approval request for an action the user isn't authorized to do.
+        allowed_agents = state.get("agents_to_invoke", []) or []
+        if AGENT_INVENTORY not in allowed_agents:
+            state["agent_flow"].append({
+                "step": "approval_gate",
+                "action": "FGA denied inventory agent; skipping approval request",
+                "status": "skipped",
+            })
+            return state
+
+        parsed = parse_inventory_intent(state["user_message"])
+        state["parsed_intent"] = parsed
+
+        if self.approval_service is None:
+            # ApprovalService not wired — treat as if gate is disabled.
+            state["agent_flow"].append({
+                "step": "approval_gate",
+                "action": "Approval service not configured; skipping gate",
+                "status": "skipped",
+            })
+            return state
+
+        if not self.approval_service.should_gate("inventory:write", parsed):
+            qty_str = str(parsed.get("quantity_delta")) if parsed else "?"
+            state["agent_flow"].append({
+                "step": "approval_gate",
+                "action": f"Quantity {qty_str} below threshold; no approval needed",
+                "status": "skipped",
+            })
+            return state
+
+        approver_group = os.getenv("OKTA_APPROVER_GROUP_NAME", "InventoryApprovers")
+        try:
+            fga_check_id = None
+            if state.get("fga_checks"):
+                fga_check_id = state["fga_checks"][-1].get("id")
+            request_id, intent = await self.approval_service.create_request(
+                user_email=self.user_info.get("email") or "",
+                requester_id=self.user_info.get("sub") or self.user_info.get("id") or "",
+                approver_group_name=approver_group,
+                agent=AGENT_INVENTORY,
+                scope="inventory:write",
+                parsed_intent=parsed,
+                original_task=state["user_message"],
+                fga_check_id=fga_check_id,
+            )
+        except Exception as exc:
+            logger.error(f"approval_gate create_request failed: {exc}")
+            state["agent_flow"].append({
+                "step": "approval_gate",
+                "action": f"Approval service error: {exc}",
+                "status": "error",
+            })
+            # Clear results so process_agents does nothing; response node reports the error.
+            state["agent_results"] = {}
+            state["pending_approval"] = None
+            return state
+
+        state["agent_flow"].append({
+            "step": "approval_gate",
+            "action": f"Queued OIG Access Request {request_id} for {approver_group}",
+            "status": "pending",
+        })
+        state["pending_approval"] = {
+            "request_id": request_id,
+            "status": "pending",
+            "approver_group": approver_group,
+            "submitted_at": intent.submitted_at,
+            "intent": {
+                "product_name": intent.product_name,
+                "quantity_delta": intent.quantity_delta,
+                "scope": intent.scope,
+                "original_task": intent.original_task,
+            },
+        }
         return state
 
     def _detect_scopes_from_keywords(self, message: str, agents: List[str]) -> Dict[str, List[str]]:
@@ -849,6 +983,32 @@ Return ONLY the JSON object, no other text."""
 
         Clearly indicates which agents contributed and which were denied.
         """
+        # Short-circuit when the approval gate queued an OIG request.
+        if state.get("pending_approval") is not None:
+            pa = state["pending_approval"]
+            intent = pa.get("intent") or {}
+            state["final_response"] = (
+                f"This inventory update ({intent.get('original_task', 'inventory write')!r}) "
+                f"requires manager approval. Request {pa['request_id']} sent to "
+                f"{pa['approver_group']}. I'll complete it automatically the moment "
+                "it's approved — you can close this tab."
+            )
+            state["agent_flow"].append({
+                "step": "generate_response",
+                "action": "Returned pending-approval message",
+                "status": "pending",
+            })
+            return state
+
+        # Short-circuit when approval-gate errored.
+        last_flow = state.get("agent_flow", [])
+        if last_flow and last_flow[-1].get("step") == "approval_gate" and last_flow[-1].get("status") == "error":
+            state["final_response"] = (
+                "I wasn't able to submit the approval request because the approval service "
+                "is temporarily unavailable. Please try again shortly."
+            )
+            return state
+
         agent_results = state["agent_results"]
 
         # Collect successful responses and denied agents
@@ -941,6 +1101,8 @@ If some agents were denied, acknowledge what information is missing but focus on
             "token_exchanges": [],
             "fga_checks": [],  # FGA fine-grained authorization checks
             "final_response": None,
+            "pending_approval": None,
+            "parsed_intent": None,
         }
 
         # Run the workflow
@@ -951,4 +1113,5 @@ If some agents were denied, acknowledge what information is missing but focus on
             "agent_flow": final_state["agent_flow"],
             "token_exchanges": final_state["token_exchanges"],
             "fga_checks": final_state["fga_checks"],
+            "pending_approval": final_state.get("pending_approval"),
         }

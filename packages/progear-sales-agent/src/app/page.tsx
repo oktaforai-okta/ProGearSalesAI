@@ -7,6 +7,7 @@ import Link from 'next/link';
 import AgentFlowCard from '@/components/AgentFlowCard';
 import TokenExchangeCard from '@/components/TokenExchangeCard';
 import FGAExplanationCard from '@/components/FGAExplanationCard';
+import ApprovalStatusCard, { type ApprovalStatus } from '@/components/ApprovalStatusCard';
 import RawTokensCard from '@/components/RawTokensCard';
 import { API_BASE_URL, OKTA_DOMAIN } from '@/lib/config';
 
@@ -41,6 +42,8 @@ const CHAT_STORAGE_KEY = 'progear-chat-messages';
 const AGENT_FLOW_STORAGE_KEY = 'progear-agent-flow';
 const TOKEN_EXCHANGE_STORAGE_KEY = 'progear-token-exchanges';
 const FGA_CHECKS_STORAGE_KEY = 'progear-fga-checks';
+const PENDING_APPROVAL_STORAGE_KEY = 'progear-pending-approval';
+const APPROVAL_ANNOUNCED_STORAGE_KEY = 'progear-approval-announced';
 
 // Decode JWT payload (for display only, no validation)
 function decodeJwtPayload(token: string): Record<string, any> | null {
@@ -64,6 +67,7 @@ export default function Home() {
   const [currentAgentFlow, setCurrentAgentFlow] = useState<any[]>([]);
   const [currentTokenExchanges, setCurrentTokenExchanges] = useState<any[]>([]);
   const [currentFGAChecks, setCurrentFGAChecks] = useState<any[]>([]);
+  const [pendingApproval, setPendingApproval] = useState<ApprovalStatus | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const isLoadingAuth = status === 'loading';
@@ -88,6 +92,14 @@ export default function Home() {
       if (savedFGAChecks) {
         setCurrentFGAChecks(JSON.parse(savedFGAChecks));
       }
+      const savedPendingApproval = sessionStorage.getItem(PENDING_APPROVAL_STORAGE_KEY);
+      if (savedPendingApproval) {
+        try {
+          setPendingApproval(JSON.parse(savedPendingApproval) as ApprovalStatus);
+        } catch {
+          /* ignore malformed saved state */
+        }
+      }
     } catch (e) {
       console.error('Error loading chat history:', e);
     }
@@ -111,7 +123,33 @@ export default function Home() {
     if (currentFGAChecks.length > 0) {
       sessionStorage.setItem(FGA_CHECKS_STORAGE_KEY, JSON.stringify(currentFGAChecks));
     }
-  }, [currentAgentFlow, currentTokenExchanges, currentFGAChecks]);
+    if (pendingApproval) {
+      sessionStorage.setItem(PENDING_APPROVAL_STORAGE_KEY, JSON.stringify(pendingApproval));
+    } else {
+      sessionStorage.removeItem(PENDING_APPROVAL_STORAGE_KEY);
+    }
+  }, [currentAgentFlow, currentTokenExchanges, currentFGAChecks, pendingApproval]);
+
+  // Debug hook: ?mockApprovalId= populates the ApprovalStatusCard for manual UI testing
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (process.env.NEXT_PUBLIC_ENABLE_DEBUG_HOOKS !== 'true') return;
+    const params = new URLSearchParams(window.location.search);
+    const mockId = params.get('mockApprovalId');
+    if (!mockId) return;
+    setPendingApproval({
+      request_id: mockId,
+      status: 'pending',
+      submitted_at: new Date().toISOString(),
+      approver_group: 'InventoryApprovers',
+      intent: {
+        product_name: 'basketball',
+        quantity_delta: 500,
+        scope: 'inventory:write',
+        original_task: 'debug: add 500 basketballs',
+      },
+    });
+  }, []);
 
   // Redirect to sign-in page if not authenticated
   useEffect(() => {
@@ -130,12 +168,66 @@ export default function Home() {
     setCurrentAgentFlow([]);
     setCurrentTokenExchanges([]);
     setCurrentFGAChecks([]);
+    setPendingApproval(null);
     setMessage('');
     // Clear session storage
     sessionStorage.removeItem(CHAT_STORAGE_KEY);
     sessionStorage.removeItem(AGENT_FLOW_STORAGE_KEY);
     sessionStorage.removeItem(TOKEN_EXCHANGE_STORAGE_KEY);
     sessionStorage.removeItem(FGA_CHECKS_STORAGE_KEY);
+    sessionStorage.removeItem(PENDING_APPROVAL_STORAGE_KEY);
+    sessionStorage.removeItem(APPROVAL_ANNOUNCED_STORAGE_KEY);
+  };
+
+  const handleApprovalStatusChange = (latest: ApprovalStatus) => {
+    setPendingApproval(latest);
+    if (latest.status !== 'executed') return;
+
+    let announced: string[] = [];
+    try {
+      announced = JSON.parse(sessionStorage.getItem(APPROVAL_ANNOUNCED_STORAGE_KEY) || '[]');
+    } catch {
+      announced = [];
+    }
+    if (announced.includes(latest.request_id)) return;
+    announced.push(latest.request_id);
+    sessionStorage.setItem(APPROVAL_ANNOUNCED_STORAGE_KEY, JSON.stringify(announced));
+
+    const intent = latest.intent ?? {};
+    const er = latest.execution_result;
+    const approverSuffix = latest.approver?.display_name
+      ? ` by ${latest.approver.display_name}`
+      : latest.approver?.email
+        ? ` by ${latest.approver.email}`
+        : '';
+    const product = intent.product_name ?? 'item';
+    const qty =
+      typeof intent.quantity_delta === 'number'
+        ? `+${intent.quantity_delta.toLocaleString()}`
+        : '';
+    const inventoryLine =
+      er && er.previous_quantity >= 0 && er.new_quantity >= 0
+        ? `Inventory for ${product}: ${er.previous_quantity.toLocaleString()} → ${er.new_quantity.toLocaleString()}${qty ? ` (${qty})` : ''}.`
+        : '';
+    const txnLine = er?.txn_id ? `Transaction: ${er.txn_id}` : '';
+
+    const body = [
+      `Your previous request ${latest.request_id} was approved${approverSuffix} and has been executed.`,
+      inventoryLine,
+      txnLine,
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    setChatMessages((prev) => [
+      ...prev,
+      {
+        id: `msg-${Date.now()}`,
+        role: 'assistant',
+        content: body,
+        timestamp: Date.now(),
+      },
+    ]);
   };
 
   const handleSignOut = async () => {
@@ -150,6 +242,7 @@ export default function Home() {
     sessionStorage.removeItem(AGENT_FLOW_STORAGE_KEY);
     sessionStorage.removeItem(TOKEN_EXCHANGE_STORAGE_KEY);
     sessionStorage.removeItem(FGA_CHECKS_STORAGE_KEY);
+    sessionStorage.removeItem(PENDING_APPROVAL_STORAGE_KEY);
 
     // End Okta session using OIDC logout endpoint
     // Reference: https://developer.okta.com/docs/guides/sign-users-out/react/main/
@@ -207,6 +300,9 @@ export default function Home() {
       setCurrentAgentFlow(data.agent_flow || []);
       setCurrentTokenExchanges(data.token_exchanges || []);
       setCurrentFGAChecks(data.fga_checks || []);
+      if (data.pending_approval) {
+        setPendingApproval(data.pending_approval);
+      }
 
       const assistantMessage: Message = {
         id: `msg-${Date.now()}`,
@@ -472,6 +568,16 @@ export default function Home() {
 
           {/* FGA Fine-Grained Authorization */}
           <FGAExplanationCard checks={currentFGAChecks} isLoading={isLoading} />
+
+          {pendingApproval && (
+            <div className="mt-4">
+              <ApprovalStatusCard
+                key={pendingApproval.request_id}
+                initial={pendingApproval}
+                onStatusChange={handleApprovalStatusChange}
+              />
+            </div>
+          )}
 
           {/* Architecture Link */}
           <Link

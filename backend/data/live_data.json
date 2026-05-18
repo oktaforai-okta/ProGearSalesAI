@@ -4,7 +4,7 @@
       "name": "Pro Game Basketball",
       "sku": "BB-PRO-001",
       "category": "Basketballs",
-      "quantity": 2847,
+      "quantity": 6057,
       "status": "good",
       "reorder_point": 500
     },
@@ -140,7 +140,7 @@
       "name": "Ball Pump Pro",
       "sku": "AC-PMP-001",
       "category": "Nets & Accessories",
-      "quantity": 3421,
+      "quantity": 8871,
       "status": "good",
       "reorder_point": 500
     },

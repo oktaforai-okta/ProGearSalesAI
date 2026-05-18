@@ -326,27 +326,19 @@ async def ensure_manager_relationship(
         "success": True,
     }
 
-    # Check current state in FGA
-    tuple_exists = await check_manager_tuple_exists(user_email, system_id)
-    result["tuple_existed"] = tuple_exists
-
-    if is_manager and not tuple_exists:
-        # Manager claim is true but tuple doesn't exist -> create it
+    # Always write/delete unconditionally. The write helpers tolerate the
+    # "tuple already exists" / "does not exist" races, which lets us skip a
+    # pre-check read that would otherwise return stale data under FGA's default
+    # MINIMIZE_LATENCY consistency. This keeps the tuple state aligned with the
+    # Okta claim without relying on fresh-read semantics we can't guarantee.
+    if is_manager:
         success = await write_manager_tuple(user_email, system_id)
-        result["action"] = "created"
+        result["action"] = "ensured_present"
         result["success"] = success
-        logger.info(f"FGA: Manager tuple created for {user_email} (Manager claim=true)")
-
-    elif not is_manager and tuple_exists:
-        # Manager claim is false but tuple exists -> delete it
-        success = await delete_manager_tuple(user_email, system_id)
-        result["action"] = "deleted"
-        result["success"] = success
-        logger.info(f"FGA: Manager tuple deleted for {user_email} (Manager claim=false)")
-
     else:
-        # No action needed - state is already correct
-        logger.info(f"FGA: Manager tuple state correct for {user_email} (no action)")
+        success = await delete_manager_tuple(user_email, system_id)
+        result["action"] = "ensured_absent"
+        result["success"] = success
 
     return result
 
@@ -514,27 +506,15 @@ async def ensure_viewer_relationship(
         "success": True,
     }
 
-    # Check current state in FGA
-    tuple_exists = await check_viewer_tuple_exists(user_email, system_id)
-    result["tuple_existed"] = tuple_exists
-
-    if is_viewer and not tuple_exists:
-        # Should be viewer but tuple doesn't exist -> create it
+    # Unconditional write/delete — see ensure_manager_relationship for rationale.
+    if is_viewer:
         success = await write_viewer_tuple(user_email, system_id)
-        result["action"] = "created"
+        result["action"] = "ensured_present"
         result["success"] = success
-        logger.info(f"FGA: Viewer tuple created for {user_email}")
-
-    elif not is_viewer and tuple_exists:
-        # Should not be viewer but tuple exists -> delete it
-        success = await delete_viewer_tuple(user_email, system_id)
-        result["action"] = "deleted"
-        result["success"] = success
-        logger.info(f"FGA: Viewer tuple deleted for {user_email}")
-
     else:
-        # No action needed - state is already correct
-        logger.info(f"FGA: Viewer tuple state correct for {user_email} (no action)")
+        success = await delete_viewer_tuple(user_email, system_id)
+        result["action"] = "ensured_absent"
+        result["success"] = success
 
     return result
 

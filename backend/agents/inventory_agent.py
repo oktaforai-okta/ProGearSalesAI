@@ -11,10 +11,10 @@ IMPORTANT: This agent has FGA (Fine-Grained Authorization) integration.
 - FGA model: can_increase_inventory = manager but not on_vacation
 """
 
-import re
 from typing import Dict, Any, Optional
 from .base_agent import BaseAgent
 from data.demo_store import demo_store
+from services.intent import parse_inventory_intent
 
 
 class InventoryAgent(BaseAgent):
@@ -95,13 +95,15 @@ Provide a helpful response using this data."""
         ])
 
         if has_write_scope and is_write_request:
-            # Extract quantity and product from task
-            qty_match = re.search(r'(\d+)\s*(basket|ball|unit|item)', task_lower)
-            quantity = int(qty_match.group(1)) if qty_match else 30
+            # Parse quantity + product using the shared helper so orchestrator
+            # and agent see the same intent.
+            parsed = parse_inventory_intent(task)
+            quantity = parsed["quantity_delta"] if parsed else 30
+            product_name = parsed["product_name"] if parsed else "basketball"
 
-            # Find product - default to Pro Game Basketball
-            product = demo_store.get_inventory_by_name("basketball")
+            product = demo_store.get_inventory_by_name(product_name)
             if not product:
+                # Preserve the existing fallback: some demo data uses the full product name.
                 product = demo_store.get_inventory_by_name("Pro Game Basketball")
 
             if product:
