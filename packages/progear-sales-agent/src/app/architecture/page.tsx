@@ -603,7 +603,7 @@ export default function ArchitecturePage() {
           title="ID-JAG Token Exchange Flow"
           subtitle="How users authorize AI agents"
           icon={<Key className="w-5 h-5" />}
-          defaultOpen={false}
+          defaultOpen={true}
         >
           <div className="mt-4">
             {/* Flow Diagram */}
