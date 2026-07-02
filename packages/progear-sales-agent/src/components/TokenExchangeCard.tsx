@@ -90,7 +90,7 @@ export default function TokenExchangeCard({ exchanges }: Props) {
         </div>
 
         {/* Exchange List */}
-        <div className="space-y-2 max-h-64 overflow-y-auto">
+        <div className="space-y-2">
           {exchanges.map((exchange, idx) => {
             const isGranted = exchange.status === 'granted';
             const isDenied = exchange.status === 'denied';

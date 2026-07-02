@@ -158,26 +158,47 @@ export default function FGAExplanationCard({ checks, isLoading }: Props) {
           </div>
         )}
 
-        {/* FGA Model Visualization - Updated to match actual model */}
+        {/* FGA Model Visualization - color meaning is explained, not just decorative */}
         <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
           <div className="text-xs font-semibold text-gray-600 mb-2 flex items-center gap-1">
             <Database className="w-3.5 h-3.5" />
-            FGA Authorization Model (ProGear New)
+            FGA Authorization Model (ProGear)
           </div>
-          <div className="font-mono text-[10px] text-gray-700 bg-white rounded p-2 border overflow-x-auto">
-            <div className="text-purple-600">type inventory_item</div>
-            <div className="ml-2 text-gray-500">relations</div>
-            <div className="ml-4">
-              <span className="text-blue-600">can_view</span>: <span className="text-gray-600">can_manage from parent</span>
+          <div className="font-mono text-[11px] leading-relaxed text-gray-700 bg-white rounded p-3 border overflow-x-auto">
+            <div className="text-purple-700 font-semibold">type inventory_item</div>
+            <div className="ml-3 text-gray-400">relations</div>
+            <div className="ml-6">
+              <span className="text-sky-700 font-semibold">can_view</span>
+              <span className="text-gray-400">: </span>
+              <span className="text-emerald-700">can_manage</span>
+              <span className="text-gray-400"> from </span>
+              <span className="text-gray-500">parent</span>
             </div>
-            <div className="ml-4">
-              <span className="text-blue-600">can_update</span>: <span className="text-orange-600">has_clearance</span> <span className="text-gray-500">and</span> <span className="text-gray-600">can_manage from parent</span>
+            <div className="ml-6">
+              <span className="text-sky-700 font-semibold">can_update</span>
+              <span className="text-gray-400">: </span>
+              <span className="text-emerald-700">has_clearance</span>
+              <span className="text-gray-400"> and </span>
+              <span className="text-emerald-700">can_manage</span>
+              <span className="text-gray-400"> from </span>
+              <span className="text-gray-500">parent</span>
             </div>
-            <div className="mt-2 text-purple-600">type inventory_system</div>
-            <div className="ml-2 text-gray-500">relations</div>
-            <div className="ml-4">
-              <span className="text-blue-600">active_manager</span>: <span className="text-gray-600">manager</span> <span className="text-red-600">but not</span> <span className="text-orange-600">on_vacation</span>
+            <div className="mt-2 text-purple-700 font-semibold">type inventory_system</div>
+            <div className="ml-3 text-gray-400">relations</div>
+            <div className="ml-6">
+              <span className="text-sky-700 font-semibold">active_manager</span>
+              <span className="text-gray-400">: </span>
+              <span className="text-emerald-700">manager</span>
+              <span className="text-gray-400"> but not </span>
+              <span className="text-rose-600 font-semibold">on_vacation</span>
             </div>
+          </div>
+          {/* Legend - explains what the colors actually mean, not just "looks nice" */}
+          <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2 text-[10px]">
+            <span className="flex items-center gap-1 text-purple-700"><span className="w-2 h-2 rounded-full bg-purple-600" />type</span>
+            <span className="flex items-center gap-1 text-sky-700"><span className="w-2 h-2 rounded-full bg-sky-600" />relation being defined</span>
+            <span className="flex items-center gap-1 text-emerald-700"><span className="w-2 h-2 rounded-full bg-emerald-600" />grants access</span>
+            <span className="flex items-center gap-1 text-rose-600"><span className="w-2 h-2 rounded-full bg-rose-600" />blocks access</span>
           </div>
         </div>
 

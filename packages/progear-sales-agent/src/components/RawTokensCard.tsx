@@ -1,7 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { Key, ChevronDown, ChevronUp, ChevronRight, Copy, Check, Lock, Unlock } from 'lucide-react';
+import {
+  Key, ChevronDown, ChevronUp, ChevronRight, Copy, Check, Lock, Unlock,
+  User, Bot, ShieldCheck, Flag, Clock, KeySquare,
+} from 'lucide-react';
 
 interface TokenExchange {
   agent: string;
@@ -23,6 +26,48 @@ interface Props {
   idTokenRaw?: string;  // Raw ID token JWT
 }
 
+// Every claim gets bucketed into one of these categories so a reader can
+// tell at a glance "who is this" vs "what can they do" vs "just plumbing" -
+// a flat alphabetical list of key:value pairs made every claim look equally
+// important, which was the actual readability complaint.
+type ClaimCategory = {
+  label: string;
+  icon: typeof User;
+  text: string;
+  bg: string;
+  border: string;
+};
+
+const CATEGORIES: Record<string, ClaimCategory> = {
+  identity: { label: 'Identity', icon: User, text: 'text-blue-700', bg: 'bg-blue-50', border: 'border-blue-400' },
+  agent: { label: 'Agent', icon: Bot, text: 'text-violet-700', bg: 'bg-violet-50', border: 'border-violet-400' },
+  authorization: { label: 'Authorization', icon: ShieldCheck, text: 'text-emerald-700', bg: 'bg-emerald-50', border: 'border-emerald-400' },
+  governance: { label: 'FGA / Governance', icon: Flag, text: 'text-amber-700', bg: 'bg-amber-50', border: 'border-amber-400' },
+  timing: { label: 'Timing', icon: Clock, text: 'text-slate-600', bg: 'bg-slate-50', border: 'border-slate-300' },
+  technical: { label: 'Technical', icon: Lock, text: 'text-gray-500', bg: 'bg-gray-50', border: 'border-gray-300' },
+};
+
+const CLAIM_CATEGORY: Record<string, keyof typeof CATEGORIES> = {
+  sub: 'identity', email: 'identity', name: 'identity', given_name: 'identity',
+  family_name: 'identity', preferred_username: 'identity', login: 'identity',
+  act: 'agent', 'act.sub': 'agent', actor: 'agent',
+  scp: 'authorization', scope: 'authorization', aud: 'authorization', groups: 'authorization',
+  Manager: 'governance', Vacation: 'governance', Clearance: 'governance',
+  is_on_vacation: 'governance', is_a_manager: 'governance', clearance_level: 'governance',
+  iat: 'timing', exp: 'timing', auth_time: 'timing', nbf: 'timing',
+};
+
+// Category display order - identity/agent/authorization/governance first
+// since those answer "who, what, allowed to do what" (the actual demo
+// story); timing and technical plumbing sink to the bottom.
+const CATEGORY_ORDER: (keyof typeof CATEGORIES)[] = [
+  'identity', 'agent', 'authorization', 'governance', 'timing', 'technical',
+];
+
+function categoryFor(key: string): keyof typeof CATEGORIES {
+  return CLAIM_CATEGORY[key] || 'technical';
+}
+
 // Format claim value for display
 function formatClaimValue(value: any): string {
   if (value === null || value === undefined) return 'null';
@@ -32,9 +77,6 @@ function formatClaimValue(value: any): string {
   if (typeof value === 'object') return JSON.stringify(value, null, 2);
   return String(value);
 }
-
-// Claims to highlight (important for demo)
-const HIGHLIGHT_CLAIMS = ['sub', 'email', 'aud', 'scope', 'scp', 'Vacation', 'is_on_vacation', 'groups'];
 
 // Copy button component
 function CopyButton({ text, label }: { text: string; label: string }) {
@@ -102,14 +144,19 @@ function TokenSection({
     );
   }
 
-  // Sort claims: highlighted first, then alphabetically
-  const sortedClaims = claims ? Object.entries(claims).sort(([a], [b]) => {
-    const aHighlight = HIGHLIGHT_CLAIMS.includes(a);
-    const bHighlight = HIGHLIGHT_CLAIMS.includes(b);
-    if (aHighlight && !bHighlight) return -1;
-    if (!aHighlight && bHighlight) return 1;
-    return a.localeCompare(b);
-  }) : [];
+  // Group claims by category, in CATEGORY_ORDER, alphabetical within a group.
+  const grouped: Record<string, [string, any][]> = {};
+  if (claims) {
+    for (const entry of Object.entries(claims)) {
+      const cat = categoryFor(entry[0]);
+      (grouped[cat] ||= []).push(entry);
+    }
+    for (const cat of Object.keys(grouped)) {
+      grouped[cat].sort(([a], [b]) => a.localeCompare(b));
+    }
+  }
+  const populatedCategories = CATEGORY_ORDER.filter((c) => grouped[c]?.length);
+  const totalClaims = claims ? Object.keys(claims).length : 0;
 
   return (
     <div className="border border-gray-200 rounded-lg overflow-hidden">
@@ -131,7 +178,7 @@ function TokenSection({
         )}
         <span className="text-sm font-medium text-gray-700">{title}</span>
         <span className="text-xs text-gray-400 ml-auto">
-          {claims ? `${Object.keys(claims).length} claims` : 'token available'}
+          {claims ? `${totalClaims} claims` : 'token available'}
         </span>
       </button>
 
@@ -168,8 +215,7 @@ function TokenSection({
 
           {/* Content */}
           {showRaw ? (
-            // Raw JWT display
-            <div className="p-2 max-h-48 overflow-y-auto">
+            <div className="p-2">
               {rawToken ? (
                 <div className="font-mono text-[10px] text-gray-700 bg-orange-50 p-2 rounded border border-orange-200 break-all whitespace-pre-wrap">
                   {rawToken}
@@ -181,35 +227,31 @@ function TokenSection({
               )}
             </div>
           ) : (
-            // Decoded claims display
-            <div className="p-2 max-h-48 overflow-y-auto">
-              {sortedClaims.length > 0 ? (
-                <div className="font-mono text-[11px] space-y-1">
-                  {sortedClaims.map(([key, value]) => {
-                    const isHighlighted = HIGHLIGHT_CLAIMS.includes(key);
-                    const displayValue = formatClaimValue(value);
-
-                    return (
-                      <div
-                        key={key}
-                        className={`flex gap-2 px-2 py-1 rounded ${
-                          isHighlighted ? 'bg-blue-50' : 'hover:bg-gray-50'
-                        }`}
-                      >
-                        <span className={`flex-shrink-0 ${
-                          isHighlighted ? 'text-blue-700 font-semibold' : 'text-gray-600'
-                        }`}>
-                          {key}:
-                        </span>
-                        <span className={`break-all ${
-                          isHighlighted ? 'text-blue-900' : 'text-gray-800'
-                        }`}>
-                          {displayValue}
-                        </span>
+            <div className="p-2 space-y-2.5">
+              {populatedCategories.length > 0 ? (
+                populatedCategories.map((cat) => {
+                  const meta = CATEGORIES[cat];
+                  const Icon = meta.icon;
+                  return (
+                    <div key={cat}>
+                      <div className={`flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide mb-1 ${meta.text}`}>
+                        <Icon className="w-3 h-3" />
+                        {meta.label}
                       </div>
-                    );
-                  })}
-                </div>
+                      <div className="space-y-1">
+                        {grouped[cat].map(([key, value]) => (
+                          <div
+                            key={key}
+                            className={`flex gap-2 px-2 py-1.5 rounded border-l-2 font-mono text-[11px] ${meta.bg} ${meta.border}`}
+                          >
+                            <span className={`flex-shrink-0 font-semibold ${meta.text}`}>{key}:</span>
+                            <span className="break-all text-gray-800">{formatClaimValue(value)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })
               ) : (
                 <div className="text-xs text-gray-400 text-center py-4">
                   No decoded claims available
@@ -276,7 +318,21 @@ export default function RawTokensCard({ exchanges, idTokenClaims, idTokenRaw }: 
 
       {/* Expanded Content */}
       {isExpanded && (
-        <div className="p-4 space-y-3 max-h-[500px] overflow-y-auto">
+        <div className="p-4 space-y-3">
+          {/* Category legend */}
+          <div className="flex flex-wrap gap-x-3 gap-y-1 pb-2 border-b border-gray-100">
+            {CATEGORY_ORDER.map((cat) => {
+              const meta = CATEGORIES[cat];
+              const Icon = meta.icon;
+              return (
+                <div key={cat} className={`flex items-center gap-1 text-[10px] ${meta.text}`}>
+                  <Icon className="w-3 h-3" />
+                  {meta.label}
+                </div>
+              );
+            })}
+          </div>
+
           {/* ID Token (User's original token) */}
           <TokenSection
             title="Step 1: User Authenticated to Okta for AI Agent Interface"
@@ -324,7 +380,8 @@ export default function RawTokensCard({ exchanges, idTokenClaims, idTokenRaw }: 
           {/* Token Flow Legend */}
           {hasAnyTokens && (
             <div className="pt-3 border-t border-gray-100">
-              <div className="text-[10px] text-gray-500">
+              <div className="text-[10px] text-gray-500 flex items-center gap-1.5">
+                <KeySquare className="w-3 h-3" />
                 <span className="font-semibold">Token Flow:</span> ID Token → ID-JAG Token → Access Token
               </div>
             </div>
