@@ -487,7 +487,7 @@ export default function D3ArchitectureDiagram({ title = 'Architecture' }: D3Arch
           <div className="flex flex-col lg:flex-row">
             <div className="flex-1 min-w-0">
               <svg
-                viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
+                viewBox={`-24 -24 ${VIEW_W + 48} ${VIEW_H + 48}`}
                 preserveAspectRatio="xMidYMid meet"
                 className="w-full h-auto block"
                 role="img"
