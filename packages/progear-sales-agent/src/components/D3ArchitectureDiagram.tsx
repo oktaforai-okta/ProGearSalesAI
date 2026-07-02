@@ -399,7 +399,14 @@ export default function D3ArchitectureDiagram({ title = 'Architecture' }: D3Arch
     return () => {
       gSel.selectAll('path.edge').remove();
     };
-  }, []);
+    // `mode` is a real dependency, not a lint-appeasing add: the <g> this
+    // effect draws into lives inside the Flow-only branch of the mode
+    // ternary, so it fully unmounts when switching to Sequence and a BRAND
+    // NEW <g> mounts when switching back. An empty dep array only ran this
+    // join once for the component's whole lifetime, so the second and later
+    // times you returned to Flow, the fresh <g> never got repopulated and
+    // every edge silently vanished.
+  }, [mode]);
 
   // --- Hover/select highlight — pure attr update, no re-join. ---------------
   useEffect(() => {
