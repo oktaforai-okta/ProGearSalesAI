@@ -223,8 +223,16 @@ class MultiAgentTokenExchange:
         except Exception as e:
             error_str = str(e).lower()
 
-            # Check for access denied errors
-            if "no_matching_policy" in error_str or "access_denied" in error_str:
+            # Check for access denied errors. Okta's real-world error text varies by
+            # failure mode ("no_matching_policy" from the AS, but the SDK also surfaces
+            # a generic "Policy evaluation failed for this request..." 401 for the same
+            # underlying cause) - match on both so real policy denials don't fall through
+            # to the generic error path below and get silently dropped downstream.
+            if (
+                "no_matching_policy" in error_str
+                or "access_denied" in error_str
+                or "policy evaluation failed" in error_str
+            ):
                 logger.info(f"[{agent_type}] ACCESS DENIED for user - policy restriction. Requested scopes: {scopes}")
                 return {
                     "success": False,
@@ -243,7 +251,31 @@ class MultiAgentTokenExchange:
                     "demo_mode": False,
                 }
 
-            # Other errors
+            # 'subject_token' is invalid at Step 1 (Org AS) almost always means the
+            # user's Okta ID token has expired - NextAuth doesn't refresh it mid-session.
+            if "subject_token" in error_str and "invalid" in error_str:
+                logger.warning(f"[{agent_type}] Subject token invalid (likely expired ID token)")
+                return {
+                    "success": False,
+                    "access_denied": False,
+                    "token_expired": True,
+                    "access_token": None,
+                    "scopes": [],
+                    "requested_scopes": scopes,
+                    "agent_info": {
+                        "name": config.name,
+                        "display_name": config.display_name,
+                        "type": agent_type,
+                        "color": config.color,
+                    },
+                    "error": "Your session has expired. Please sign out and sign back in.",
+                    "error_code": "token_expired",
+                    "demo_mode": False,
+                }
+
+            # Other errors - genuine infrastructure/system failures, distinct from
+            # both of the above so callers never mistake this for "access denied"
+            # or "AI didn't understand the request".
             logger.error(f"[{agent_type}] Token exchange failed: {e}")
             return self._error_result(agent_type, config, str(e), scopes)
 
@@ -311,6 +343,7 @@ class MultiAgentTokenExchange:
                 "color": config.color if config else "#888888",
             },
             "error": error,
+            "error_code": "system_error",
             "demo_mode": False,
         }
 

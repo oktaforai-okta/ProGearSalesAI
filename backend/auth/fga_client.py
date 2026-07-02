@@ -16,7 +16,7 @@ This means:
 - User with insufficient clearance can VIEW but CANNOT UPDATE high-sensitivity items
 - Users need both manager status AND adequate clearance to update items
 
-FGA Model (Store: ProGear New - 01KQ391VCMRKCD0G5XE92HVTQY):
+FGA Model (Store: ProGear - 01KNSR7472HW2PAYFR224NAPCY):
   type user
   type clearance_level
     relations
@@ -26,16 +26,26 @@ FGA Model (Store: ProGear New - 01KQ391VCMRKCD0G5XE92HVTQY):
   type inventory_system
     relations
       define manager: [user]
+      define viewer: [user]
       define on_vacation: [user]
       define active_manager: manager but not on_vacation
+      define active_viewer: viewer but not on_vacation
       define can_manage: active_manager
+      define can_read: active_manager or active_viewer
   type inventory_item
     relations
       define parent: [inventory_system]
       define required_clearance: [clearance_level]
       define has_clearance: holder from required_clearance
-      define can_view: can_manage from parent
+      define can_view: can_read from parent
       define can_update: has_clearance and can_manage from parent
+
+Non-managers who have Okta RBAC read access to inventory get a "viewer" tuple
+(see ensure_viewer_relationship) so can_view covers manager OR viewer, while
+can_update stays manager-only + clearance-gated. This reconciles the two
+descriptions that used to live in this file (this docstring vs.
+get_fga_model_info() below) - they disagreed on whether viewers could
+can_view at all; they can, now that the model actually matches this text.
 
 Tuples:
 - Manager roles: Pre-seeded in FGA store (user:{email} -> manager -> inventory_system:warehouse)
@@ -932,7 +942,7 @@ def get_fga_model_info() -> Dict[str, Any]:
     return {
         "mode": "rebac-abac",
         "description": "Full o4aa-fga-example model with clearance hierarchy, viewer role, and delegation",
-        "store_name": "ProGear New",
+        "store_name": "ProGear",
         "api_url": FGA_API_URL,
         "store_id": FGA_STORE_ID,
         "model_id": FGA_MODEL_ID,

@@ -4,11 +4,8 @@ import { useState, useRef, useEffect } from 'react';
 import { useSession, signOut } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import AgentFlowCard from '@/components/AgentFlowCard';
-import TokenExchangeCard from '@/components/TokenExchangeCard';
-import FGAExplanationCard from '@/components/FGAExplanationCard';
-import ApprovalStatusCard, { type ApprovalStatus } from '@/components/ApprovalStatusCard';
-import RawTokensCard from '@/components/RawTokensCard';
+import { Key, GitBranch } from 'lucide-react';
+import { type ApprovalStatus } from '@/components/ApprovalStatusCard';
 import { API_BASE_URL, OKTA_DOMAIN } from '@/lib/config';
 
 interface Message {
@@ -45,17 +42,20 @@ const FGA_CHECKS_STORAGE_KEY = 'progear-fga-checks';
 const PENDING_APPROVAL_STORAGE_KEY = 'progear-pending-approval';
 const APPROVAL_ANNOUNCED_STORAGE_KEY = 'progear-approval-announced';
 
-// Decode JWT payload (for display only, no validation)
-function decodeJwtPayload(token: string): Record<string, any> | null {
-  try {
-    const parts = token.split('.');
-    if (parts.length !== 3) return null;
-    const payload = parts[1];
-    const decoded = atob(payload.replace(/-/g, '+').replace(/_/g, '/'));
-    return JSON.parse(decoded);
-  } catch {
-    return null;
-  }
+// Pull the router's classified intent (agents + scopes) out of an agent_flow
+// array so it can be shown inline under the assistant's reply, even when the
+// request later fails for infrastructure reasons. Answers "what did the AI
+// understand this prompt to mean" directly, instead of leaving that only
+// inferable from whether the answer happened to come back right.
+function getRouterSummary(agentFlow?: any[]): string | null {
+  if (!agentFlow) return null;
+  const routerStep = agentFlow.find((s) => s.step === 'router' && s.agents && s.scopes);
+  if (!routerStep) return null;
+  const parts = (routerStep.agents as string[]).map((agent) => {
+    const scopes = (routerStep.scopes[agent] || []) as string[];
+    return `${agent}: ${scopes.join(', ')}`;
+  });
+  return parts.length ? `Interpreted as → ${parts.join(' · ')}` : null;
 }
 
 export default function Home() {
@@ -230,6 +230,34 @@ export default function Home() {
     ]);
   };
 
+  // Now that the Token/Approval detail card lives on /tokens, the chat page
+  // owns its own lightweight poll so a pending manager-approval request still
+  // gets announced in the conversation even if the user never opens /tokens.
+  useEffect(() => {
+    if (!pendingApproval) return;
+    if (pendingApproval.status === 'executed' || pendingApproval.status === 'denied') return;
+
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/approvals/${pendingApproval.request_id}`);
+        if (!res.ok || cancelled) return;
+        const data: ApprovalStatus = await res.json();
+        if (!cancelled) handleApprovalStatusChange(data);
+      } catch {
+        /* next tick retries */
+      }
+    };
+
+    tick();
+    const handle = setInterval(tick, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(handle);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingApproval?.request_id, pendingApproval?.status]);
+
   const handleSignOut = async () => {
     // Get the idToken BEFORE signing out (session will be cleared after signOut)
     const idToken = session?.idToken;
@@ -401,6 +429,22 @@ export default function Home() {
 
           <div className="flex items-center space-x-3">
             <div className="flex items-center gap-3">
+              <Link
+                href="/tokens"
+                className="px-4 py-2.5 bg-white/10 hover:bg-accent/30 text-white rounded-lg transition border border-white/20 hover:border-accent/50 flex items-center gap-2 text-sm"
+                title="Token exchanges, FGA checks, and demo controls"
+              >
+                <Key className="w-4 h-4" />
+                <span className="hidden sm:inline">Tokens</span>
+              </Link>
+              <Link
+                href="/architecture"
+                className="px-4 py-2.5 bg-white/10 hover:bg-accent/30 text-white rounded-lg transition border border-white/20 hover:border-accent/50 flex items-center gap-2 text-sm"
+                title="How the system is wired together"
+              >
+                <GitBranch className="w-4 h-4" />
+                <span className="hidden sm:inline">Architecture</span>
+              </Link>
               <span className="text-gray-200 text-sm">{session?.user?.email}</span>
               <button
                 onClick={handleSignOut}
@@ -416,12 +460,11 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Dual Pane Layout */}
+      {/* Chat - full width; token/FGA/approval detail lives on /tokens now */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Left Pane - Chat Interface */}
-        <div className="w-2/5 flex flex-col bg-gradient-to-b from-neutral-bg to-white">
+        <div className="w-full flex flex-col bg-gradient-to-b from-neutral-bg to-white">
           {/* Messages Area */}
-          <div className="flex-1 overflow-y-auto p-6 space-y-4">
+          <div className="flex-1 overflow-y-auto p-6 space-y-4 max-w-3xl mx-auto w-full">
             {chatMessages.length === 0 && (
               <div className="text-center py-8 max-w-2xl mx-auto">
                 <div className="inline-block mb-4 relative">
@@ -481,6 +524,11 @@ export default function Home() {
                     <p className={`whitespace-pre-wrap ${msg.role === 'assistant' ? 'text-gray-700' : ''}`}>
                       {msg.content}
                     </p>
+                    {msg.role === 'assistant' && getRouterSummary(msg.agentFlow) && (
+                      <div className="text-[11px] font-mono text-okta-blue/80 mt-2 pt-2 border-t border-neutral-border/60">
+                        {getRouterSummary(msg.agentFlow)}
+                      </div>
+                    )}
                     <div className={`text-xs mt-2 ${msg.role === 'user' ? 'text-white/70' : 'text-gray-400'}`}>
                       {new Date(msg.timestamp).toLocaleTimeString()}
                     </div>
@@ -540,60 +588,6 @@ export default function Home() {
               </button>
             </form>
           </div>
-        </div>
-
-        {/* Right Pane - Security Dashboard */}
-        <div className="w-3/5 bg-gradient-to-b from-gray-50 to-white border-l-4 border-accent/30 overflow-y-auto p-4 space-y-4">
-          <div className="text-center pb-4 border-b-2 border-accent/20">
-            <h2 className="text-lg font-bold text-gray-800 flex items-center justify-center gap-2">
-              <svg className="w-5 h-5 text-okta-blue" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-              </svg>
-              Security Dashboard
-            </h2>
-          </div>
-
-          {/* Agent Flow */}
-          <AgentFlowCard steps={currentAgentFlow} isLoading={isLoading} />
-
-          {/* Token Exchanges */}
-          <TokenExchangeCard exchanges={currentTokenExchanges} />
-
-          {/* Raw Tokens (Collapsed by default) */}
-          <RawTokensCard
-            exchanges={currentTokenExchanges}
-            idTokenClaims={session?.idToken ? decodeJwtPayload(session.idToken) ?? undefined : undefined}
-            idTokenRaw={session?.idToken}
-          />
-
-          {/* FGA Fine-Grained Authorization */}
-          <FGAExplanationCard checks={currentFGAChecks} isLoading={isLoading} />
-
-          {pendingApproval && (
-            <div className="mt-4">
-              <ApprovalStatusCard
-                key={pendingApproval.request_id}
-                initial={pendingApproval}
-                onStatusChange={handleApprovalStatusChange}
-              />
-            </div>
-          )}
-
-          {/* Architecture Link */}
-          <Link
-            href="/architecture"
-            className="block p-4 bg-gradient-to-r from-okta-blue to-okta-blue-light text-white rounded-xl hover:shadow-lg transition hover:scale-[1.02]"
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="font-semibold">Learn More</div>
-                <div className="text-sm text-white/80">View Architecture Details</div>
-              </div>
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
-            </div>
-          </Link>
         </div>
       </div>
     </main>

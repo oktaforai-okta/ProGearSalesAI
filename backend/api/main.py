@@ -29,6 +29,7 @@ from typing import Optional, List, Dict, Any
 from auth.okta_auth import get_okta_auth
 from auth.agent_config import get_all_agent_configs, DEMO_AGENTS
 from auth.fga_client import close_fga_client
+from auth.demo_admin import toggle_demo_attribute, reset_demo_attributes, ALLOWED_ATTRIBUTES
 from orchestrator.orchestrator import Orchestrator
 from dataclasses import asdict
 from data.demo_store import demo_store
@@ -89,8 +90,14 @@ async def _approval_poller_loop():
 
     Only resolves; idempotency is enforced inside ApprovalService.execute_if_approved.
     Never raises — swallows every error so the loop body can't take down the task.
+
+    Backs off on consecutive errors (429/500 from Okta's governance API were
+    observed hitting this loop every ~60s in production logs) instead of
+    retrying at a fixed interval regardless of Okta's health.
     """
-    interval = int(os.getenv("APPROVAL_POLL_INTERVAL_SECONDS", "60"))
+    base_interval = int(os.getenv("APPROVAL_POLL_INTERVAL_SECONDS", "120"))
+    max_interval = base_interval * 8
+    interval = base_interval
     req_type_id = os.environ.get("OKTA_OIG_INVENTORY_REQUEST_TYPE_ID")
     if not req_type_id:
         logger.warning("OKTA_OIG_INVENTORY_REQUEST_TYPE_ID not set; approval poller disabled")
@@ -115,8 +122,10 @@ async def _approval_poller_loop():
                     await svc.execute_if_approved(rid)
                 except Exception as exc:
                     logger.warning(f"Approval poller: execute failed for {rid}: {exc}")
+            interval = base_interval
         except Exception as exc:
-            logger.warning(f"Approval poller: loop error: {exc}")
+            interval = min(interval * 2, max_interval)
+            logger.warning(f"Approval poller: loop error, backing off to {interval}s: {exc}")
         await _approval_asyncio.sleep(interval)
 
 
@@ -567,6 +576,74 @@ async def okta_system_logs(
             "logs": [],
             "error": str(e)
         }
+
+
+# --- Demo FGA Controls (real Okta profile mutation, scoped to caller) ---
+
+class DemoToggleRequest(BaseModel):
+    """Body for POST /api/admin/demo-toggle."""
+    attribute: str
+    value: Any
+
+
+async def _resolve_caller_user_id(authorization: Optional[str]) -> str:
+    """Validate the caller's bearer token and return their Okta login/email.
+
+    Never trust a user id from the request body for demo-admin endpoints -
+    the caller can only ever mutate their own Okta profile.
+    """
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing bearer token")
+
+    okta_auth = get_okta_auth()
+    try:
+        user_claims = await okta_auth.validate_token(authorization[7:])
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"Invalid token: {e}")
+
+    user_id = user_claims.get("email") or user_claims.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Token missing subject/email")
+    return user_id
+
+
+@app.post("/api/admin/demo-toggle")
+async def demo_toggle(
+    request: DemoToggleRequest,
+    authorization: Optional[str] = Header(None, alias="Authorization")
+):
+    """
+    Demo-only: toggle the SIGNED-IN user's own is_on_vacation / is_a_manager /
+    clearance_level Okta attribute for real, so the FGA scenarios (manager on
+    vacation, insufficient clearance) can be shown live without an Okta Admin
+    Console detour mid-demo. See auth/demo_admin.py for the scoping rules.
+    """
+    user_id = await _resolve_caller_user_id(authorization)
+
+    if request.attribute not in ALLOWED_ATTRIBUTES:
+        raise HTTPException(status_code=400, detail=f"Attribute must be one of {sorted(ALLOWED_ATTRIBUTES)}")
+
+    try:
+        return await toggle_demo_attribute(user_id, request.attribute, request.value)
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        logger.error(f"demo_toggle failed: {e}")
+        raise HTTPException(status_code=502, detail=f"Okta update failed: {e}")
+
+
+@app.post("/api/admin/demo-reset")
+async def demo_reset(authorization: Optional[str] = Header(None, alias="Authorization")):
+    """Restore the signed-in user's demo attributes to their pre-toggle values."""
+    user_id = await _resolve_caller_user_id(authorization)
+
+    try:
+        return await reset_demo_attributes(user_id)
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        logger.error(f"demo_reset failed: {e}")
+        raise HTTPException(status_code=502, detail=f"Okta update failed: {e}")
 
 
 # --- Approval Resolver Endpoint ---

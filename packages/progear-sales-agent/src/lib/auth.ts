@@ -1,5 +1,53 @@
 import type { NextAuthOptions } from 'next-auth';
+import type { JWT } from 'next-auth/jwt';
 import OktaProvider from 'next-auth/providers/okta';
+
+// The Okta AI SDK's Step 1 (ID token -> ID-JAG at the Org AS) needs a live,
+// unexpired ID token. Okta ID tokens are typically short-lived (~1hr), and
+// without this refresh the ID token captured at login goes stale for any
+// session left open longer than that - every chat message after expiry then
+// fails Step 1 with 'subject_token' is invalid, which orchestrator.py now
+// surfaces as an explicit "session expired" error instead of silently
+// swallowing it. This refresh removes the need for that error path entirely
+// for normal-length sessions.
+//
+// Requires the Okta OIDC app to have the refresh_token grant type enabled and
+// the authorization request to include the offline_access scope - see the
+// `authorization.params.scope` below and the deployment note in the repo.
+async function refreshOktaToken(token: JWT): Promise<JWT> {
+  try {
+    const issuer = process.env.NEXT_PUBLIC_OKTA_ISSUER!;
+    const response = await fetch(`${issuer}/oauth2/v1/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        client_id: process.env.NEXT_PUBLIC_OKTA_CLIENT_ID!,
+        client_secret: process.env.OKTA_CLIENT_SECRET || '',
+        refresh_token: token.refreshToken || '',
+      }),
+    });
+
+    const refreshed = await response.json();
+    if (!response.ok) throw refreshed;
+
+    return {
+      ...token,
+      idToken: refreshed.id_token,
+      accessToken: refreshed.access_token,
+      expiresAt: Math.floor(Date.now() / 1000) + refreshed.expires_in,
+      refreshToken: refreshed.refresh_token ?? token.refreshToken,
+      error: undefined,
+    };
+  } catch (error) {
+    console.error('Error refreshing Okta token', error);
+    // Keep the stale token rather than dropping the session - the next
+    // /api/chat call will surface a clear "session expired" error via the
+    // token_expired path in multi_agent_auth.py, and the sign-in page is one
+    // click away.
+    return { ...token, error: 'RefreshAccessTokenError' };
+  }
+}
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -7,6 +55,7 @@ export const authOptions: NextAuthOptions = {
       clientId: process.env.NEXT_PUBLIC_OKTA_CLIENT_ID!,
       clientSecret: process.env.OKTA_CLIENT_SECRET || 'placeholder-for-pkce',
       issuer: process.env.NEXT_PUBLIC_OKTA_ISSUER!,
+      authorization: { params: { scope: 'openid profile email offline_access' } },
     }),
   ],
   pages: {
@@ -17,12 +66,25 @@ export const authOptions: NextAuthOptions = {
       if (account) {
         token.accessToken = account.access_token;
         token.idToken = account.id_token;
+        token.refreshToken = account.refresh_token;
+        token.expiresAt = account.expires_at;
+        return token;
       }
-      return token;
+
+      // Refresh ~60s before actual expiry to avoid a request racing the
+      // exact expiry boundary.
+      if (token.expiresAt && Date.now() < token.expiresAt * 1000 - 60_000) {
+        return token;
+      }
+      if (!token.refreshToken) {
+        return token;
+      }
+      return refreshOktaToken(token);
     },
     async session({ session, token }) {
       session.accessToken = token.accessToken as string;
       session.idToken = token.idToken as string;
+      session.error = token.error;
       session.user = {
         ...session.user,
         id: token.sub as string,

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { CheckCircle, ChevronDown, ChevronUp, XCircle, Shield, Key } from 'lucide-react';
+import { CheckCircle, ChevronDown, ChevronUp, XCircle, AlertTriangle, Shield, Key } from 'lucide-react';
 
 interface TokenExchange {
   agent: string;
@@ -9,9 +9,9 @@ interface TokenExchange {
   color: string;
   success: boolean;
   access_denied: boolean;
-  status: string;
+  status: string; // 'granted' | 'denied' | 'error' - set explicitly by the backend, see orchestrator.py::_exchange_tokens_node
   scopes: string[];
-  requested_scopes?: string[];  // What was requested (shown for denied cases)
+  requested_scopes?: string[];  // What was requested (shown for denied/error cases)
   error?: string;
   demo_mode: boolean;
 }
@@ -20,23 +20,11 @@ interface Props {
   exchanges: TokenExchange[];
 }
 
-// Helper to detect if an error is a policy denial (even if access_denied flag isn't set)
-const isPolicyDenial = (exchange: TokenExchange): boolean => {
-  if (exchange.access_denied) return true;
-  if (!exchange.error) return false;
-
-  const errorLower = exchange.error.toLowerCase();
-  const policyKeywords = [
-    'policy', 'denied', 'token_exchange_failed',
-    'no_matching_policy', 'access_denied', 'authorization'
-  ];
-  return policyKeywords.some(kw => errorLower.includes(kw));
-};
-
 export default function TokenExchangeCard({ exchanges }: Props) {
   const [isExpanded, setIsExpanded] = useState(false);
-  const granted = exchanges.filter(e => e.success && !isPolicyDenial(e));
-  const denied = exchanges.filter(e => isPolicyDenial(e));
+  const granted = exchanges.filter(e => e.status === 'granted');
+  const denied = exchanges.filter(e => e.status === 'denied');
+  const errored = exchanges.filter(e => e.status === 'error');
 
   return (
     <div className="bg-white rounded-xl border-2 border-neutral-border shadow-sm overflow-hidden">
@@ -87,13 +75,26 @@ export default function TokenExchangeCard({ exchanges }: Props) {
               </div>
             </div>
           )}
+
+          {errored.length > 0 && (
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-full bg-amber-500/10 flex items-center justify-center">
+                <AlertTriangle className="w-4 h-4 text-amber-600" />
+              </div>
+              <div>
+                <div className="text-lg font-bold text-amber-600">{errored.length}</div>
+                <div className="text-[10px] text-gray-500 uppercase">System Error</div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Exchange List */}
         <div className="space-y-2 max-h-64 overflow-y-auto">
           {exchanges.map((exchange, idx) => {
-            const isDenied = isPolicyDenial(exchange);
-            const isGranted = exchange.success && !isDenied;
+            const isGranted = exchange.status === 'granted';
+            const isDenied = exchange.status === 'denied';
+            const isError = exchange.status === 'error';
 
             return (
               <div
@@ -101,7 +102,9 @@ export default function TokenExchangeCard({ exchanges }: Props) {
                 className={`rounded-lg border-2 p-3 transition-all ${
                   isGranted
                     ? 'border-success-green/30 bg-success-green/5'
-                    : 'border-error-red/30 bg-error-red/5'
+                    : isError
+                      ? 'border-amber-400/40 bg-amber-50/50'
+                      : 'border-error-red/30 bg-error-red/5'
                 }`}
               >
                 <div className="flex items-start justify-between">
@@ -125,14 +128,23 @@ export default function TokenExchangeCard({ exchanges }: Props) {
                   <div className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold ${
                     isGranted
                       ? 'bg-success-green/20 text-success-green'
-                      : 'bg-error-red/20 text-error-red'
+                      : isError
+                        ? 'bg-amber-500/20 text-amber-700'
+                        : 'bg-error-red/20 text-error-red'
                   }`}>
-                    {isGranted ? (
+                    {isGranted && (
                       <>
                         <CheckCircle className="w-3 h-3" />
                         <span>Granted</span>
                       </>
-                    ) : (
+                    )}
+                    {isError && (
+                      <>
+                        <AlertTriangle className="w-3 h-3" />
+                        <span>System Error</span>
+                      </>
+                    )}
+                    {isDenied && (
                       <>
                         <XCircle className="w-3 h-3" />
                         <span>Denied</span>
@@ -155,14 +167,18 @@ export default function TokenExchangeCard({ exchanges }: Props) {
                   </div>
                 )}
 
-                {/* Denied Scopes - show what was requested but denied */}
-                {isDenied && exchange.requested_scopes && exchange.requested_scopes.length > 0 && (
+                {/* Denied/Errored - show what was requested */}
+                {(isDenied || isError) && exchange.requested_scopes && exchange.requested_scopes.length > 0 && (
                   <div className="mt-2">
                     <div className="flex flex-wrap gap-1">
                       {exchange.requested_scopes.map((scope, sIdx) => (
                         <span
                           key={sIdx}
-                          className="px-2 py-0.5 bg-error-red/10 text-error-red text-[10px] rounded-full font-mono border border-error-red/30 line-through"
+                          className={`px-2 py-0.5 text-[10px] rounded-full font-mono border ${
+                            isError
+                              ? 'bg-amber-100 text-amber-700 border-amber-300'
+                              : 'bg-error-red/10 text-error-red border-error-red/30 line-through'
+                          }`}
                         >
                           {scope}
                         </span>
@@ -176,6 +192,14 @@ export default function TokenExchangeCard({ exchanges }: Props) {
                   <div className="mt-2 flex items-center gap-1.5 text-[11px] text-gray-500">
                     <Shield className="w-3.5 h-3.5" />
                     <span>Blocked by Okta governance policy</span>
+                  </div>
+                )}
+
+                {/* System error - distinct from a policy decision, shows the real cause */}
+                {isError && (
+                  <div className="mt-2 flex items-start gap-1.5 text-[11px] text-amber-700">
+                    <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                    <span>{exchange.error || 'A backend/Okta system error occurred - not a policy decision.'}</span>
                   </div>
                 )}
               </div>

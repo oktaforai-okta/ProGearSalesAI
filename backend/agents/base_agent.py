@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 # Anthropic configuration
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "claude-sonnet-4-20250514")
+LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "claude-sonnet-4-6")  # previous default (claude-sonnet-4-20250514) was retired
 
 
 class BaseAgent:

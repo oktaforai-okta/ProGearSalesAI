@@ -1,6 +1,6 @@
 'use client';
 
-import { CheckCircle, XCircle, Clock, ArrowRight } from 'lucide-react';
+import { CheckCircle, XCircle, Clock, ArrowRight, AlertTriangle } from 'lucide-react';
 
 interface AgentFlowStep {
   step: string;
@@ -8,6 +8,9 @@ interface AgentFlowStep {
   status: string;
   color?: string;
   agents?: string[];
+  scopes?: Record<string, string[]>;
+  detail?: string;
+  requested_scopes?: string[];
 }
 
 interface Props {
@@ -32,7 +35,7 @@ const agentIcons: Record<string, string> = {
 // Determine which technology handles each step
 function getTechBadge(step: string): { label: string; color: string; bg: string } | null {
   if (step === 'router' || step.includes('routing')) {
-    return { label: 'LangChain', color: '#854d0e', bg: '#fef3c7' }; // Yellow/amber for LangChain
+    return { label: 'LangGraph', color: '#854d0e', bg: '#fef3c7' }; // Yellow/amber for LangGraph
   }
   if (step.includes('token') || step.includes('exchange')) {
     return { label: 'Okta', color: '#1e40af', bg: '#dbeafe' }; // Blue for Okta
@@ -100,7 +103,7 @@ export default function AgentFlowCard({ steps, isLoading }: Props) {
               d="M13 10V3L4 14h7v7l9-11h-7z" />
           </svg>
           <span>Agent Flow</span>
-          <span className="text-white/60 text-sm font-normal">— LangChain + Claude</span>
+          <span className="text-white/60 text-sm font-normal">— LangGraph + Claude</span>
         </h3>
       </div>
 
@@ -124,10 +127,13 @@ export default function AgentFlowCard({ steps, isLoading }: Props) {
               const agentStep = steps.find(s => s.step === `${agent}_agent`);
               const status = agentStep?.status || (isInvolved ? 'pending' : 'inactive');
 
-              // Determine background color: red for denied, brand color otherwise
+              // Determine background color: red for denied, amber for a real
+              // system error (distinct from denied - this is a backend/Okta
+              // failure, not a policy decision), brand color otherwise.
               const getBackgroundColor = () => {
                 if (status === 'inactive') return undefined;
                 if (status === 'denied') return '#ef4444'; // Red for denied
+                if (status === 'error') return '#f59e0b'; // Amber for system error
                 return agentColors[agent]; // Brand color for all other states
               };
 
@@ -137,15 +143,18 @@ export default function AgentFlowCard({ steps, isLoading }: Props) {
                     className={`w-10 h-10 rounded-lg flex items-center justify-center text-sm font-bold transition-all ${
                       status === 'completed' ? 'text-white shadow-lg' :
                       status === 'denied' ? 'text-white shadow-lg' :
+                      status === 'error' ? 'text-white shadow-lg' :
                       status === 'pending' ? 'text-white animate-pulse' :
                       'bg-gray-200 text-gray-400'
                     }`}
                     style={{
                       backgroundColor: getBackgroundColor()
                     }}
+                    title={status === 'error' ? (agentStep?.detail || 'System error') : undefined}
                   >
                     {status === 'completed' && <CheckCircle className="w-5 h-5" />}
                     {status === 'denied' && <XCircle className="w-5 h-5" />}
+                    {status === 'error' && <AlertTriangle className="w-5 h-5" />}
                     {status === 'pending' && <Clock className="w-5 h-5" />}
                     {status === 'inactive' && agentIcons[agent]}
                   </div>

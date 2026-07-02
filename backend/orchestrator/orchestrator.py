@@ -23,7 +23,7 @@ import json
 
 # Load environment variables for Anthropic API
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "claude-sonnet-4-20250514")  # Model name
+LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "claude-sonnet-4-6")  # Model name - previous default (claude-sonnet-4-20250514) was retired
 
 from auth.multi_agent_auth import (
     get_multi_agent_exchange,
@@ -445,25 +445,28 @@ Return ONLY the JSON object, no other text."""
         for agent_type in agents:
             scopes = state["agent_scopes"].get(agent_type, [])
 
-            # Run FGA check using FGA API with new model
-            # - user_email: from token's email claim
-            # - is_on_vacation: passed as contextual tuple if true
-            # - item_id: default to "widget-a" (general inventory item)
-            # Note: In a real app, you'd map the user's request to specific items
-            result: FGACheckResult = await check_agent_access(
-                user_email=user_email,
-                agent_type=agent_type,
-                scopes=scopes,
-                is_on_vacation=is_on_vacation,
-                item_id="widget-a",  # Default item for demo
-            )
-
-            # Determine required clearance for the item (for UI display)
+            # Determine which item this request concerns BEFORE running the real
+            # check, so the real check and the UI-displayed item/clearance always
+            # agree. Previously the real check always ran against "widget-a" while
+            # the displayed item/clearance could independently switch to
+            # "classified-part" based on message content - the two could disagree.
             item_id = "widget-a"  # Default item
             item_required_clearance = 3  # widget-a requires clearance 3
             if "classified" in state["user_message"].lower():
                 item_id = "classified-part"
                 item_required_clearance = 7  # classified-part requires clearance 7
+
+            # Run FGA check using FGA API with new model
+            # - user_email: from token's email claim
+            # - is_on_vacation: passed as contextual tuple if true
+            # - item_id: the item determined above, so display and enforcement match
+            result: FGACheckResult = await check_agent_access(
+                user_email=user_email,
+                agent_type=agent_type,
+                scopes=scopes,
+                is_on_vacation=is_on_vacation,
+                item_id=item_id,
+            )
 
             # Record the FGA check for UI visibility with real values
             fga_check_record = {
@@ -807,6 +810,22 @@ Return ONLY the JSON object, no other text."""
                     "color": exchange_result["agent_info"]["color"],
                     "requested_scopes": requested_scopes
                 })
+            else:
+                # Real system/infrastructure error (expired token, Okta outage, SDK
+                # failure, etc.) - distinct from access_denied. Without this branch
+                # the agent silently vanishes from agent_flow (stuck "pending" in the
+                # UI forever) and _generate_response_node has nothing to say about it,
+                # degrading to the generic "I'm not sure how to help" message that
+                # looks like a routing failure but is actually a masked backend error.
+                error_detail = exchange_result.get("error", "Unknown error")
+                state["agent_flow"].append({
+                    "step": f"{agent_type}_agent",
+                    "action": f"{display_name}",
+                    "detail": f"SYSTEM ERROR: {error_detail}",
+                    "status": "error",
+                    "color": exchange_result["agent_info"]["color"],
+                    "requested_scopes": requested_scopes
+                })
 
         state["agent_results"] = agent_results
         return state
@@ -1011,15 +1030,23 @@ Return ONLY the JSON object, no other text."""
 
         agent_results = state["agent_results"]
 
-        # Collect successful responses and denied agents
+        # Collect successful responses, denied agents, and agents that hit a real
+        # system error (token exchange failed for reasons other than a policy
+        # denial). These three cases must stay distinguishable in the final
+        # response - collapsing "system error" into the generic fallback is what
+        # made real backend/Okta failures look like the AI misunderstanding the
+        # prompt.
         responses = []
         denied_agents = []
+        system_error_agents = []
 
         for agent_type, result in agent_results.items():
             if result["success"] and "response" in result:
                 responses.append(result["response"])
             elif result.get("access_denied"):
                 denied_agents.append(result["agent_info"]["name"])
+            elif not result["success"]:
+                system_error_agents.append((result["agent_info"]["name"], result.get("error", "Unknown error")))
 
         # Generate combined response
         if responses:
@@ -1049,6 +1076,22 @@ If some agents were denied, acknowledge what information is missing but focus on
                 logger.error(f"Response synthesis failed: {e}")
                 final_response = combined_data
 
+        elif system_error_agents:
+            # Real infrastructure/Okta failure - the router understood the request
+            # and picked the right agent(s), the token exchange itself failed.
+            # Say so explicitly instead of falling through to the generic
+            # "I'm not sure how to help" message, which reads as an LLM
+            # comprehension failure when it's actually a backend/Okta problem.
+            names = ", ".join(name for name, _ in system_error_agents)
+            details = "; ".join(f"{name}: {err}" for name, err in system_error_agents)
+            final_response = (
+                f"I understood you're asking about {names}, but hit a system error "
+                f"reaching that service - this is a backend/Okta connectivity issue, "
+                f"not a misunderstanding of your request. Please try again in a moment.\n\n"
+                f"Details: {details}"
+            )
+            if denied_agents:
+                final_response += f"\n\nAlso denied (as expected by policy): {', '.join(denied_agents)}"
         elif denied_agents:
             final_response = (
                 f"I apologize, but you don't have access to the agents needed for this request.\n\n"
