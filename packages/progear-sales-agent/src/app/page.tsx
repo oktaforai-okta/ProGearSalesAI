@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Key, GitBranch } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { type ApprovalStatus } from '@/components/ApprovalStatusCard';
 import { API_BASE_URL, OKTA_DOMAIN } from '@/lib/config';
 
@@ -63,6 +64,22 @@ const markdownComponents = {
   li: ({ children }: { children?: ReactNode }) => <li>{children}</li>,
   code: ({ children }: { children?: ReactNode }) => (
     <code className="bg-gray-100 text-accent px-1 py-0.5 rounded text-sm font-mono">{children}</code>
+  ),
+  // Tables need remark-gfm to even parse (plain react-markdown only speaks
+  // CommonMark, not GFM tables) - without it, "| Product | Stock |..." shows
+  // up as a literal pipe-delimited line of text instead of a real table.
+  table: ({ children }: { children?: ReactNode }) => (
+    <div className="overflow-x-auto mb-2">
+      <table className="min-w-full border border-neutral-border rounded-lg text-sm">{children}</table>
+    </div>
+  ),
+  thead: ({ children }: { children?: ReactNode }) => <thead className="bg-gray-50">{children}</thead>,
+  tr: ({ children }: { children?: ReactNode }) => <tr className="border-b border-neutral-border last:border-0">{children}</tr>,
+  th: ({ children }: { children?: ReactNode }) => (
+    <th className="px-3 py-2 text-left font-semibold text-gray-700 border-r border-neutral-border last:border-0">{children}</th>
+  ),
+  td: ({ children }: { children?: ReactNode }) => (
+    <td className="px-3 py-2 border-r border-neutral-border last:border-0">{children}</td>
   ),
 };
 
@@ -435,7 +452,7 @@ export default function Home() {
               title="How the system is wired together"
             >
               <GitBranch className="w-4 h-4" />
-              <span className="hidden sm:inline">Architecture</span>
+              <span className="hidden sm:inline">How it works?</span>
             </Link>
           </div>
 
@@ -519,7 +536,7 @@ export default function Home() {
                   }`}>
                     {msg.role === 'assistant' ? (
                       <div className="text-gray-700 text-sm [&_p:last-child]:mb-0">
-                        <ReactMarkdown components={markdownComponents}>{msg.content}</ReactMarkdown>
+                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{msg.content}</ReactMarkdown>
                       </div>
                     ) : (
                       <p className="whitespace-pre-wrap">{msg.content}</p>

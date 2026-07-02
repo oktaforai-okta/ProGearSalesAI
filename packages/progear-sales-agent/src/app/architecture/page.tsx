@@ -338,266 +338,6 @@ export default function ArchitecturePage() {
           </div>
         </CollapsibleSection>
 
-        {/* Okta Configuration */}
-        <CollapsibleSection
-          title="Live Okta Configuration"
-          subtitle="Actual configuration from Okta Admin Console"
-          icon={<Database className="w-5 h-5" />}
-          defaultOpen={true}
-        >
-          <div className="mt-4 space-y-6">
-            {/* AI Agent Identity */}
-            <div className="bg-gradient-to-r from-okta-blue/10 to-blue-50 rounded-xl p-5 border border-okta-blue/30">
-              <div className="flex items-center gap-3 mb-4">
-                <Bot className="w-6 h-6 text-okta-blue" />
-                <div>
-                  <div className="font-bold text-gray-800">AI Agent Identity</div>
-                  <div className="text-sm text-gray-500">Registered in Okta as Workload Identity Principal</div>
-                </div>
-              </div>
-              <div className="grid md:grid-cols-2 gap-4">
-                <div className="bg-white rounded-lg p-4 border border-gray-200">
-                  <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Agent Name</div>
-                  <div className="font-semibold text-gray-800">ProGear Sales Agent</div>
-                </div>
-                <div className="bg-white rounded-lg p-4 border border-gray-200">
-                  <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Agent ID (wlp)</div>
-                  <div className="font-mono text-sm text-okta-blue">wlp8x5q7mvH86KvFJ0g7</div>
-                </div>
-              </div>
-            </div>
-
-            {/* Authorization Servers */}
-            <div>
-              <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
-                <Server className="w-5 h-5 text-gray-600" />
-                Authorization Servers (4 MCP APIs)
-              </h3>
-              <div className="grid md:grid-cols-2 gap-3">
-                {[
-                  { name: "ProGear Sales MCP", id: "aus8xdftgwlTMxp3u0g7", audience: "api://progear-sales", scopes: ["sales:read", "sales:quote", "sales:order"], color: "#3b82f6" },
-                  { name: "ProGear Inventory MCP", id: "aus8xdg1oaSVfDgxa0g7", audience: "api://progear-inventory", scopes: ["inventory:read", "inventory:write", "inventory:alert"], color: "#10b981" },
-                  { name: "ProGear Customer MCP", id: "aus8xdfti92mIRSAE0g7", audience: "api://progear-customer", scopes: ["customer:read", "customer:lookup", "customer:history"], color: "#8b5cf6" },
-                  { name: "ProGear Pricing MCP", id: "aus8xdepyb5DHmTlq0g7", audience: "api://progear-pricing", scopes: ["pricing:read", "pricing:margin", "pricing:discount"], color: "#f59e0b" },
-                ].map((server, idx) => (
-                  <div key={idx} className="bg-white rounded-lg p-4 border-2 border-gray-100 hover:border-gray-200 transition">
-                    <div className="flex items-center gap-2 mb-2">
-                      <div className="w-3 h-3 rounded-full" style={{ backgroundColor: server.color }} />
-                      <span className="font-semibold text-gray-800 text-sm">{server.name}</span>
-                    </div>
-                    <div className="space-y-1 text-xs">
-                      <div><span className="text-gray-500">ID:</span> <span className="font-mono text-gray-600">{server.id}</span></div>
-                      <div><span className="text-gray-500">Audience:</span> <span className="font-mono text-gray-600">{server.audience}</span></div>
-                      <div className="flex flex-wrap gap-1 mt-2">
-                        {server.scopes.map((scope, sIdx) => (
-                          <span key={sIdx} className="px-1.5 py-0.5 rounded text-white text-[10px] font-mono" style={{ backgroundColor: server.color }}>
-                            {scope}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* User Groups */}
-            <div>
-              <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
-                <Users className="w-5 h-5 text-gray-600" />
-                Access Control Groups
-              </h3>
-              <div className="grid md:grid-cols-3 gap-3">
-                {[
-                  { name: "ProGear-Sales", id: "00g8xdepuhJhZ3Ecs0g7", desc: "Full agent access", access: ["Sales", "Inventory", "Customer", "Pricing"] },
-                  { name: "ProGear-Warehouse", id: "00g8xdf4j4wmXgZMe0g7", desc: "Inventory only", access: ["Inventory"] },
-                  { name: "ProGear-Finance", id: "00g8xdfshmbpjDjSA0g7", desc: "Pricing only", access: ["Pricing"] },
-                ].map((group, idx) => (
-                  <div key={idx} className="bg-white rounded-lg p-4 border-2 border-gray-100">
-                    <div className="font-semibold text-gray-800 text-sm mb-1">{group.name}</div>
-                    <div className="text-xs text-gray-500 mb-2">{group.desc}</div>
-                    <div className="text-[10px] font-mono text-gray-400 mb-2">{group.id}</div>
-                    <div className="flex flex-wrap gap-1">
-                      {group.access.map((a, aIdx) => (
-                        <span key={aIdx} className="px-1.5 py-0.5 bg-green-100 text-green-700 rounded text-[10px]">
-                          {a}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </CollapsibleSection>
-
-        {/* LangGraph Orchestration */}
-        <CollapsibleSection
-          title="LangGraph Orchestration"
-          subtitle="LangGraph workflow with intent-based scope detection"
-          icon={<Cpu className="w-5 h-5" />}
-          defaultOpen={false}
-        >
-          <div className="mt-4 space-y-6">
-            {/* Workflow Pipeline */}
-            <div className="bg-gray-50 rounded-xl p-5">
-              <h3 className="font-bold text-gray-800 mb-3 text-sm uppercase tracking-wide">LangGraph Workflow</h3>
-              <div className="bg-gray-900 rounded-lg p-4 font-mono text-sm">
-                <div className="flex items-center gap-2 flex-wrap text-gray-300">
-                  <span className="px-2 py-1 bg-purple-500/30 rounded text-purple-300">router</span>
-                  <span className="text-gray-500">→</span>
-                  <span className="px-2 py-1 bg-okta-blue/30 rounded text-blue-300">exchange_tokens</span>
-                  <span className="text-gray-500">→</span>
-                  <span className="px-2 py-1 bg-green-500/30 rounded text-green-300">process_agents</span>
-                  <span className="text-gray-500">→</span>
-                  <span className="px-2 py-1 bg-gray-500/30 rounded text-gray-300">generate_response</span>
-                  <span className="text-gray-500">→</span>
-                  <span className="text-gray-500">END</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Router Decision */}
-            <div className="bg-white rounded-xl p-5 border border-gray-200">
-              <h3 className="font-bold text-gray-800 mb-3 text-sm uppercase tracking-wide">Router Node Output</h3>
-              <p className="text-sm text-gray-600 mb-3">LLM analyzes query intent and returns agents + required scopes:</p>
-              <div className="bg-gray-900 rounded-lg p-4 font-mono text-xs overflow-x-auto">
-                <pre className="text-gray-300">{`{
-  "inventory": { "needed": true,  "scopes": ["inventory:read"] },
-  "customer":  { "needed": true,  "scopes": ["customer:lookup"] },
-  "pricing":   { "needed": true,  "scopes": ["pricing:discount"] },
-  "sales":     { "needed": true,  "scopes": ["sales:quote"] }
-}`}</pre>
-              </div>
-              <p className="text-xs text-gray-500 mt-2 italic">Scope selection based on operation type: read queries → :read, write operations → :write, bulk pricing → :discount</p>
-            </div>
-
-            {/* Example with Scopes */}
-            <div className="bg-white rounded-xl p-5 border border-gray-200">
-              <h3 className="font-bold text-gray-800 mb-3 text-sm uppercase tracking-wide">Example Query → Token Exchange</h3>
-              <div className="bg-purple-50 rounded-lg p-3 mb-4 border-l-4 border-purple-500">
-                <div className="text-sm text-purple-800 font-mono">
-                  "Can we fulfill 1500 basketballs for State University at a bulk discount?"
-                </div>
-              </div>
-              <div className="grid md:grid-cols-4 gap-3">
-                <div className="p-3 bg-green-50 rounded-lg border border-green-200">
-                  <div className="text-green-700 font-semibold text-sm">Inventory MCP</div>
-                  <div className="font-mono text-xs text-green-600 mt-1 bg-green-100 px-2 py-0.5 rounded inline-block">inventory:read</div>
-                </div>
-                <div className="p-3 bg-purple-50 rounded-lg border border-purple-200">
-                  <div className="text-purple-700 font-semibold text-sm">Customer MCP</div>
-                  <div className="font-mono text-xs text-purple-600 mt-1 bg-purple-100 px-2 py-0.5 rounded inline-block">customer:lookup</div>
-                </div>
-                <div className="p-3 bg-orange-50 rounded-lg border border-orange-200">
-                  <div className="text-orange-700 font-semibold text-sm">Pricing MCP</div>
-                  <div className="font-mono text-xs text-orange-600 mt-1 bg-orange-100 px-2 py-0.5 rounded inline-block">pricing:discount</div>
-                </div>
-                <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
-                  <div className="text-blue-700 font-semibold text-sm">Sales MCP</div>
-                  <div className="font-mono text-xs text-blue-600 mt-1 bg-blue-100 px-2 py-0.5 rounded inline-block">sales:quote</div>
-                </div>
-              </div>
-              <p className="text-xs text-gray-500 mt-3">Each MCP gets its own ID-JAG exchange → Okta policy evaluated per scope</p>
-            </div>
-          </div>
-        </CollapsibleSection>
-
-        {/* MCP Server Security */}
-        <CollapsibleSection
-          title="Securing MCP Servers"
-          subtitle="Zero-trust access to AI capabilities"
-          icon={<Lock className="w-5 h-5" />}
-          defaultOpen={false}
-        >
-          <div className="mt-4">
-            {/* Value Proposition */}
-            <div className="bg-gradient-to-r from-purple-50 to-blue-50 rounded-xl p-6 mb-6 border border-purple-100">
-              <h3 className="font-bold text-gray-800 text-lg mb-3">The Challenge</h3>
-              <p className="text-gray-600 mb-4">
-                MCP servers give AI agents powerful capabilities - but without proper security, any agent could access any server.
-                How do you ensure the right agents access the right capabilities for the right users?
-              </p>
-              <h3 className="font-bold text-gray-800 text-lg mb-3">Okta's Solution</h3>
-              <p className="text-gray-600">
-                Each MCP server is protected by its own Okta Authorization Server. Agents must obtain scoped tokens
-                through the ID-JAG exchange - which validates both the agent's identity AND the user's permissions.
-              </p>
-            </div>
-
-            {/* MCP Servers */}
-            <div className="space-y-4">
-              {[
-                {
-                  name: "Sales MCP Server",
-                  color: "#3b82f6",
-                  scopes: ["sales:read", "sales:quote", "sales:order"],
-                  desc: "Quote generation, order creation, sales pipeline access",
-                  value: "Only authorized sales users can create quotes and orders"
-                },
-                {
-                  name: "Inventory MCP Server",
-                  color: "#10b981",
-                  scopes: ["inventory:read", "inventory:write", "inventory:alert"],
-                  desc: "Stock levels, product management, warehouse operations",
-                  value: "Warehouse staff can update stock; sales can only read"
-                },
-                {
-                  name: "Customer MCP Server",
-                  color: "#8b5cf6",
-                  scopes: ["customer:read", "customer:lookup", "customer:history"],
-                  desc: "Customer PII, account details, purchase history",
-                  value: "Sensitive customer data protected - sales access only"
-                },
-                {
-                  name: "Pricing MCP Server",
-                  color: "#f59e0b",
-                  scopes: ["pricing:read", "pricing:margin", "pricing:discount"],
-                  desc: "Product pricing, margin data, discount authorization",
-                  value: "Finance sees margins; sales sees prices only"
-                },
-              ].map((server, idx) => (
-                <div
-                  key={idx}
-                  className="p-4 rounded-xl border-2 border-gray-100 hover:shadow-md transition"
-                >
-                  <div className="flex items-start gap-4">
-                    <div
-                      className="w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold text-xl"
-                      style={{ backgroundColor: server.color }}
-                    >
-                      <Server className="w-6 h-6" />
-                    </div>
-                    <div className="flex-1">
-                      <div className="flex items-center justify-between flex-wrap gap-2">
-                        <div className="font-semibold text-gray-800">{server.name}</div>
-                        <div className="text-xs text-white px-2 py-1 rounded" style={{ backgroundColor: server.color }}>
-                          {server.value}
-                        </div>
-                      </div>
-                      <div className="text-sm text-gray-600 mt-1">{server.desc}</div>
-                      <div className="flex flex-wrap gap-1 mt-2">
-                        {server.scopes.map((scope, sIdx) => (
-                          <span
-                            key={sIdx}
-                            className="px-2 py-0.5 text-xs rounded-full font-mono"
-                            style={{
-                              backgroundColor: `${server.color}20`,
-                              color: server.color
-                            }}
-                          >
-                            {scope}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </CollapsibleSection>
-
         {/* Token Flow */}
         <CollapsibleSection
           title="ID-JAG Token Exchange Flow"
@@ -954,6 +694,265 @@ export default function ArchitecturePage() {
                   </div>
                 </div>
               </div>
+            </div>
+          </div>
+        </CollapsibleSection>
+
+        <CollapsibleSection
+          title="Live Okta Configuration"
+          subtitle="Actual configuration from Okta Admin Console"
+          icon={<Database className="w-5 h-5" />}
+          defaultOpen={true}
+        >
+          <div className="mt-4 space-y-6">
+            {/* AI Agent Identity */}
+            <div className="bg-gradient-to-r from-okta-blue/10 to-blue-50 rounded-xl p-5 border border-okta-blue/30">
+              <div className="flex items-center gap-3 mb-4">
+                <Bot className="w-6 h-6 text-okta-blue" />
+                <div>
+                  <div className="font-bold text-gray-800">AI Agent Identity</div>
+                  <div className="text-sm text-gray-500">Registered in Okta as Workload Identity Principal</div>
+                </div>
+              </div>
+              <div className="grid md:grid-cols-2 gap-4">
+                <div className="bg-white rounded-lg p-4 border border-gray-200">
+                  <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Agent Name</div>
+                  <div className="font-semibold text-gray-800">ProGear Sales Agent</div>
+                </div>
+                <div className="bg-white rounded-lg p-4 border border-gray-200">
+                  <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Agent ID (wlp)</div>
+                  <div className="font-mono text-sm text-okta-blue">wlp8x5q7mvH86KvFJ0g7</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Authorization Servers */}
+            <div>
+              <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                <Server className="w-5 h-5 text-gray-600" />
+                Authorization Servers (4 MCP APIs)
+              </h3>
+              <div className="grid md:grid-cols-2 gap-3">
+                {[
+                  { name: "ProGear Sales MCP", id: "aus8xdftgwlTMxp3u0g7", audience: "api://progear-sales", scopes: ["sales:read", "sales:quote", "sales:order"], color: "#3b82f6" },
+                  { name: "ProGear Inventory MCP", id: "aus8xdg1oaSVfDgxa0g7", audience: "api://progear-inventory", scopes: ["inventory:read", "inventory:write", "inventory:alert"], color: "#10b981" },
+                  { name: "ProGear Customer MCP", id: "aus8xdfti92mIRSAE0g7", audience: "api://progear-customer", scopes: ["customer:read", "customer:lookup", "customer:history"], color: "#8b5cf6" },
+                  { name: "ProGear Pricing MCP", id: "aus8xdepyb5DHmTlq0g7", audience: "api://progear-pricing", scopes: ["pricing:read", "pricing:margin", "pricing:discount"], color: "#f59e0b" },
+                ].map((server, idx) => (
+                  <div key={idx} className="bg-white rounded-lg p-4 border-2 border-gray-100 hover:border-gray-200 transition">
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="w-3 h-3 rounded-full" style={{ backgroundColor: server.color }} />
+                      <span className="font-semibold text-gray-800 text-sm">{server.name}</span>
+                    </div>
+                    <div className="space-y-1 text-xs">
+                      <div><span className="text-gray-500">ID:</span> <span className="font-mono text-gray-600">{server.id}</span></div>
+                      <div><span className="text-gray-500">Audience:</span> <span className="font-mono text-gray-600">{server.audience}</span></div>
+                      <div className="flex flex-wrap gap-1 mt-2">
+                        {server.scopes.map((scope, sIdx) => (
+                          <span key={sIdx} className="px-1.5 py-0.5 rounded text-white text-[10px] font-mono" style={{ backgroundColor: server.color }}>
+                            {scope}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* User Groups */}
+            <div>
+              <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                <Users className="w-5 h-5 text-gray-600" />
+                Access Control Groups
+              </h3>
+              <div className="grid md:grid-cols-3 gap-3">
+                {[
+                  { name: "ProGear-Sales", id: "00g8xdepuhJhZ3Ecs0g7", desc: "Full agent access", access: ["Sales", "Inventory", "Customer", "Pricing"] },
+                  { name: "ProGear-Warehouse", id: "00g8xdf4j4wmXgZMe0g7", desc: "Inventory only", access: ["Inventory"] },
+                  { name: "ProGear-Finance", id: "00g8xdfshmbpjDjSA0g7", desc: "Pricing only", access: ["Pricing"] },
+                ].map((group, idx) => (
+                  <div key={idx} className="bg-white rounded-lg p-4 border-2 border-gray-100">
+                    <div className="font-semibold text-gray-800 text-sm mb-1">{group.name}</div>
+                    <div className="text-xs text-gray-500 mb-2">{group.desc}</div>
+                    <div className="text-[10px] font-mono text-gray-400 mb-2">{group.id}</div>
+                    <div className="flex flex-wrap gap-1">
+                      {group.access.map((a, aIdx) => (
+                        <span key={aIdx} className="px-1.5 py-0.5 bg-green-100 text-green-700 rounded text-[10px]">
+                          {a}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </CollapsibleSection>
+
+        {/* LangGraph Orchestration */}
+        <CollapsibleSection
+          title="LangGraph Orchestration"
+          subtitle="LangGraph workflow with intent-based scope detection"
+          icon={<Cpu className="w-5 h-5" />}
+          defaultOpen={false}
+        >
+          <div className="mt-4 space-y-6">
+            {/* Workflow Pipeline */}
+            <div className="bg-gray-50 rounded-xl p-5">
+              <h3 className="font-bold text-gray-800 mb-3 text-sm uppercase tracking-wide">LangGraph Workflow</h3>
+              <div className="bg-gray-900 rounded-lg p-4 font-mono text-sm">
+                <div className="flex items-center gap-2 flex-wrap text-gray-300">
+                  <span className="px-2 py-1 bg-purple-500/30 rounded text-purple-300">router</span>
+                  <span className="text-gray-500">→</span>
+                  <span className="px-2 py-1 bg-okta-blue/30 rounded text-blue-300">exchange_tokens</span>
+                  <span className="text-gray-500">→</span>
+                  <span className="px-2 py-1 bg-green-500/30 rounded text-green-300">process_agents</span>
+                  <span className="text-gray-500">→</span>
+                  <span className="px-2 py-1 bg-gray-500/30 rounded text-gray-300">generate_response</span>
+                  <span className="text-gray-500">→</span>
+                  <span className="text-gray-500">END</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Router Decision */}
+            <div className="bg-white rounded-xl p-5 border border-gray-200">
+              <h3 className="font-bold text-gray-800 mb-3 text-sm uppercase tracking-wide">Router Node Output</h3>
+              <p className="text-sm text-gray-600 mb-3">LLM analyzes query intent and returns agents + required scopes:</p>
+              <div className="bg-gray-900 rounded-lg p-4 font-mono text-xs overflow-x-auto">
+                <pre className="text-gray-300">{`{
+  "inventory": { "needed": true,  "scopes": ["inventory:read"] },
+  "customer":  { "needed": true,  "scopes": ["customer:lookup"] },
+  "pricing":   { "needed": true,  "scopes": ["pricing:discount"] },
+  "sales":     { "needed": true,  "scopes": ["sales:quote"] }
+}`}</pre>
+              </div>
+              <p className="text-xs text-gray-500 mt-2 italic">Scope selection based on operation type: read queries → :read, write operations → :write, bulk pricing → :discount</p>
+            </div>
+
+            {/* Example with Scopes */}
+            <div className="bg-white rounded-xl p-5 border border-gray-200">
+              <h3 className="font-bold text-gray-800 mb-3 text-sm uppercase tracking-wide">Example Query → Token Exchange</h3>
+              <div className="bg-purple-50 rounded-lg p-3 mb-4 border-l-4 border-purple-500">
+                <div className="text-sm text-purple-800 font-mono">
+                  "Can we fulfill 1500 basketballs for State University at a bulk discount?"
+                </div>
+              </div>
+              <div className="grid md:grid-cols-4 gap-3">
+                <div className="p-3 bg-green-50 rounded-lg border border-green-200">
+                  <div className="text-green-700 font-semibold text-sm">Inventory MCP</div>
+                  <div className="font-mono text-xs text-green-600 mt-1 bg-green-100 px-2 py-0.5 rounded inline-block">inventory:read</div>
+                </div>
+                <div className="p-3 bg-purple-50 rounded-lg border border-purple-200">
+                  <div className="text-purple-700 font-semibold text-sm">Customer MCP</div>
+                  <div className="font-mono text-xs text-purple-600 mt-1 bg-purple-100 px-2 py-0.5 rounded inline-block">customer:lookup</div>
+                </div>
+                <div className="p-3 bg-orange-50 rounded-lg border border-orange-200">
+                  <div className="text-orange-700 font-semibold text-sm">Pricing MCP</div>
+                  <div className="font-mono text-xs text-orange-600 mt-1 bg-orange-100 px-2 py-0.5 rounded inline-block">pricing:discount</div>
+                </div>
+                <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
+                  <div className="text-blue-700 font-semibold text-sm">Sales MCP</div>
+                  <div className="font-mono text-xs text-blue-600 mt-1 bg-blue-100 px-2 py-0.5 rounded inline-block">sales:quote</div>
+                </div>
+              </div>
+              <p className="text-xs text-gray-500 mt-3">Each MCP gets its own ID-JAG exchange → Okta policy evaluated per scope</p>
+            </div>
+          </div>
+        </CollapsibleSection>
+
+        {/* MCP Server Security */}
+        <CollapsibleSection
+          title="Securing MCP Servers"
+          subtitle="Zero-trust access to AI capabilities"
+          icon={<Lock className="w-5 h-5" />}
+          defaultOpen={false}
+        >
+          <div className="mt-4">
+            {/* Value Proposition */}
+            <div className="bg-gradient-to-r from-purple-50 to-blue-50 rounded-xl p-6 mb-6 border border-purple-100">
+              <h3 className="font-bold text-gray-800 text-lg mb-3">The Challenge</h3>
+              <p className="text-gray-600 mb-4">
+                MCP servers give AI agents powerful capabilities - but without proper security, any agent could access any server.
+                How do you ensure the right agents access the right capabilities for the right users?
+              </p>
+              <h3 className="font-bold text-gray-800 text-lg mb-3">Okta's Solution</h3>
+              <p className="text-gray-600">
+                Each MCP server is protected by its own Okta Authorization Server. Agents must obtain scoped tokens
+                through the ID-JAG exchange - which validates both the agent's identity AND the user's permissions.
+              </p>
+            </div>
+
+            {/* MCP Servers */}
+            <div className="space-y-4">
+              {[
+                {
+                  name: "Sales MCP Server",
+                  color: "#3b82f6",
+                  scopes: ["sales:read", "sales:quote", "sales:order"],
+                  desc: "Quote generation, order creation, sales pipeline access",
+                  value: "Only authorized sales users can create quotes and orders"
+                },
+                {
+                  name: "Inventory MCP Server",
+                  color: "#10b981",
+                  scopes: ["inventory:read", "inventory:write", "inventory:alert"],
+                  desc: "Stock levels, product management, warehouse operations",
+                  value: "Warehouse staff can update stock; sales can only read"
+                },
+                {
+                  name: "Customer MCP Server",
+                  color: "#8b5cf6",
+                  scopes: ["customer:read", "customer:lookup", "customer:history"],
+                  desc: "Customer PII, account details, purchase history",
+                  value: "Sensitive customer data protected - sales access only"
+                },
+                {
+                  name: "Pricing MCP Server",
+                  color: "#f59e0b",
+                  scopes: ["pricing:read", "pricing:margin", "pricing:discount"],
+                  desc: "Product pricing, margin data, discount authorization",
+                  value: "Finance sees margins; sales sees prices only"
+                },
+              ].map((server, idx) => (
+                <div
+                  key={idx}
+                  className="p-4 rounded-xl border-2 border-gray-100 hover:shadow-md transition"
+                >
+                  <div className="flex items-start gap-4">
+                    <div
+                      className="w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold text-xl"
+                      style={{ backgroundColor: server.color }}
+                    >
+                      <Server className="w-6 h-6" />
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center justify-between flex-wrap gap-2">
+                        <div className="font-semibold text-gray-800">{server.name}</div>
+                        <div className="text-xs text-white px-2 py-1 rounded" style={{ backgroundColor: server.color }}>
+                          {server.value}
+                        </div>
+                      </div>
+                      <div className="text-sm text-gray-600 mt-1">{server.desc}</div>
+                      <div className="flex flex-wrap gap-1 mt-2">
+                        {server.scopes.map((scope, sIdx) => (
+                          <span
+                            key={sIdx}
+                            className="px-2 py-0.5 text-xs rounded-full font-mono"
+                            style={{
+                              backgroundColor: `${server.color}20`,
+                              color: server.color
+                            }}
+                          >
+                            {scope}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         </CollapsibleSection>
