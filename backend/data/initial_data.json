@@ -303,47 +303,641 @@
       "quantity": 234,
       "status": "good",
       "reorder_point": 50
+    },
+    "BB-MINI-001": {
+      "name": "Mini Basketball",
+      "sku": "BB-MINI-001",
+      "category": "Basketballs",
+      "quantity": 3120,
+      "status": "good",
+      "reorder_point": 500
+    },
+    "BB-PRAC-001": {
+      "name": "Practice Rubber Basketball",
+      "sku": "BB-PRAC-001",
+      "category": "Basketballs",
+      "quantity": 2890,
+      "status": "good",
+      "reorder_point": 500
+    },
+    "BB-AUTO-001": {
+      "name": "Autograph Model Basketball",
+      "sku": "BB-AUTO-001",
+      "category": "Basketballs",
+      "quantity": 156,
+      "status": "low",
+      "reorder_point": 180
+    },
+    "BB-YCOMP-001": {
+      "name": "Composite Youth Basketball",
+      "sku": "BB-YCOMP-001",
+      "category": "Basketballs",
+      "quantity": 1876,
+      "status": "good",
+      "reorder_point": 350
+    },
+    "HP-INGR-001": {
+      "name": "In-Ground Pro Hoop System",
+      "sku": "HP-INGR-001",
+      "category": "Hoops & Backboards",
+      "quantity": 18,
+      "status": "low",
+      "reorder_point": 25
+    },
+    "HP-GLS60-001": {
+      "name": "Glass Backboard 60\"",
+      "sku": "HP-GLS60-001",
+      "category": "Hoops & Backboards",
+      "quantity": 76,
+      "status": "good",
+      "reorder_point": 60
+    },
+    "HP-MINI-001": {
+      "name": "Mini Hoop (Over-Door)",
+      "sku": "HP-MINI-001",
+      "category": "Hoops & Backboards",
+      "quantity": 645,
+      "status": "good",
+      "reorder_point": 150
+    },
+    "HP-POLE-001": {
+      "name": "Adjustable Height Pole",
+      "sku": "HP-POLE-001",
+      "category": "Hoops & Backboards",
+      "quantity": 134,
+      "status": "good",
+      "reorder_point": 100
+    },
+    "NT-PRAC-001": {
+      "name": "Practice Net (Nylon)",
+      "sku": "NT-PRAC-001",
+      "category": "Nets & Accessories",
+      "quantity": 1892,
+      "status": "good",
+      "reorder_point": 300
+    },
+    "AC-CLIP-001": {
+      "name": "Anti-Sag Net Clip Set",
+      "sku": "AC-CLIP-001",
+      "category": "Nets & Accessories",
+      "quantity": 2456,
+      "status": "good",
+      "reorder_point": 400
+    },
+    "AC-NDL-001": {
+      "name": "Ball Inflation Needle Kit (10-pack)",
+      "sku": "AC-NDL-001",
+      "category": "Nets & Accessories",
+      "quantity": 3890,
+      "status": "good",
+      "reorder_point": 500
+    },
+    "AC-CRT-001": {
+      "name": "Ball Cart (holds 30)",
+      "sku": "AC-CRT-001",
+      "category": "Nets & Accessories",
+      "quantity": 87,
+      "status": "good",
+      "reorder_point": 40
+    },
+    "UNI-REF-001": {
+      "name": "Referee Jersey",
+      "sku": "UNI-REF-001",
+      "category": "Uniforms & Apparel",
+      "quantity": 678,
+      "status": "good",
+      "reorder_point": 150
+    },
+    "UNI-CMP-001": {
+      "name": "Compression Shirt",
+      "sku": "UNI-CMP-001",
+      "category": "Uniforms & Apparel",
+      "quantity": 2345,
+      "status": "good",
+      "reorder_point": 400
+    },
+    "UNI-SCK-001": {
+      "name": "Pro Team Socks (6-pack)",
+      "sku": "UNI-SCK-001",
+      "category": "Uniforms & Apparel",
+      "quantity": 4567,
+      "status": "good",
+      "reorder_point": 700
+    },
+    "UNI-HWB-001": {
+      "name": "Headband & Wristband Set",
+      "sku": "UNI-HWB-001",
+      "category": "Uniforms & Apparel",
+      "quantity": 3120,
+      "status": "good",
+      "reorder_point": 500
+    },
+    "TR-MCH-001": {
+      "name": "Automated Shooting Machine",
+      "sku": "TR-MCH-001",
+      "category": "Training Equipment",
+      "quantity": 12,
+      "status": "low",
+      "reorder_point": 15
+    },
+    "TR-VST-001": {
+      "name": "Weighted Training Vest",
+      "sku": "TR-VST-001",
+      "category": "Training Equipment",
+      "quantity": 456,
+      "status": "good",
+      "reorder_point": 100
+    },
+    "TR-PLY-001": {
+      "name": "Plyo Box Set (3-tier)",
+      "sku": "TR-PLY-001",
+      "category": "Training Equipment",
+      "quantity": 289,
+      "status": "good",
+      "reorder_point": 75
+    },
+    "TR-ROP-001": {
+      "name": "Speed Jump Rope",
+      "sku": "TR-ROP-001",
+      "category": "Training Equipment",
+      "quantity": 1678,
+      "status": "good",
+      "reorder_point": 250
+    },
+    "FW-WOM-001": {
+      "name": "Women's Basketball Shoe",
+      "sku": "FW-WOM-001",
+      "category": "Footwear",
+      "quantity": 1456,
+      "status": "good",
+      "reorder_point": 300
+    },
+    "FW-HGH-001": {
+      "name": "High-Top Trainer",
+      "sku": "FW-HGH-001",
+      "category": "Footwear",
+      "quantity": 987,
+      "status": "good",
+      "reorder_point": 200
+    },
+    "FW-LOW-001": {
+      "name": "Low-Top Trainer",
+      "sku": "FW-LOW-001",
+      "category": "Footwear",
+      "quantity": 1234,
+      "status": "good",
+      "reorder_point": 250
+    },
+    "CG-CLK-001": {
+      "name": "Shot Clock System",
+      "sku": "CG-CLK-001",
+      "category": "Court & Game Equipment",
+      "quantity": 23,
+      "status": "good",
+      "reorder_point": 20
+    },
+    "CG-SCB-001": {
+      "name": "Scoreboard (Digital)",
+      "sku": "CG-SCB-001",
+      "category": "Court & Game Equipment",
+      "quantity": 15,
+      "status": "low",
+      "reorder_point": 20
+    },
+    "CG-ARR-001": {
+      "name": "Possession Arrow",
+      "sku": "CG-ARR-001",
+      "category": "Court & Game Equipment",
+      "quantity": 342,
+      "status": "good",
+      "reorder_point": 100
+    },
+    "CG-WHS-001": {
+      "name": "Referee Whistle (3-pack)",
+      "sku": "CG-WHS-001",
+      "category": "Court & Game Equipment",
+      "quantity": 2890,
+      "status": "good",
+      "reorder_point": 400
+    },
+    "CG-HRN-001": {
+      "name": "Scorer's Table Horn",
+      "sku": "CG-HRN-001",
+      "category": "Court & Game Equipment",
+      "quantity": 178,
+      "status": "good",
+      "reorder_point": 60
+    },
+    "CG-TAPE-001": {
+      "name": "Court Marking Tape",
+      "sku": "CG-TAPE-001",
+      "category": "Court & Game Equipment",
+      "quantity": 567,
+      "status": "good",
+      "reorder_point": 150
+    },
+    "BG-TEQ-001": {
+      "name": "Team Equipment Bag",
+      "sku": "BG-TEQ-001",
+      "category": "Bags & Storage",
+      "quantity": 234,
+      "status": "good",
+      "reorder_point": 80
+    },
+    "BG-GYM-001": {
+      "name": "Personal Gym Bag",
+      "sku": "BG-GYM-001",
+      "category": "Bags & Storage",
+      "quantity": 1123,
+      "status": "good",
+      "reorder_point": 250
+    },
+    "BG-DUF-001": {
+      "name": "Rolling Duffel Bag",
+      "sku": "BG-DUF-001",
+      "category": "Bags & Storage",
+      "quantity": 345,
+      "status": "good",
+      "reorder_point": 100
+    },
+    "BG-RCK-001": {
+      "name": "Ball Storage Rack (holds 24)",
+      "sku": "BG-RCK-001",
+      "category": "Bags & Storage",
+      "quantity": 98,
+      "status": "good",
+      "reorder_point": 40
+    },
+    "BG-BPK-001": {
+      "name": "Travel Backpack",
+      "sku": "BG-BPK-001",
+      "category": "Bags & Storage",
+      "quantity": 678,
+      "status": "good",
+      "reorder_point": 150
     }
   },
   "pricing": {
-    "BB-PRO-001": { "price": 149.99, "cost": 62.00, "margin": 58.7 },
-    "BB-COMP-001": { "price": 89.99, "cost": 38.00, "margin": 57.8 },
-    "BB-WOM-001": { "price": 129.99, "cost": 55.00, "margin": 57.7 },
-    "BB-YTH5-001": { "price": 34.99, "cost": 14.00, "margin": 60.0 },
-    "BB-YTH4-001": { "price": 29.99, "cost": 12.00, "margin": 60.0 },
-    "BB-IND-001": { "price": 169.99, "cost": 72.00, "margin": 57.6 },
-    "BB-OUT-001": { "price": 24.99, "cost": 9.00, "margin": 64.0 },
-    "BB-TRN-001": { "price": 59.99, "cost": 25.00, "margin": 58.3 },
-    "HP-ARENA-001": { "price": 1299.99, "cost": 650.00, "margin": 50.0 },
-    "HP-PORT-001": { "price": 449.99, "cost": 180.00, "margin": 60.0 },
-    "HP-WALL-001": { "price": 299.99, "cost": 120.00, "margin": 60.0 },
-    "HP-YTH-001": { "price": 199.99, "cost": 75.00, "margin": 62.5 },
-    "HP-RIM-001": { "price": 189.99, "cost": 70.00, "margin": 63.2 },
-    "HP-BACK-001": { "price": 599.99, "cost": 280.00, "margin": 53.3 },
-    "NT-PRO-001": { "price": 24.99, "cost": 8.00, "margin": 68.0 },
-    "NT-CHN-001": { "price": 34.99, "cost": 12.00, "margin": 65.7 },
-    "NT-AWP-001": { "price": 29.99, "cost": 10.00, "margin": 66.7 },
-    "AC-PMP-001": { "price": 19.99, "cost": 6.00, "margin": 70.0 },
-    "AC-BAG-001": { "price": 44.99, "cost": 15.00, "margin": 66.7 },
-    "AC-RCK-001": { "price": 129.99, "cost": 48.00, "margin": 63.1 },
-    "UNI-JRS-001": { "price": 54.99, "cost": 18.00, "margin": 67.3 },
-    "UNI-SHT-001": { "price": 39.99, "cost": 14.00, "margin": 65.0 },
-    "UNI-REV-001": { "price": 34.99, "cost": 12.00, "margin": 65.7 },
-    "UNI-WRM-001": { "price": 79.99, "cost": 32.00, "margin": 60.0 },
-    "UNI-WRP-001": { "price": 59.99, "cost": 24.00, "margin": 60.0 },
-    "UNI-SHO-001": { "price": 44.99, "cost": 16.00, "margin": 64.4 },
-    "UNI-HOD-001": { "price": 64.99, "cost": 26.00, "margin": 60.0 },
-    "UNI-PRS-001": { "price": 29.99, "cost": 10.00, "margin": 66.7 },
-    "TR-CON-001": { "price": 24.99, "cost": 8.00, "margin": 68.0 },
-    "TR-LAD-001": { "price": 34.99, "cost": 12.00, "margin": 65.7 },
-    "TR-GOG-001": { "price": 19.99, "cost": 6.00, "margin": 70.0 },
-    "TR-RES-001": { "price": 29.99, "cost": 10.00, "margin": 66.7 },
-    "TR-ARC-001": { "price": 89.99, "cost": 35.00, "margin": 61.1 },
-    "TR-SLD-001": { "price": 149.99, "cost": 58.00, "margin": 61.3 },
-    "FW-PRO-001": { "price": 159.99, "cost": 65.00, "margin": 59.4 },
-    "FW-YTH-001": { "price": 79.99, "cost": 32.00, "margin": 60.0 },
-    "FW-TRN-001": { "price": 119.99, "cost": 48.00, "margin": 60.0 },
-    "FW-REF-001": { "price": 89.99, "cost": 36.00, "margin": 60.0 }
+    "BB-PRO-001": {
+      "price": 149.99,
+      "cost": 62.0,
+      "margin": 58.7
+    },
+    "BB-COMP-001": {
+      "price": 89.99,
+      "cost": 38.0,
+      "margin": 57.8
+    },
+    "BB-WOM-001": {
+      "price": 129.99,
+      "cost": 55.0,
+      "margin": 57.7
+    },
+    "BB-YTH5-001": {
+      "price": 34.99,
+      "cost": 14.0,
+      "margin": 60.0
+    },
+    "BB-YTH4-001": {
+      "price": 29.99,
+      "cost": 12.0,
+      "margin": 60.0
+    },
+    "BB-IND-001": {
+      "price": 169.99,
+      "cost": 72.0,
+      "margin": 57.6
+    },
+    "BB-OUT-001": {
+      "price": 24.99,
+      "cost": 9.0,
+      "margin": 64.0
+    },
+    "BB-TRN-001": {
+      "price": 59.99,
+      "cost": 25.0,
+      "margin": 58.3
+    },
+    "HP-ARENA-001": {
+      "price": 1299.99,
+      "cost": 650.0,
+      "margin": 50.0
+    },
+    "HP-PORT-001": {
+      "price": 449.99,
+      "cost": 180.0,
+      "margin": 60.0
+    },
+    "HP-WALL-001": {
+      "price": 299.99,
+      "cost": 120.0,
+      "margin": 60.0
+    },
+    "HP-YTH-001": {
+      "price": 199.99,
+      "cost": 75.0,
+      "margin": 62.5
+    },
+    "HP-RIM-001": {
+      "price": 189.99,
+      "cost": 70.0,
+      "margin": 63.2
+    },
+    "HP-BACK-001": {
+      "price": 599.99,
+      "cost": 280.0,
+      "margin": 53.3
+    },
+    "NT-PRO-001": {
+      "price": 24.99,
+      "cost": 8.0,
+      "margin": 68.0
+    },
+    "NT-CHN-001": {
+      "price": 34.99,
+      "cost": 12.0,
+      "margin": 65.7
+    },
+    "NT-AWP-001": {
+      "price": 29.99,
+      "cost": 10.0,
+      "margin": 66.7
+    },
+    "AC-PMP-001": {
+      "price": 19.99,
+      "cost": 6.0,
+      "margin": 70.0
+    },
+    "AC-BAG-001": {
+      "price": 44.99,
+      "cost": 15.0,
+      "margin": 66.7
+    },
+    "AC-RCK-001": {
+      "price": 129.99,
+      "cost": 48.0,
+      "margin": 63.1
+    },
+    "UNI-JRS-001": {
+      "price": 54.99,
+      "cost": 18.0,
+      "margin": 67.3
+    },
+    "UNI-SHT-001": {
+      "price": 39.99,
+      "cost": 14.0,
+      "margin": 65.0
+    },
+    "UNI-REV-001": {
+      "price": 34.99,
+      "cost": 12.0,
+      "margin": 65.7
+    },
+    "UNI-WRM-001": {
+      "price": 79.99,
+      "cost": 32.0,
+      "margin": 60.0
+    },
+    "UNI-WRP-001": {
+      "price": 59.99,
+      "cost": 24.0,
+      "margin": 60.0
+    },
+    "UNI-SHO-001": {
+      "price": 44.99,
+      "cost": 16.0,
+      "margin": 64.4
+    },
+    "UNI-HOD-001": {
+      "price": 64.99,
+      "cost": 26.0,
+      "margin": 60.0
+    },
+    "UNI-PRS-001": {
+      "price": 29.99,
+      "cost": 10.0,
+      "margin": 66.7
+    },
+    "TR-CON-001": {
+      "price": 24.99,
+      "cost": 8.0,
+      "margin": 68.0
+    },
+    "TR-LAD-001": {
+      "price": 34.99,
+      "cost": 12.0,
+      "margin": 65.7
+    },
+    "TR-GOG-001": {
+      "price": 19.99,
+      "cost": 6.0,
+      "margin": 70.0
+    },
+    "TR-RES-001": {
+      "price": 29.99,
+      "cost": 10.0,
+      "margin": 66.7
+    },
+    "TR-ARC-001": {
+      "price": 89.99,
+      "cost": 35.0,
+      "margin": 61.1
+    },
+    "TR-SLD-001": {
+      "price": 149.99,
+      "cost": 58.0,
+      "margin": 61.3
+    },
+    "FW-PRO-001": {
+      "price": 159.99,
+      "cost": 65.0,
+      "margin": 59.4
+    },
+    "FW-YTH-001": {
+      "price": 79.99,
+      "cost": 32.0,
+      "margin": 60.0
+    },
+    "FW-TRN-001": {
+      "price": 119.99,
+      "cost": 48.0,
+      "margin": 60.0
+    },
+    "FW-REF-001": {
+      "price": 89.99,
+      "cost": 36.0,
+      "margin": 60.0
+    },
+    "BB-MINI-001": {
+      "price": 14.99,
+      "cost": 5.0,
+      "margin": 66.6
+    },
+    "BB-PRAC-001": {
+      "price": 19.99,
+      "cost": 7.0,
+      "margin": 65.0
+    },
+    "BB-AUTO-001": {
+      "price": 249.99,
+      "cost": 100.0,
+      "margin": 60.0
+    },
+    "BB-YCOMP-001": {
+      "price": 39.99,
+      "cost": 16.0,
+      "margin": 60.0
+    },
+    "HP-INGR-001": {
+      "price": 1899.99,
+      "cost": 950.0,
+      "margin": 50.0
+    },
+    "HP-GLS60-001": {
+      "price": 799.99,
+      "cost": 380.0,
+      "margin": 52.5
+    },
+    "HP-MINI-001": {
+      "price": 39.99,
+      "cost": 14.0,
+      "margin": 65.0
+    },
+    "HP-POLE-001": {
+      "price": 349.99,
+      "cost": 150.0,
+      "margin": 57.1
+    },
+    "NT-PRAC-001": {
+      "price": 17.99,
+      "cost": 5.5,
+      "margin": 69.4
+    },
+    "AC-CLIP-001": {
+      "price": 12.99,
+      "cost": 4.0,
+      "margin": 69.2
+    },
+    "AC-NDL-001": {
+      "price": 9.99,
+      "cost": 2.5,
+      "margin": 75.0
+    },
+    "AC-CRT-001": {
+      "price": 249.99,
+      "cost": 95.0,
+      "margin": 62.0
+    },
+    "UNI-REF-001": {
+      "price": 44.99,
+      "cost": 16.0,
+      "margin": 64.4
+    },
+    "UNI-CMP-001": {
+      "price": 34.99,
+      "cost": 12.0,
+      "margin": 65.7
+    },
+    "UNI-SCK-001": {
+      "price": 24.99,
+      "cost": 8.0,
+      "margin": 68.0
+    },
+    "UNI-HWB-001": {
+      "price": 14.99,
+      "cost": 4.5,
+      "margin": 70.0
+    },
+    "TR-MCH-001": {
+      "price": 3499.99,
+      "cost": 1600.0,
+      "margin": 54.3
+    },
+    "TR-VST-001": {
+      "price": 79.99,
+      "cost": 32.0,
+      "margin": 60.0
+    },
+    "TR-PLY-001": {
+      "price": 189.99,
+      "cost": 78.0,
+      "margin": 58.9
+    },
+    "TR-ROP-001": {
+      "price": 16.99,
+      "cost": 5.0,
+      "margin": 70.6
+    },
+    "FW-WOM-001": {
+      "price": 139.99,
+      "cost": 56.0,
+      "margin": 60.0
+    },
+    "FW-HGH-001": {
+      "price": 109.99,
+      "cost": 44.0,
+      "margin": 60.0
+    },
+    "FW-LOW-001": {
+      "price": 99.99,
+      "cost": 40.0,
+      "margin": 60.0
+    },
+    "CG-CLK-001": {
+      "price": 2499.99,
+      "cost": 1100.0,
+      "margin": 56.0
+    },
+    "CG-SCB-001": {
+      "price": 1899.99,
+      "cost": 850.0,
+      "margin": 55.3
+    },
+    "CG-ARR-001": {
+      "price": 89.99,
+      "cost": 35.0,
+      "margin": 61.1
+    },
+    "CG-WHS-001": {
+      "price": 12.99,
+      "cost": 3.5,
+      "margin": 73.1
+    },
+    "CG-HRN-001": {
+      "price": 44.99,
+      "cost": 16.0,
+      "margin": 64.4
+    },
+    "CG-TAPE-001": {
+      "price": 22.99,
+      "cost": 7.0,
+      "margin": 69.6
+    },
+    "BG-TEQ-001": {
+      "price": 129.99,
+      "cost": 52.0,
+      "margin": 60.0
+    },
+    "BG-GYM-001": {
+      "price": 39.99,
+      "cost": 14.0,
+      "margin": 65.0
+    },
+    "BG-DUF-001": {
+      "price": 79.99,
+      "cost": 30.0,
+      "margin": 62.5
+    },
+    "BG-RCK-001": {
+      "price": 179.99,
+      "cost": 68.0,
+      "margin": 62.2
+    },
+    "BG-BPK-001": {
+      "price": 64.99,
+      "cost": 24.0,
+      "margin": 63.1
+    }
   },
   "customers": {
     "CUST-001": {

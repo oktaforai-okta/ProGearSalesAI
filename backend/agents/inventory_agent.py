@@ -146,14 +146,33 @@ Provide a helpful response using this data."""
 - Total Inventory Value: ${summary['total_value']:,.2f}
 - Low Stock Alerts: {summary['low_stock_count']}"""
 
-        # Search for specific product or category
-        search_term = "basketball" if "basketball" in task_lower else None
-        if not search_term:
-            # Try to extract search term
-            for word in ["hoop", "net", "uniform", "training", "shoe", "footwear"]:
-                if word in task_lower:
-                    search_term = word
-                    break
+        # Search for specific product or category. Check the more specific
+        # category words FIRST: this store's whole vertical is basketball
+        # equipment, so "basketball" appears in almost every query (e.g.
+        # "basketball hoops", "basketball shoes") — matching it first, as a
+        # prior version of this code did, meant those more specific words
+        # were never even checked, and every category-specific question
+        # silently fell back to just the "Basketballs" category.
+        # "goal" and "sneaker" are real synonyms customers use but never
+        # appear literally in an item name, so they're mapped to the term
+        # that actually is -- otherwise they'd silently match zero results
+        # and fall through to a generic summary instead of the real answer.
+        synonym_map = {"goal": "hoop", "sneaker": "shoe"}
+        search_term = None
+        for word in [
+            "goal", "hoop", "backboard", "rim",
+            "scoreboard", "clock", "whistle", "arrow", "horn", "tape",
+            "bag", "backpack", "duffel", "cart", "rack",
+            "net", "accessor", "pump", "needle", "clip",
+            "uniform", "jersey", "apparel", "sock", "compression", "headband", "wristband",
+            "sneaker", "shoe", "footwear",
+            "training", "vest", "ladder", "cone", "plyo", "rope", "goggles", "resistance", "shooting machine",
+        ]:
+            if word in task_lower:
+                search_term = synonym_map.get(word, word)
+                break
+        if not search_term and "basketball" in task_lower:
+            search_term = "basketball"
 
         if search_term:
             results = demo_store.search_inventory(search_term)

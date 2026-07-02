@@ -38,3 +38,8 @@ coverage/
 *.temp
 .vercel
 .env*.local
+
+# Runtime-mutated demo data snapshot -- must never be committed. DemoStore
+# prefers this file over initial_data.json if it exists, so a committed
+# live_data.json silently shadows every future edit to the seed data.
+backend/data/live_data.json
