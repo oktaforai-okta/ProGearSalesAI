@@ -330,7 +330,6 @@ const EDGE_LABELS: Record<string, string> = {
 // node (ai_okta / ai_fga) sit on opposite sides and no anchor lands on a
 // node. A semi-opaque pill is drawn behind each label so it stays legible.
 const EDGE_LABEL_OFFSET: Record<string, number> = {
-  you_ai: -16,
   ai_okta: -12,
   ai_fga: 16,
   ai_approval: 18,
@@ -339,13 +338,22 @@ const EDGE_LABEL_OFFSET: Record<string, number> = {
   fga_audit: -16,
 };
 
-const EDGE_LABEL_U: Record<string, number> = {
-  // Pulled well toward the "You" side. The pill-width heuristic below
-  // (label.length * 5.6 + 8) undercounts a proportional sans-serif font's
-  // real rendered width, so a small nudge (0.38) still let the actual text
-  // glyphs — not just the background pill — reach the AI node's "2" badge.
-  // 0.26 keeps real clearance even if the text renders wider than estimated.
-  you_ai: 0.26,
+const EDGE_LABEL_U: Record<string, number> = {};
+
+interface DetachedLabel {
+  x: number;
+  y: number;
+  anchorX: number;
+  anchorY: number;
+}
+
+// Edges whose label can't sit on or near the line itself without being
+// occluded by nearby node boxes (this file draws edge-label <g>s before
+// node <g>s, so nodes paint on top) get lifted clear of the boxes
+// entirely, with a short leader line + arrowhead pointing back down to
+// the actual edge so it's still clear which edge the label belongs to.
+const EDGE_LABEL_DETACHED: Record<string, DetachedLabel> = {
+  you_ai: { x: 188, y: 260, anchorX: 188, anchorY: 320 },
 };
 
 function edgeLabelAnchor(edge: PhysicalEdge, nodes: DiagramNode[], offset: number, u = 0.5): [number, number] {
@@ -513,8 +521,35 @@ export default function D3ArchitectureDiagram({ title = 'Architecture' }: D3Arch
                 {EDGES.map((e) => {
                   const label = EDGE_LABELS[e.id];
                   if (!label) return null;
-                  const [lx, ly] = edgeLabelAnchor(e, NODES, EDGE_LABEL_OFFSET[e.id] ?? 0, EDGE_LABEL_U[e.id] ?? 0.5);
+                  const detached = EDGE_LABEL_DETACHED[e.id];
                   const pillW = label.length * 5.6 + 8;
+
+                  if (detached) {
+                    return (
+                      <g key={`lbl-${e.id}`} className="pointer-events-none select-none">
+                        <line
+                          x1={detached.x}
+                          y1={detached.y + 9}
+                          x2={detached.anchorX}
+                          y2={detached.anchorY - 8}
+                          stroke={C.textDim}
+                          strokeOpacity={0.45}
+                          strokeWidth={1.5}
+                        />
+                        <polygon
+                          points={`${detached.anchorX - 4},${detached.anchorY - 8} ${detached.anchorX + 4},${detached.anchorY - 8} ${detached.anchorX},${detached.anchorY - 1}`}
+                          fill={C.textDim}
+                          fillOpacity={0.45}
+                        />
+                        <rect x={detached.x - pillW / 2} y={detached.y - 9} width={pillW} height={18} rx={9} fill="#0d0d14" fillOpacity={0.82} />
+                        <text x={detached.x} y={detached.y + 3.5} textAnchor="middle" fontSize={10.5} fill={C.textDim}>
+                          {label}
+                        </text>
+                      </g>
+                    );
+                  }
+
+                  const [lx, ly] = edgeLabelAnchor(e, NODES, EDGE_LABEL_OFFSET[e.id] ?? 0, EDGE_LABEL_U[e.id] ?? 0.5);
                   return (
                     <g key={`lbl-${e.id}`} className="pointer-events-none select-none">
                       <rect x={lx - pillW / 2} y={ly - 9} width={pillW} height={18} rx={9} fill="#0d0d14" fillOpacity={0.82} />
