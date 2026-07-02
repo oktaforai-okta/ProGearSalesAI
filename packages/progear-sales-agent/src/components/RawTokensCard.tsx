@@ -239,15 +239,26 @@ function TokenSection({
                         {meta.label}
                       </div>
                       <div className="space-y-1">
-                        {grouped[cat].map(([key, value]) => (
-                          <div
-                            key={key}
-                            className={`flex gap-2 px-2 py-1.5 rounded border-l-2 font-mono text-[11px] ${meta.bg} ${meta.border}`}
-                          >
-                            <span className={`flex-shrink-0 font-semibold ${meta.text}`}>{key}:</span>
-                            <span className="break-all text-gray-800">{formatClaimValue(value)}</span>
-                          </div>
-                        ))}
+                        {grouped[cat].map(([key, value]) => {
+                          const isObject = value !== null && typeof value === 'object';
+                          return (
+                            <div
+                              key={key}
+                              className={`rounded border-l-2 font-mono text-[11px] ${meta.bg} ${meta.border} ${
+                                isObject ? 'px-2 py-1.5' : 'flex gap-2 px-2 py-1.5'
+                              }`}
+                            >
+                              <span className={`flex-shrink-0 font-semibold ${meta.text}`}>{key}:</span>
+                              {isObject ? (
+                                <pre className="mt-1 text-gray-800 whitespace-pre overflow-x-auto">
+                                  {JSON.stringify(value, null, 2)}
+                                </pre>
+                              ) : (
+                                <span className="break-all text-gray-800">{formatClaimValue(value)}</span>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   );
