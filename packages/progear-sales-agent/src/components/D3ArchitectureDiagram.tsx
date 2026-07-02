@@ -37,7 +37,6 @@ import SequenceDiagram from './SequenceDiagram';
 // Types
 // ---------------------------------------------------------------------------
 
-type Persona = 'sarah' | 'mike';
 type Mode = 'overview' | 'flow';
 
 interface NodeDetail {
@@ -56,7 +55,7 @@ interface BusinessChild {
 interface DiagramNode {
   id: string;
   label: string;
-  sublabel: string | Record<Persona, string>;
+  sublabel: string;
   x: number;
   y: number;
   w: number;
@@ -112,14 +111,14 @@ const NODES: DiagramNode[] = [
   {
     id: 'you',
     label: 'You',
-    sublabel: { sarah: 'Signed in as Sarah', mike: 'Signed in as Mike' },
+    sublabel: 'Signed-in person',
     x: 76, y: 320, w: 150, h: 70,
     accent: C.purple,
     order: 1,
     description: 'The signed-in person asking a question in plain English.',
     detail: {
       body: "This is the human driving the conversation. When you sign in, Okta confirms who you are and hands your session a verified identity badge. Everything the AI does next is done on your behalf and within your limits, never with its own free-standing power.",
-      callouts: ['Verified by Okta login', 'Role: Sales (Sarah) / Warehouse (Mike)'],
+      callouts: ['Verified by Okta login', 'Role determines what you can do'],
     },
   },
   {
@@ -311,10 +310,6 @@ function pointAlongEdge(edge: PhysicalEdge, nodes: DiagramNode[], u: number): [n
   return [pts[pts.length - 1][0], pts[pts.length - 1][1]];
 }
 
-function sublabelFor(n: DiagramNode, persona: Persona): string {
-  return typeof n.sublabel === 'string' ? n.sublabel : n.sublabel[persona];
-}
-
 const EDGE_LABELS: Record<string, string> = {
   you_ai: 'asks / answers',
   ai_okta: 'requests a pass ↔ issues one',
@@ -378,7 +373,6 @@ export default function D3ArchitectureDiagram({ title = 'Architecture' }: D3Arch
   const edgesRef = useRef<SVGGElement | null>(null);
 
   const [mode, setMode] = useState<Mode>('overview');
-  const [persona, setPersona] = useState<Persona>('sarah');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [showArchitect, setShowArchitect] = useState(false);
@@ -422,16 +416,40 @@ export default function D3ArchitectureDiagram({ title = 'Architecture' }: D3Arch
   }, [mode]);
 
   // --- Hover/select highlight — pure attr update, no re-join. ---------------
+  // Kill Switch has no edges of its own, so selecting it doesn't fall out of
+  // the generic "edges touching the active node" rule below. Instead it's a
+  // special case: it visualizes WHAT gets cut — the AI's reach into Business
+  // Systems — by forcing that one edge into a red, dashed "severed" state.
   useEffect(() => {
     const g = edgesRef.current;
     if (!g) return;
     const activeNode = hoveredId ?? selectedId;
+    const killSwitchActive = selectedId === 'killswitch';
 
     select(g)
       .selectAll<SVGPathElement, PhysicalEdge>('path.edge')
-      .attr('stroke', (d) => (activeNode && (d.source === activeNode || d.target === activeNode) ? C.edgeActive : C.edge))
-      .attr('stroke-opacity', (d) => (activeNode && (d.source === activeNode || d.target === activeNode) ? 0.95 : 0.4))
-      .attr('stroke-width', (d) => (activeNode && (d.source === activeNode || d.target === activeNode) ? 3.5 : 2.5));
+      .attr('stroke', (d) =>
+        killSwitchActive && d.id === 'ai_business'
+          ? C.deny
+          : activeNode && (d.source === activeNode || d.target === activeNode)
+          ? C.edgeActive
+          : C.edge
+      )
+      .attr('stroke-opacity', (d) =>
+        killSwitchActive && d.id === 'ai_business'
+          ? 1
+          : activeNode && (d.source === activeNode || d.target === activeNode)
+          ? 0.95
+          : 0.4
+      )
+      .attr('stroke-width', (d) =>
+        killSwitchActive && d.id === 'ai_business'
+          ? 3.5
+          : activeNode && (d.source === activeNode || d.target === activeNode)
+          ? 3.5
+          : 2.5
+      )
+      .attr('stroke-dasharray', (d) => (killSwitchActive && d.id === 'ai_business' ? '7 5' : 'none'));
   }, [hoveredId, selectedId]);
 
   return (
@@ -446,22 +464,6 @@ export default function D3ArchitectureDiagram({ title = 'Architecture' }: D3Arch
         </div>
 
         <div className="flex items-center gap-2">
-          {mode === 'overview' && (
-            <div className="flex rounded-lg bg-black/30 border border-white/10 p-0.5 text-xs">
-              {(['sarah', 'mike'] as Persona[]).map((p) => (
-                <button
-                  key={p}
-                  onClick={() => setPersona(p)}
-                  className={`px-3 py-1.5 rounded-md font-medium transition ${
-                    persona === p ? 'bg-okta-blue text-white' : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  {p === 'sarah' ? 'Sarah · Sales' : 'Mike · Warehouse'}
-                </button>
-              ))}
-            </div>
-          )}
-
           <div className="flex rounded-lg bg-black/30 border border-white/10 p-0.5 text-xs">
             {(['overview', 'flow'] as Mode[]).map((m) => (
               <button
@@ -519,7 +521,8 @@ export default function D3ArchitectureDiagram({ title = 'Architecture' }: D3Arch
                     perpendicular normal and backed by a pill so it stays
                     legible over any edge or glow. */}
                 {EDGES.map((e) => {
-                  const label = EDGE_LABELS[e.id];
+                  const isKillCut = selectedId === 'killswitch' && e.id === 'ai_business';
+                  const label = isKillCut ? 'access cut' : EDGE_LABELS[e.id];
                   if (!label) return null;
                   const detached = EDGE_LABEL_DETACHED[e.id];
                   const pillW = label.length * 5.6 + 8;
@@ -552,8 +555,18 @@ export default function D3ArchitectureDiagram({ title = 'Architecture' }: D3Arch
                   const [lx, ly] = edgeLabelAnchor(e, NODES, EDGE_LABEL_OFFSET[e.id] ?? 0, EDGE_LABEL_U[e.id] ?? 0.5);
                   return (
                     <g key={`lbl-${e.id}`} className="pointer-events-none select-none">
-                      <rect x={lx - pillW / 2} y={ly - 9} width={pillW} height={18} rx={9} fill="#0d0d14" fillOpacity={0.82} />
-                      <text x={lx} y={ly + 3.5} textAnchor="middle" fontSize={10.5} fill={C.textDim}>
+                      <rect
+                        x={lx - pillW / 2}
+                        y={ly - 9}
+                        width={pillW}
+                        height={18}
+                        rx={9}
+                        fill={isKillCut ? '#3a0f0f' : '#0d0d14'}
+                        fillOpacity={0.82}
+                        stroke={isKillCut ? C.deny : 'none'}
+                        strokeOpacity={0.6}
+                      />
+                      <text x={lx} y={ly + 3.5} textAnchor="middle" fontSize={10.5} fontWeight={isKillCut ? 700 : 400} fill={isKillCut ? C.deny : C.textDim}>
                         {label}
                       </text>
                     </g>
@@ -578,7 +591,7 @@ export default function D3ArchitectureDiagram({ title = 'Architecture' }: D3Arch
                   const isSelected = n.id === selectedId;
                   const isHovered = n.id === hoveredId;
                   const dim = (hoveredId ?? selectedId) && !isSelected && !isHovered;
-                  const label = sublabelFor(n, persona);
+                  const label = n.sublabel;
 
                   return (
                     <g
@@ -635,20 +648,20 @@ export default function D3ArchitectureDiagram({ title = 'Architecture' }: D3Arch
             </div>
 
             {/* Detail side panel */}
-            <div className="lg:w-64 shrink-0 border-t lg:border-t-0 lg:border-l border-white/10 p-5">
+            <div className="lg:w-64 shrink-0 border-t lg:border-t-0 lg:border-l border-white/10 p-4">
               {selectedNode ? (
                 <div>
-                  <div className="flex items-center gap-2 mb-3">
+                  <div className="flex items-center gap-2 mb-2">
                     <span className="w-3 h-3 rounded-full" style={{ backgroundColor: selectedNode.accent }} />
-                    <span className="text-slate-100 font-semibold">{selectedNode.label}</span>
+                    <span className="text-sm text-slate-100 font-semibold">{selectedNode.label}</span>
                   </div>
-                  <div className="text-xs uppercase tracking-wide text-slate-500 mb-2">{sublabelFor(selectedNode, persona)}</div>
-                  <p className="text-sm text-slate-300 leading-relaxed">{selectedNode.detail.body}</p>
+                  <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-1.5">{selectedNode.sublabel}</div>
+                  <p className="text-xs text-slate-300 leading-relaxed">{selectedNode.detail.body}</p>
 
                   {selectedNode.detail.subpoints && (
-                    <ul className="mt-3 space-y-1.5">
+                    <ul className="mt-2 space-y-1">
                       {selectedNode.detail.subpoints.map((s, i) => (
-                        <li key={i} className="text-xs text-slate-400 flex gap-2">
+                        <li key={i} className="text-[11px] text-slate-400 flex gap-1.5">
                           <span className="text-slate-600">—</span>
                           <span>{s}</span>
                         </li>
@@ -657,11 +670,11 @@ export default function D3ArchitectureDiagram({ title = 'Architecture' }: D3Arch
                   )}
 
                   {selectedNode.detail.callouts && (
-                    <div className="mt-3 flex flex-wrap gap-1.5">
+                    <div className="mt-2 flex flex-wrap gap-1">
                       {selectedNode.detail.callouts.map((c, i) => (
                         <span
                           key={i}
-                          className="px-2 py-1 rounded-full text-[10px] font-medium border"
+                          className="px-1.5 py-0.5 rounded-full text-[9px] font-medium border"
                           style={{ color: selectedNode.accent, borderColor: `${selectedNode.accent}55`, backgroundColor: `${selectedNode.accent}15` }}
                         >
                           {c}
@@ -671,38 +684,32 @@ export default function D3ArchitectureDiagram({ title = 'Architecture' }: D3Arch
                   )}
 
                   {selectedNode.children && (
-                    <div className="mt-4 space-y-2">
+                    <div className="mt-3 space-y-1.5">
                       {selectedNode.children.map((c) => (
-                        <div key={c.label} className="rounded-lg border border-white/10 bg-white/[0.02] p-2.5">
+                        <div key={c.label} className="rounded-lg border border-white/10 bg-white/[0.02] p-2">
                           <div className="flex items-center justify-between">
-                            <span className="text-xs font-semibold text-slate-200">{c.label}</span>
-                            <span className="text-[10px] text-slate-500">{c.sublabel}</span>
+                            <span className="text-[11px] font-semibold text-slate-200">{c.label}</span>
+                            <span className="text-[9px] text-slate-500">{c.sublabel}</span>
                           </div>
-                          <p className="text-[11px] text-slate-400 mt-1">{c.body}</p>
+                          <p className="text-[10px] text-slate-400 mt-1">{c.body}</p>
                         </div>
                       ))}
                     </div>
                   )}
 
                   {showArchitect && selectedNode.detail.architect && (
-                    <div className="mt-4 pt-3 border-t border-white/10">
-                      <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-1.5">For architects</div>
-                      <p className="text-xs text-slate-400 leading-relaxed">{selectedNode.detail.architect}</p>
+                    <div className="mt-3 pt-2 border-t border-white/10">
+                      <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-1">For architects</div>
+                      <p className="text-[11px] text-slate-400 leading-relaxed">{selectedNode.detail.architect}</p>
                     </div>
                   )}
 
-                  {selectedNode.id === 'you' && (
-                    <button onClick={() => setPersona((p) => (p === 'sarah' ? 'mike' : 'sarah'))} className="mt-4 text-xs text-orange-400 hover:text-orange-300 transition">
-                      See the difference → switch to {persona === 'sarah' ? 'Mike' : 'Sarah'}
-                    </button>
-                  )}
-
-                  <button onClick={() => setSelectedId(null)} className="mt-4 block text-xs text-slate-400 hover:text-slate-200 transition">
+                  <button onClick={() => setSelectedId(null)} className="mt-3 block text-[11px] text-slate-400 hover:text-slate-200 transition">
                     Clear selection
                   </button>
                 </div>
               ) : (
-                <div className="text-sm text-slate-500">
+                <div className="text-xs text-slate-500">
                   Select a node to see what it does. Hover any node to trace its connections, or hit "See it as a
                   Sequence" to see a real request move through the whole system step by step.
                 </div>
