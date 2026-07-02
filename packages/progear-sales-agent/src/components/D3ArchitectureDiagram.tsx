@@ -590,7 +590,15 @@ export default function D3ArchitectureDiagram({ title = 'Architecture' }: D3Arch
                 {NODES.map((n) => {
                   const isSelected = n.id === selectedId;
                   const isHovered = n.id === hoveredId;
-                  const dim = (hoveredId ?? selectedId) && !isSelected && !isHovered;
+                  // Kill Switch has no edges of its own (see the highlight effect
+                  // above), so its two "victims" — the AI Assistant and Business
+                  // Systems boxes the red cut line actually connects — need to be
+                  // explicitly lit up here too. Otherwise selecting Kill Switch
+                  // dims everything else on the canvas, including the very two
+                  // nodes the whole point is to draw attention to.
+                  const isKillEndpoint = selectedId === 'killswitch' && (n.id === 'ai' || n.id === 'business');
+                  const isActive = isSelected || isHovered || isKillEndpoint;
+                  const dim = (hoveredId ?? selectedId) && !isActive;
                   const label = n.sublabel;
 
                   return (
@@ -598,7 +606,7 @@ export default function D3ArchitectureDiagram({ title = 'Architecture' }: D3Arch
                       key={n.id}
                       transform={`translate(${n.x},${n.y})`}
                       className="cursor-pointer"
-                      opacity={n.dim && !isSelected && !isHovered ? 0.6 : dim ? 0.55 : 1}
+                      opacity={n.dim && !isActive ? 0.6 : dim ? 0.55 : 1}
                       onMouseEnter={() => setHoveredId(n.id)}
                       onMouseLeave={() => setHoveredId(null)}
                       onClick={() => setSelectedId((cur) => (cur === n.id ? null : n.id))}
@@ -618,10 +626,14 @@ export default function D3ArchitectureDiagram({ title = 'Architecture' }: D3Arch
                         height={n.h}
                         rx={n.chip ? n.h / 2 : 12}
                         fill={n.chip ? 'rgba(0,0,0,0.35)' : C.nodeFill}
-                        stroke={n.accent}
-                        strokeWidth={isSelected ? 3 : n.hero ? 2.5 : 1.5}
+                        stroke={isKillEndpoint ? C.deny : n.accent}
+                        strokeWidth={isSelected ? 3 : isKillEndpoint ? 2.5 : n.hero ? 2.5 : 1.5}
                         style={{
-                          filter: isSelected || isHovered ? `drop-shadow(0 0 ${n.hero ? 16 : 10}px ${n.accent}aa)` : n.hero ? `drop-shadow(0 0 8px ${n.accent}55)` : 'none',
+                          filter: isActive
+                            ? `drop-shadow(0 0 ${n.hero || isKillEndpoint ? 16 : 10}px ${isKillEndpoint ? C.deny : n.accent}aa)`
+                            : n.hero
+                            ? `drop-shadow(0 0 8px ${n.accent}55)`
+                            : 'none',
                           transition: 'stroke-width 120ms ease, filter 200ms ease',
                         }}
                       />
