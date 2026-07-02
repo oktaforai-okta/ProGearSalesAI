@@ -361,6 +361,15 @@ export default function D3ArchitectureDiagram({ title = 'Architecture' }: D3Arch
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [showArchitect, setShowArchitect] = useState(false);
+  // Softens the Flow<->Sequence switch into a brief crossfade instead of an
+  // instant hard swap, which read as an abrupt, unannounced jump.
+  const [contentVisible, setContentVisible] = useState(true);
+
+  useEffect(() => {
+    setContentVisible(false);
+    const t = setTimeout(() => setContentVisible(true), 30);
+    return () => clearTimeout(t);
+  }, [mode]);
 
   const selectedNode = useMemo(() => (selectedId ? NODES.find((n) => n.id === selectedId) ?? null : null), [selectedId]);
 
@@ -434,7 +443,7 @@ export default function D3ArchitectureDiagram({ title = 'Architecture' }: D3Arch
                   mode === m ? 'bg-white/15 text-white' : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
-                {m === 'overview' ? 'Overview' : 'Watch a request'}
+                {m === 'overview' ? 'Flow' : 'Sequence'}
               </button>
             ))}
           </div>
@@ -448,6 +457,10 @@ export default function D3ArchitectureDiagram({ title = 'Architecture' }: D3Arch
         </div>
       </div>
 
+      <div
+        className="transition-opacity duration-300 ease-out"
+        style={{ opacity: contentVisible ? 1 : 0 }}
+      >
       {mode === 'flow' ? (
         <div className="p-0">
           <SequenceDiagram />
@@ -459,7 +472,7 @@ export default function D3ArchitectureDiagram({ title = 'Architecture' }: D3Arch
               onClick={() => setMode('flow')}
               className="px-4 py-1.5 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 transition"
             >
-              ▶ Watch a request flow
+              ▶ See it as a Sequence
             </button>
           </div>
 
@@ -635,6 +648,7 @@ export default function D3ArchitectureDiagram({ title = 'Architecture' }: D3Arch
           </div>
         </>
       )}
+      </div>
     </div>
   );
 }

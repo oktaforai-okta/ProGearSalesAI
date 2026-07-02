@@ -167,6 +167,12 @@ const HEADER_H = 96;
 const ROW_H = 52;
 const ROW_TOP = HEADER_H + 24;
 
+// How long the active arrow takes to draw itself, and how long it sits fully
+// drawn before the next step begins. Slower than a typical UI transition on
+// purpose — this is meant to be narrated/read step by step, not glanced at.
+const DRAW_MS = 1100;
+const PAUSE_MS = 900;
+
 function laneX(actorIndex: number, count: number): number {
   const usable = VIEW_W - MARGIN_X * 2;
   return MARGIN_X + (usable * actorIndex) / (count - 1);
@@ -176,7 +182,7 @@ interface Props {
   title?: string;
 }
 
-export default function SequenceDiagram({ title = 'Watch a Request' }: Props) {
+export default function SequenceDiagram({ title = 'Sequence' }: Props) {
   const [scenarioKey, setScenarioKey] = useState('happy');
   const [branch, setBranch] = useState<'approve' | 'reject' | null>(null);
   const [played, setPlayed] = useState(0);
@@ -276,7 +282,7 @@ export default function SequenceDiagram({ title = 'Watch a Request' }: Props) {
       if (cancelledRef.current) return;
       setPlayed(i + 1);
       await new Promise((r) => setTimeout(r, 20));
-      await drawActiveArrow(650);
+      await drawActiveArrow(DRAW_MS);
 
       const step = scenario.messages[i];
       if (step.kind === 'approvalPause') {
@@ -284,7 +290,7 @@ export default function SequenceDiagram({ title = 'Watch a Request' }: Props) {
         setIsPlaying(false);
         return;
       }
-      await new Promise((r) => setTimeout(r, 380));
+      await new Promise((r) => setTimeout(r, PAUSE_MS));
     }
     setIsPlaying(false);
   }, [isPlaying, scenario, drawActiveArrow]);
@@ -303,8 +309,8 @@ export default function SequenceDiagram({ title = 'Watch a Request' }: Props) {
         if (cancelledRef.current) return;
         setPlayed(base + i + 1);
         await new Promise((r) => setTimeout(r, 20));
-        await drawActiveArrow(650);
-        await new Promise((r) => setTimeout(r, 380));
+        await drawActiveArrow(DRAW_MS);
+        await new Promise((r) => setTimeout(r, PAUSE_MS));
       }
       setIsPlaying(false);
     },
