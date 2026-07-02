@@ -126,7 +126,7 @@ const NODES: DiagramNode[] = [
     id: 'you',
     label: 'You',
     sublabel: { sarah: 'Signed in as Sarah', mike: 'Signed in as Mike' },
-    x: 76, y: 300, w: 116, h: 60,
+    x: 76, y: 320, w: 116, h: 60,
     accent: C.purple,
     description: 'The signed-in person asking a question in plain English.',
     detail: {
@@ -138,7 +138,7 @@ const NODES: DiagramNode[] = [
     id: 'ai',
     label: 'AI Assistant',
     sublabel: 'Understands + routes',
-    x: 296, y: 300, w: 130, h: 60,
+    x: 300, y: 320, w: 130, h: 60,
     accent: C.oktaBlue,
     description: 'The chatbot that understands your request and figures out which systems it needs.',
     detail: {
@@ -151,7 +151,7 @@ const NODES: DiagramNode[] = [
     id: 'okta',
     label: 'Okta',
     sublabel: 'Identity + Access',
-    x: 545, y: 132, w: 150, h: 74,
+    x: 560, y: 120, w: 150, h: 74,
     accent: C.oktaBlue,
     hero: true,
     description: 'Issues a short-lived, single-purpose pass every time the AI needs to touch a system.',
@@ -170,7 +170,7 @@ const NODES: DiagramNode[] = [
     id: 'fga',
     label: 'Access Rules',
     sublabel: 'Relationship + context check',
-    x: 640, y: 300, w: 150, h: 70,
+    x: 610, y: 300, w: 150, h: 70,
     accent: C.accent,
     hero: true,
     description: 'A live check of your relationships and current context, like whether you manage this warehouse or are on vacation.',
@@ -189,7 +189,7 @@ const NODES: DiagramNode[] = [
     id: 'approval',
     label: 'Approval Gate',
     sublabel: 'Human sign-off on big changes',
-    x: 690, y: 505, w: 150, h: 64,
+    x: 600, y: 505, w: 150, h: 64,
     accent: C.purple,
     description: 'High-impact actions (like a large inventory change) pause here for a human to approve.',
     detail: {
@@ -207,7 +207,7 @@ const NODES: DiagramNode[] = [
     id: 'business',
     label: 'Business Systems',
     sublabel: '4 domains',
-    x: 950, y: 440, w: 130, h: 66,
+    x: 945, y: 400, w: 130, h: 66,
     accent: C.green,
     description: 'Your real company systems: inventory, pricing, customers, and sales.',
     detail: {
@@ -224,7 +224,7 @@ const NODES: DiagramNode[] = [
     id: 'audit',
     label: 'Audit Trail',
     sublabel: 'Every decision logged',
-    x: 466, y: 560, w: 130, h: 40,
+    x: 762, y: 120, w: 132, h: 44,
     accent: C.slate,
     dim: true,
     description: 'A permanent, searchable record of every pass issued and every allow/deny decision.',
@@ -238,7 +238,7 @@ const NODES: DiagramNode[] = [
     id: 'killswitch',
     label: 'Kill Switch',
     sublabel: 'Revoke in one click',
-    x: 700, y: 88, w: 108, h: 34,
+    x: 120, y: 70, w: 108, h: 34,
     accent: C.deny,
     dim: true,
     chip: true,
@@ -254,7 +254,7 @@ const HUMAN_NODE: DiagramNode = {
   id: 'human',
   label: 'Approver',
   sublabel: 'A named person',
-  x: 950, y: 560, w: 108, h: 50,
+  x: 945, y: 558, w: 120, h: 52,
   accent: C.purple,
   description: 'The real person who reviews high-impact requests.',
   detail: { body: 'A named human in Okta Identity Governance reviews the request and approves or denies it. The AI cannot bypass this step.' },
@@ -380,17 +380,59 @@ const linkPath = line<[number, number]>()
   .y((d) => d[1])
   .curve(curveBumpX);
 
-function edgeD(edge: PhysicalEdge, nodes: DiagramNode[]): string {
+// A few edges are genuine multi-point bent paths, not straight two-point curves.
+// ai_business arcs DOWN out of the AI hub and through the open lane between the
+// FGA box (bottom y=335) and the Approval Gate (top y=473) — around y=400 — so
+// its long reach to the resource tier never crosses the AI's other spokes nor
+// the okta_audit / fga_audit edges. The interior waypoint sits in that gap.
+// Points are authored source->target; pointAlongEdge handles reverse + the
+// packet is arc-length parameterized so it tracks the full polyline at even
+// speed (not linearly between just the two endpoints).
+const EDGE_WAYPOINTS: Record<string, Array<[number, number]>> = {
+  ai_business: [[470, 400]],
+};
+
+// Full ordered point list for an edge (source, ...waypoints, target).
+function edgePoints(edge: PhysicalEdge, nodes: DiagramNode[]): Array<[number, number]> {
   const s = findNode(nodes, edge.source);
   const t = findNode(nodes, edge.target);
-  return linkPath([[s.x, s.y], [t.x, t.y]])!;
+  const mids = EDGE_WAYPOINTS[edge.id] ?? [];
+  return [[s.x, s.y], ...mids, [t.x, t.y]];
 }
 
+function edgeD(edge: PhysicalEdge, nodes: DiagramNode[]): string {
+  return linkPath(edgePoints(edge, nodes))!;
+}
+
+// Position at fraction `u` (0..1) along the edge's full polyline, by cumulative
+// arc length so the animated packet moves at a constant visual speed across a
+// bent, multi-segment path. Straight two-point edges reduce to a plain lerp.
 function pointAlongEdge(edge: PhysicalEdge, nodes: DiagramNode[], u: number, reverse?: boolean): [number, number] {
-  const s = findNode(nodes, edge.source);
-  const t = findNode(nodes, edge.target);
-  const [a, b] = reverse ? [t, s] : [s, t];
-  return [a.x + (b.x - a.x) * u, a.y + (b.y - a.y) * u];
+  const raw = edgePoints(edge, nodes);
+  const pts = reverse ? [...raw].reverse() : raw;
+
+  const segLens: number[] = [];
+  let total = 0;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const d = Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]);
+    segLens.push(d);
+    total += d;
+  }
+  if (total === 0) return [pts[0][0], pts[0][1]];
+
+  const target = Math.max(0, Math.min(1, u)) * total;
+  let acc = 0;
+  for (let i = 0; i < segLens.length; i++) {
+    if (target <= acc + segLens[i] || i === segLens.length - 1) {
+      const local = segLens[i] === 0 ? 0 : (target - acc) / segLens[i];
+      return [
+        pts[i][0] + (pts[i + 1][0] - pts[i][0]) * local,
+        pts[i][1] + (pts[i + 1][1] - pts[i][1]) * local,
+      ];
+    }
+    acc += segLens[i];
+  }
+  return [pts[pts.length - 1][0], pts[pts.length - 1][1]];
 }
 
 function sublabelFor(n: DiagramNode, persona: Persona): string {
@@ -422,8 +464,8 @@ const EDGE_LABEL_OFFSET: Record<string, number> = {
   ai_fga: 16,
   ai_approval: 18,
   approval_human: 16,
-  ai_business: 18,
-  okta_audit: 16,
+  ai_business: -20, // pushed ABOVE its low gap-lane so the pill clears the FGA box
+  okta_audit: 50, // pushed BELOW the short horizontal Okta↔Audit edge (clears both boxes)
   fga_audit: -16,
 };
 
@@ -433,14 +475,17 @@ const EDGE_LABEL_U: Record<string, number> = {
   you_ai: 0.484, // recenter "asks / answers" in the You↔AI gap so its pill clears both
 };
 
-// Anchor a label at fraction `u` along the edge, then push it off along the
-// edge's perpendicular normal by `offset` px. Mirrors the geometry the
-// verification script asserts against.
-function edgeLabelAnchor(s: DiagramNode, t: DiagramNode, offset: number, u = 0.5): [number, number] {
-  const px = s.x + (t.x - s.x) * u;
-  const py = s.y + (t.y - s.y) * u;
-  const dx = t.x - s.x;
-  const dy = t.y - s.y;
+// Anchor a label at fraction `u` along the edge's full polyline (arc-length
+// parameterized, so bent edges anchor on the real path midpoint, not the
+// straight chord), then push it off along the local tangent's perpendicular
+// normal by `offset` px. Mirrors the geometry the verification script asserts.
+function edgeLabelAnchor(edge: PhysicalEdge, nodes: DiagramNode[], offset: number, u = 0.5): [number, number] {
+  const [px, py] = pointAlongEdge(edge, nodes, u);
+  // Local tangent: sample a hair before/after u so the normal follows the bend.
+  const [bx, by] = pointAlongEdge(edge, nodes, Math.max(0, u - 0.02));
+  const [ax, ay] = pointAlongEdge(edge, nodes, Math.min(1, u + 0.02));
+  const dx = ax - bx;
+  const dy = ay - by;
   const len = Math.hypot(dx, dy) || 1;
   return [px + (-dy / len) * offset, py + (dx / len) * offset];
 }
@@ -798,10 +843,7 @@ export default function D3ArchitectureDiagram({ title = 'Architecture' }: D3Arch
             {/* Denial glyph + label at the midpoint of any currently-denied edge. */}
             {edges.map((e) => {
               if (!deniedEdges[e.id]) return null;
-              const s = findNode(nodes, e.source);
-              const t = findNode(nodes, e.target);
-              const mx = (s.x + t.x) / 2;
-              const my = (s.y + t.y) / 2;
+              const [mx, my] = pointAlongEdge(e, nodes, 0.5);
               return (
                 <g key={`deny-${e.id}`} transform={`translate(${mx},${my})`}>
                   <circle r={10} fill="#1a0b0b" stroke={C.deny} strokeWidth={2} />
@@ -820,11 +862,9 @@ export default function D3ArchitectureDiagram({ title = 'Architecture' }: D3Arch
             {!isFlowing &&
               mode === 'overview' &&
               edges.map((e) => {
-                const s = findNode(nodes, e.source);
-                const t = findNode(nodes, e.target);
                 const label = EDGE_LABELS[e.id];
                 if (!label) return null;
-                const [lx, ly] = edgeLabelAnchor(s, t, EDGE_LABEL_OFFSET[e.id] ?? 0, EDGE_LABEL_U[e.id] ?? 0.5);
+                const [lx, ly] = edgeLabelAnchor(e, nodes, EDGE_LABEL_OFFSET[e.id] ?? 0, EDGE_LABEL_U[e.id] ?? 0.5);
                 const pillW = label.length * 5.6 + 8;
                 return (
                   <g key={`lbl-${e.id}`} className="pointer-events-none select-none">
@@ -846,9 +886,10 @@ export default function D3ArchitectureDiagram({ title = 'Architecture' }: D3Arch
 
             {/* Governance rail — a faint band threading the trust tier
                 (Okta → Access Rules → Approval Gate), reminding the viewer
-                these three checks are one connected governance layer. */}
+                these three checks are one connected governance layer. Follows
+                the trust column down: okta(560,120) → fga(610,300) → approval(600,505). */}
             <path
-              d="M 545 175 C 660 235, 640 300, 660 380 S 690 460, 690 468"
+              d="M 560 157 C 600 210, 610 235, 610 265 S 606 400, 604 473"
               fill="none"
               stroke="#ffd166"
               strokeOpacity={0.16}
@@ -858,7 +899,7 @@ export default function D3ArchitectureDiagram({ title = 'Architecture' }: D3Arch
 
             {/* Context chip (vacation flag) flashed just above the FGA node. */}
             {contextChip && (
-              <g transform="translate(640, 248)">
+              <g transform="translate(610, 248)">
                 <rect x={-62} y={-12} width={124} height={22} rx={11} fill="#3a0f0f" stroke={C.deny} strokeWidth={1.5} />
                 <text textAnchor="middle" y={4} fontSize={10} fill={C.deny} fontFamily="monospace">
                   {contextChip}
@@ -866,9 +907,11 @@ export default function D3ArchitectureDiagram({ title = 'Architecture' }: D3Arch
               </g>
             )}
 
-            {/* Audit flash */}
+            {/* Audit flash — ring around the Audit Trail node (now tucked
+                right of Okta at 762,120). Sized to hug the node without
+                reaching the Okta box to its left. */}
             {auditFlash && (
-              <circle cx={466} cy={560} r={62} fill="none" stroke={auditFlash.deny ? C.deny : '#ffd166'} strokeWidth={2} opacity={0.4} />
+              <circle cx={762} cy={120} r={52} fill="none" stroke={auditFlash.deny ? C.deny : '#ffd166'} strokeWidth={2} opacity={0.4} />
             )}
 
             {/* Animated request packet. */}
