@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, type ReactNode } from 'react';
 import { useSession, signOut } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Key, GitBranch } from 'lucide-react';
+import { Key, GitBranch, Network } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { type ApprovalStatus } from '@/components/ApprovalStatusCard';
@@ -436,7 +436,7 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Token Flow + Architecture */}
+          {/* Token Flow + How it Works? + Architecture */}
           <div className="flex items-center space-x-2">
             <Link
               href="/tokens"
@@ -447,12 +447,20 @@ export default function Home() {
               <span className="hidden sm:inline">Token Flow</span>
             </Link>
             <Link
+              href="/how-it-works"
+              className="px-4 py-2.5 bg-white/10 hover:bg-accent/30 text-white rounded-lg transition border border-white/20 hover:border-accent/50 flex items-center gap-2 text-sm"
+              title="An interactive, customer-facing walkthrough of identity, access, and governance"
+            >
+              <Network className="w-4 h-4" />
+              <span className="hidden sm:inline">How it Works?</span>
+            </Link>
+            <Link
               href="/architecture"
               className="px-4 py-2.5 bg-white/10 hover:bg-accent/30 text-white rounded-lg transition border border-white/20 hover:border-accent/50 flex items-center gap-2 text-sm"
               title="How the system is wired together"
             >
               <GitBranch className="w-4 h-4" />
-              <span className="hidden sm:inline">How it works?</span>
+              <span className="hidden sm:inline">Architecture</span>
             </Link>
           </div>
 

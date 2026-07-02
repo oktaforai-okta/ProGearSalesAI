@@ -5,7 +5,6 @@ import Link from 'next/link';
 import { useSession } from 'next-auth/react';
 import { ChevronDown, ChevronRight, Shield, Key, Users, Server, ArrowRight, CheckCircle, XCircle, Cpu, Lock, GitBranch, Database, Activity, Bot } from 'lucide-react';
 import OktaSystemLog from '@/components/OktaSystemLog';
-import D3ArchitectureDiagram from '@/components/D3ArchitectureDiagram';
 
 interface CollapsibleSectionProps {
   title: string;
@@ -70,19 +69,6 @@ export default function ArchitecturePage() {
       </header>
 
       <div className="max-w-6xl mx-auto py-8 px-6 space-y-6">
-        {/* Hero: the interactive, customer-facing "how it works" diagram. */}
-        <D3ArchitectureDiagram />
-
-        {/* Everything below is the technical deep-dive, collapsed by default
-            so the interactive diagram above stays the star for a first-glance
-            audience — deeply technical viewers can still open this. */}
-        <CollapsibleSection
-          title="Technical Deep-Dive (For Architects)"
-          subtitle="Live audit logs, the full ID-JAG sequence diagram, Okta config, and orchestration internals"
-          icon={<Cpu className="w-5 h-5" />}
-          defaultOpen={false}
-        >
-        <div className="space-y-6 pt-4">
         {/* Audit Trail - First section to highlight governance */}
         <CollapsibleSection
           title="Audit Trail (Okta Syslog)"
@@ -1105,8 +1091,6 @@ export default function ArchitecturePage() {
               </div>
             </div>
           </div>
-        </CollapsibleSection>
-        </div>
         </CollapsibleSection>
 
         {/* Footer */}
