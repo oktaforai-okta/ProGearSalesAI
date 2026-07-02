@@ -15,21 +15,23 @@ body {
   transition-timing-function: ease-in-out;
 }
 
-/* Custom scrollbar for basketball theme */
+/* Custom scrollbar - subtle by default, only reads as "orange" on hover.
+   A solid #ff6b35 thumb used to read fine in the narrower chat pane, but
+   became a stark vertical bar once the chat area went full-width. */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #1a1a2e;
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #ff6b35;
+  background: rgba(255, 107, 53, 0.25);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #e85d04;
+  background: #ff6b35;
 }

@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, type ReactNode } from 'react';
 import { useSession, signOut } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Key, GitBranch } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 import { type ApprovalStatus } from '@/components/ApprovalStatusCard';
 import { API_BASE_URL, OKTA_DOMAIN } from '@/lib/config';
 
@@ -25,14 +26,6 @@ const exampleQuestions = [
   { text: "What's our margin on pro basketballs?", icon: "💰" },
   { text: "Show me recent bulk equipment orders", icon: "📦" },
   { text: "Which customers have Platinum tier?", icon: "⭐" },
-];
-
-// Predefined prompts for quick access in header
-const predefinedPrompts = [
-  { text: "Check inventory", icon: "📦", shortText: "Inventory" },
-  { text: "Show pricing", icon: "💰", shortText: "Pricing" },
-  { text: "Customer lookup", icon: "👥", shortText: "Customers" },
-  { text: "Recent orders", icon: "📋", shortText: "Orders" },
 ];
 
 const CHAT_STORAGE_KEY = 'progear-chat-messages';
@@ -57,6 +50,21 @@ function getRouterSummary(agentFlow?: any[]): string | null {
   });
   return parts.length ? `Interpreted as → ${parts.join(' · ')}` : null;
 }
+
+// Claude's responses come back as markdown (**bold**, numbered lists, etc.)
+// which previously rendered as literal asterisks in a plain <p> tag. Map the
+// handful of elements actually used in responses to Tailwind-styled tags
+// rather than pulling in the @tailwindcss/typography plugin for this alone.
+const markdownComponents = {
+  p: ({ children }: { children?: ReactNode }) => <p className="mb-2 last:mb-0">{children}</p>,
+  strong: ({ children }: { children?: ReactNode }) => <strong className="font-semibold text-gray-900">{children}</strong>,
+  ul: ({ children }: { children?: ReactNode }) => <ul className="list-disc pl-5 mb-2 space-y-1">{children}</ul>,
+  ol: ({ children }: { children?: ReactNode }) => <ol className="list-decimal pl-5 mb-2 space-y-1">{children}</ol>,
+  li: ({ children }: { children?: ReactNode }) => <li>{children}</li>,
+  code: ({ children }: { children?: ReactNode }) => (
+    <code className="bg-gray-100 text-accent px-1 py-0.5 rounded text-sm font-mono">{children}</code>
+  ),
+};
 
 export default function Home() {
   const { data: session, status } = useSession();
@@ -411,40 +419,28 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Predefined Prompts */}
+          {/* Token Flow + Architecture */}
           <div className="flex items-center space-x-2">
-            {predefinedPrompts.map((prompt, idx) => (
-              <button
-                key={idx}
-                onClick={() => handleSendMessage(prompt.text)}
-                disabled={isLoading}
-                className="px-3 py-2 bg-white/10 hover:bg-accent/40 text-white rounded-lg transition border border-white/20 hover:border-accent/50 flex items-center space-x-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                title={prompt.text}
-              >
-                <span>{prompt.icon}</span>
-                <span className="hidden md:inline">{prompt.shortText}</span>
-              </button>
-            ))}
+            <Link
+              href="/tokens"
+              className="px-4 py-2.5 bg-white/10 hover:bg-accent/30 text-white rounded-lg transition border border-white/20 hover:border-accent/50 flex items-center gap-2 text-sm"
+              title="Token exchanges, FGA checks, and demo controls"
+            >
+              <Key className="w-4 h-4" />
+              <span className="hidden sm:inline">Token Flow</span>
+            </Link>
+            <Link
+              href="/architecture"
+              className="px-4 py-2.5 bg-white/10 hover:bg-accent/30 text-white rounded-lg transition border border-white/20 hover:border-accent/50 flex items-center gap-2 text-sm"
+              title="How the system is wired together"
+            >
+              <GitBranch className="w-4 h-4" />
+              <span className="hidden sm:inline">Architecture</span>
+            </Link>
           </div>
 
           <div className="flex items-center space-x-3">
             <div className="flex items-center gap-3">
-              <Link
-                href="/tokens"
-                className="px-4 py-2.5 bg-white/10 hover:bg-accent/30 text-white rounded-lg transition border border-white/20 hover:border-accent/50 flex items-center gap-2 text-sm"
-                title="Token exchanges, FGA checks, and demo controls"
-              >
-                <Key className="w-4 h-4" />
-                <span className="hidden sm:inline">Tokens</span>
-              </Link>
-              <Link
-                href="/architecture"
-                className="px-4 py-2.5 bg-white/10 hover:bg-accent/30 text-white rounded-lg transition border border-white/20 hover:border-accent/50 flex items-center gap-2 text-sm"
-                title="How the system is wired together"
-              >
-                <GitBranch className="w-4 h-4" />
-                <span className="hidden sm:inline">Architecture</span>
-              </Link>
               <span className="text-gray-200 text-sm">{session?.user?.email}</span>
               <button
                 onClick={handleSignOut}
@@ -521,9 +517,13 @@ export default function Home() {
                       ? 'bg-gradient-to-br from-accent to-court-orange text-white'
                       : 'bg-white border-2 border-neutral-border'
                   }`}>
-                    <p className={`whitespace-pre-wrap ${msg.role === 'assistant' ? 'text-gray-700' : ''}`}>
-                      {msg.content}
-                    </p>
+                    {msg.role === 'assistant' ? (
+                      <div className="text-gray-700 text-sm [&_p:last-child]:mb-0">
+                        <ReactMarkdown components={markdownComponents}>{msg.content}</ReactMarkdown>
+                      </div>
+                    ) : (
+                      <p className="whitespace-pre-wrap">{msg.content}</p>
+                    )}
                     {msg.role === 'assistant' && getRouterSummary(msg.agentFlow) && (
                       <div className="text-[11px] font-mono text-okta-blue/80 mt-2 pt-2 border-t border-neutral-border/60">
                         {getRouterSummary(msg.agentFlow)}
