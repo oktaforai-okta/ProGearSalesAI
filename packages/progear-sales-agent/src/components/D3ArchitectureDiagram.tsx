@@ -65,6 +65,7 @@ interface DiagramNode {
   hero?: boolean;
   dim?: boolean;
   chip?: boolean;
+  order?: number;
   description: string;
   detail: NodeDetail;
   children?: BusinessChild[];
@@ -112,8 +113,9 @@ const NODES: DiagramNode[] = [
     id: 'you',
     label: 'You',
     sublabel: { sarah: 'Signed in as Sarah', mike: 'Signed in as Mike' },
-    x: 76, y: 320, w: 116, h: 60,
+    x: 76, y: 320, w: 150, h: 70,
     accent: C.purple,
+    order: 1,
     description: 'The signed-in person asking a question in plain English.',
     detail: {
       body: "This is the human driving the conversation. When you sign in, Okta confirms who you are and hands your session a verified identity badge. Everything the AI does next is done on your behalf and within your limits, never with its own free-standing power.",
@@ -124,8 +126,9 @@ const NODES: DiagramNode[] = [
     id: 'ai',
     label: 'AI Assistant',
     sublabel: 'Understands + routes',
-    x: 300, y: 320, w: 130, h: 60,
+    x: 300, y: 320, w: 150, h: 70,
     accent: C.oktaBlue,
+    order: 2,
     description: 'The chatbot that understands your request and figures out which systems it needs.',
     detail: {
       body: "The assistant reads your question and decides which business systems could answer it. Important: it only routes and phrases. It never decides what you're allowed to see. That decision is made by Okta and the governance layer, not by the AI. So even a confused or manipulated AI cannot hand out data you aren't cleared for.",
@@ -137,9 +140,10 @@ const NODES: DiagramNode[] = [
     id: 'okta',
     label: 'Okta',
     sublabel: 'Identity + Access',
-    x: 560, y: 120, w: 150, h: 74,
+    x: 560, y: 120, w: 150, h: 70,
     accent: C.oktaBlue,
     hero: true,
+    order: 3,
     description: 'Issues a short-lived, single-purpose pass every time the AI needs to touch a system.',
     detail: {
       body: "Before the AI can reach any system, it must ask Okta for permission. Okta checks two things: who you are and whether your role is allowed to do this specific thing. If yes, Okta issues a short-lived pass that works for one system and one purpose only. If your role isn't allowed, Okta refuses and nothing is issued.",
@@ -159,6 +163,7 @@ const NODES: DiagramNode[] = [
     x: 610, y: 300, w: 150, h: 70,
     accent: C.accent,
     hero: true,
+    order: 4,
     description: 'A live check of your relationships and current context, like whether you manage this warehouse or are on vacation.',
     detail: {
       body: "Roles alone aren't always enough. This layer answers the human questions: do you actually manage this warehouse? Is your clearance high enough? Are you on vacation right now? It checks live relationships and real-time context, not just a static job title. If your situation doesn't fit, access is blocked instantly, even if your role would normally allow it.",
@@ -174,9 +179,10 @@ const NODES: DiagramNode[] = [
   {
     id: 'approval',
     label: 'Approval Gate',
-    sublabel: 'Human sign-off on big changes',
-    x: 600, y: 505, w: 150, h: 64,
+    sublabel: 'Human Approval Only',
+    x: 600, y: 505, w: 150, h: 70,
     accent: C.purple,
+    order: 5,
     description: 'High-impact actions (like a large inventory change) pause here for a human to approve.',
     detail: {
       body: "Some actions are too consequential to auto-approve. When the AI tries to make a large change, for example writing a big inventory adjustment, the request pauses and a real person is asked to approve or deny it. The AI cannot push it through on its own. Once approved, the action completes automatically.",
@@ -193,8 +199,9 @@ const NODES: DiagramNode[] = [
     id: 'business',
     label: 'Business Systems',
     sublabel: '4 domains',
-    x: 945, y: 400, w: 130, h: 66,
+    x: 945, y: 400, w: 150, h: 70,
     accent: C.green,
+    order: 6,
     description: 'Your real company systems: inventory, pricing, customers, and sales.',
     detail: {
       body: "These are the real systems the assistant can draw on. Each one is protected separately and requires its own pass from Okta. The AI can only reach the ones your role and situation permit for the question you asked.",
@@ -210,9 +217,10 @@ const NODES: DiagramNode[] = [
     id: 'audit',
     label: 'Audit Trail',
     sublabel: 'Every decision logged',
-    x: 762, y: 120, w: 132, h: 44,
+    x: 762, y: 120, w: 150, h: 70,
     accent: C.slate,
     dim: true,
+    order: 7,
     description: 'A permanent, searchable record of every pass issued and every allow/deny decision.',
     detail: {
       body: "Every single access decision, granted or denied, is written to a tamper-evident log the moment it happens. Security and compliance teams can answer 'who accessed what, when, and why' for any request the AI ever made, without trusting the AI to self-report.",
@@ -510,7 +518,7 @@ export default function D3ArchitectureDiagram({ title = 'Architecture' }: D3Arch
                     viewer these three checks are one connected governance
                     layer. */}
                 <path
-                  d="M 560 157 C 600 210, 610 235, 610 265 S 606 400, 604 473"
+                  d="M 560 155 C 600 210, 610 235, 610 265 S 606 400, 604 473"
                   fill="none"
                   stroke="#ffd166"
                   strokeOpacity={0.16}
@@ -564,6 +572,14 @@ export default function D3ArchitectureDiagram({ title = 'Architecture' }: D3Arch
                         <text textAnchor="middle" y={15} fontSize={10.5} fill={C.textDim} className="select-none">
                           {label}
                         </text>
+                      )}
+                      {n.order !== undefined && (
+                        <g transform={`translate(${-n.w / 2 + 2},${-n.h / 2 + 2})`}>
+                          <circle r={10} fill="#0b1120" stroke={n.accent} strokeWidth={1.5} />
+                          <text textAnchor="middle" y={4} fontSize={11} fontWeight={700} fill="#fff" className="select-none">
+                            {n.order}
+                          </text>
+                        </g>
                       )}
                     </g>
                   );
