@@ -340,7 +340,12 @@ const EDGE_LABEL_OFFSET: Record<string, number> = {
 };
 
 const EDGE_LABEL_U: Record<string, number> = {
-  you_ai: 0.38,
+  // Pulled well toward the "You" side. The pill-width heuristic below
+  // (label.length * 5.6 + 8) undercounts a proportional sans-serif font's
+  // real rendered width, so a small nudge (0.38) still let the actual text
+  // glyphs — not just the background pill — reach the AI node's "2" badge.
+  // 0.26 keeps real clearance even if the text renders wider than estimated.
+  you_ai: 0.26,
 };
 
 function edgeLabelAnchor(edge: PhysicalEdge, nodes: DiagramNode[], offset: number, u = 0.5): [number, number] {
