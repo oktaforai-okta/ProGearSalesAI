@@ -340,7 +340,7 @@ const EDGE_LABEL_OFFSET: Record<string, number> = {
 };
 
 const EDGE_LABEL_U: Record<string, number> = {
-  you_ai: 0.484,
+  you_ai: 0.38,
 };
 
 function edgeLabelAnchor(edge: PhysicalEdge, nodes: DiagramNode[], offset: number, u = 0.5): [number, number] {
@@ -595,7 +595,7 @@ export default function D3ArchitectureDiagram({ title = 'Architecture' }: D3Arch
             </div>
 
             {/* Detail side panel */}
-            <div className="lg:w-80 shrink-0 border-t lg:border-t-0 lg:border-l border-white/10 p-5">
+            <div className="lg:w-64 shrink-0 border-t lg:border-t-0 lg:border-l border-white/10 p-5">
               {selectedNode ? (
                 <div>
                   <div className="flex items-center gap-2 mb-3">
@@ -663,8 +663,8 @@ export default function D3ArchitectureDiagram({ title = 'Architecture' }: D3Arch
                 </div>
               ) : (
                 <div className="text-sm text-slate-500">
-                  Select a node to see what it does. Hover any node to trace its connections, or hit "Watch a request
-                  flow" to see a real request move through the whole system step by step.
+                  Select a node to see what it does. Hover any node to trace its connections, or hit "See it as a
+                  Sequence" to see a real request move through the whole system step by step.
                 </div>
               )}
             </div>
