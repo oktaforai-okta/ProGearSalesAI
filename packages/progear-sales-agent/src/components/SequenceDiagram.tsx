@@ -163,9 +163,9 @@ const SCENARIOS: Scenario[] = [
 
 const VIEW_W = 980;
 const MARGIN_X = 76;
-const HEADER_H = 96;
-const ROW_H = 52;
-const ROW_TOP = HEADER_H + 24;
+const HEADER_H = 82;
+const ROW_H = 44;
+const ROW_TOP = HEADER_H + 18;
 
 // How long the active arrow takes to draw itself, and how long it sits fully
 // drawn before the next step begins. Slower than a typical UI transition on
@@ -327,8 +327,8 @@ export default function SequenceDiagram({ title = 'Sequence' }: Props) {
     [isPlaying, awaitingDecision, drawActiveArrow]
   );
 
-  const svgHeight = ROW_TOP + messages.length * ROW_H + 40;
-  const lifelineBottom = ROW_TOP + messages.length * ROW_H + 12;
+  const svgHeight = ROW_TOP + messages.length * ROW_H + 32;
+  const lifelineBottom = ROW_TOP + messages.length * ROW_H + 10;
 
   // "You"'s sublabel reflects whichever persona this scenario is about —
   // the sequence is inherently persona-specific (the approval/vacation
