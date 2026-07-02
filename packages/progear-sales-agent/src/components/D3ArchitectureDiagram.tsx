@@ -126,7 +126,7 @@ const NODES: DiagramNode[] = [
     id: 'you',
     label: 'You',
     sublabel: { sarah: 'Signed in as Sarah', mike: 'Signed in as Mike' },
-    x: 90, y: 300, w: 116, h: 60,
+    x: 76, y: 300, w: 116, h: 60,
     accent: C.purple,
     description: 'The signed-in person asking a question in plain English.',
     detail: {
@@ -138,7 +138,7 @@ const NODES: DiagramNode[] = [
     id: 'ai',
     label: 'AI Assistant',
     sublabel: 'Understands + routes',
-    x: 300, y: 300, w: 130, h: 60,
+    x: 296, y: 300, w: 130, h: 60,
     accent: C.oktaBlue,
     description: 'The chatbot that understands your request and figures out which systems it needs.',
     detail: {
@@ -151,7 +151,7 @@ const NODES: DiagramNode[] = [
     id: 'okta',
     label: 'Okta',
     sublabel: 'Identity + Access',
-    x: 560, y: 130, w: 150, h: 74,
+    x: 545, y: 132, w: 150, h: 74,
     accent: C.oktaBlue,
     hero: true,
     description: 'Issues a short-lived, single-purpose pass every time the AI needs to touch a system.',
@@ -170,7 +170,7 @@ const NODES: DiagramNode[] = [
     id: 'fga',
     label: 'Access Rules',
     sublabel: 'Relationship + context check',
-    x: 560, y: 310, w: 150, h: 70,
+    x: 640, y: 300, w: 150, h: 70,
     accent: C.accent,
     hero: true,
     description: 'A live check of your relationships and current context, like whether you manage this warehouse or are on vacation.',
@@ -189,7 +189,7 @@ const NODES: DiagramNode[] = [
     id: 'approval',
     label: 'Approval Gate',
     sublabel: 'Human sign-off on big changes',
-    x: 560, y: 470, w: 150, h: 64,
+    x: 690, y: 505, w: 150, h: 64,
     accent: C.purple,
     description: 'High-impact actions (like a large inventory change) pause here for a human to approve.',
     detail: {
@@ -207,7 +207,7 @@ const NODES: DiagramNode[] = [
     id: 'business',
     label: 'Business Systems',
     sublabel: '4 domains',
-    x: 890, y: 300, w: 130, h: 66,
+    x: 950, y: 440, w: 130, h: 66,
     accent: C.green,
     description: 'Your real company systems: inventory, pricing, customers, and sales.',
     detail: {
@@ -224,7 +224,7 @@ const NODES: DiagramNode[] = [
     id: 'audit',
     label: 'Audit Trail',
     sublabel: 'Every decision logged',
-    x: 560, y: 570, w: 130, h: 40,
+    x: 466, y: 560, w: 130, h: 40,
     accent: C.slate,
     dim: true,
     description: 'A permanent, searchable record of every pass issued and every allow/deny decision.',
@@ -238,7 +238,7 @@ const NODES: DiagramNode[] = [
     id: 'killswitch',
     label: 'Kill Switch',
     sublabel: 'Revoke in one click',
-    x: 720, y: 90, w: 108, h: 34,
+    x: 700, y: 88, w: 108, h: 34,
     accent: C.deny,
     dim: true,
     chip: true,
@@ -254,7 +254,7 @@ const HUMAN_NODE: DiagramNode = {
   id: 'human',
   label: 'Approver',
   sublabel: 'A named person',
-  x: 800, y: 470, w: 108, h: 50,
+  x: 950, y: 560, w: 108, h: 50,
   accent: C.purple,
   description: 'The real person who reviews high-impact requests.',
   detail: { body: 'A named human in Okta Identity Governance reviews the request and approves or denies it. The AI cannot bypass this step.' },
@@ -410,11 +410,50 @@ const EDGE_LABELS: Record<string, string> = {
   fga_audit: 'logs the check',
 };
 
+// Each label is pushed off its edge midpoint along the edge's perpendicular
+// normal by this many px (signed: which side of the line). Tuned so the two
+// corridors that both fan out from the AI node (ai_okta / ai_fga) sit on
+// opposite sides and never share a vertical band, and so no anchor lands on a
+// node. A semi-opaque pill is drawn behind each label at render time, so a
+// label stays legible even if it happens to sit over an edge.
+const EDGE_LABEL_OFFSET: Record<string, number> = {
+  you_ai: -16,
+  ai_okta: -12,
+  ai_fga: 16,
+  ai_approval: 18,
+  approval_human: 16,
+  ai_business: 18,
+  okta_audit: 16,
+  fga_audit: -16,
+};
+
+// A few labels slide off the geometric midpoint toward one endpoint (u != 0.5)
+// so their pill clears a nearby node. Only overrides listed here differ from 0.5.
+const EDGE_LABEL_U: Record<string, number> = {
+  you_ai: 0.484, // recenter "asks / answers" in the You↔AI gap so its pill clears both
+};
+
+// Anchor a label at fraction `u` along the edge, then push it off along the
+// edge's perpendicular normal by `offset` px. Mirrors the geometry the
+// verification script asserts against.
+function edgeLabelAnchor(s: DiagramNode, t: DiagramNode, offset: number, u = 0.5): [number, number] {
+  const px = s.x + (t.x - s.x) * u;
+  const py = s.y + (t.y - s.y) * u;
+  const dx = t.x - s.x;
+  const dy = t.y - s.y;
+  const len = Math.hypot(dx, dy) || 1;
+  return [px + (-dy / len) * offset, py + (dx / len) * offset];
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-export default function D3ArchitectureDiagram() {
+interface D3ArchitectureDiagramProps {
+  title?: string;
+}
+
+export default function D3ArchitectureDiagram({ title = 'Architecture' }: D3ArchitectureDiagramProps) {
   const edgesRef = useRef<SVGGElement | null>(null);
   const packetRef = useRef<SVGCircleElement | null>(null);
   const rafRef = useRef<number | null>(null);
@@ -660,7 +699,7 @@ export default function D3ArchitectureDiagram() {
       {/* Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3 border-b border-white/10 bg-white/[0.02]">
         <div className="flex items-center gap-2">
-          <div className="text-sm font-semibold text-slate-100">How It Works</div>
+          <div className="text-sm font-semibold text-slate-100">{title}</div>
           <div className="hidden sm:block text-xs text-slate-500">hover to trace · click a node for detail</div>
         </div>
 
@@ -774,7 +813,10 @@ export default function D3ArchitectureDiagram() {
               );
             })}
 
-            {/* Resting-state edge labels — Overview mode only. */}
+            {/* Resting-state edge labels — Overview mode only. Each label is
+                offset along its edge's perpendicular normal (so the two
+                corridors fanning out of the AI node don't stack) and backed by
+                a semi-opaque pill so it stays legible over any edge or glow. */}
             {!isFlowing &&
               mode === 'overview' &&
               edges.map((e) => {
@@ -782,27 +824,41 @@ export default function D3ArchitectureDiagram() {
                 const t = findNode(nodes, e.target);
                 const label = EDGE_LABELS[e.id];
                 if (!label) return null;
+                const [lx, ly] = edgeLabelAnchor(s, t, EDGE_LABEL_OFFSET[e.id] ?? 0, EDGE_LABEL_U[e.id] ?? 0.5);
+                const pillW = label.length * 5.6 + 8;
                 return (
-                  <text
-                    key={`lbl-${e.id}`}
-                    x={(s.x + t.x) / 2}
-                    y={(s.y + t.y) / 2 - 8}
-                    textAnchor="middle"
-                    fontSize={10.5}
-                    fill={C.textDim}
-                    className="pointer-events-none select-none"
-                  >
-                    {label}
-                  </text>
+                  <g key={`lbl-${e.id}`} className="pointer-events-none select-none">
+                    <rect
+                      x={lx - pillW / 2}
+                      y={ly - 9}
+                      width={pillW}
+                      height={18}
+                      rx={9}
+                      fill="#0d0d14"
+                      fillOpacity={0.82}
+                    />
+                    <text x={lx} y={ly + 3.5} textAnchor="middle" fontSize={10.5} fill={C.textDim}>
+                      {label}
+                    </text>
+                  </g>
                 );
               })}
 
-            {/* Governance rail — ties Okta/FGA/Approval/Audit together visually. */}
-            <line x1={635} y1={167} x2={635} y2={550} stroke="#ffd166" strokeOpacity={0.18} strokeWidth={3} strokeDasharray="2 6" />
+            {/* Governance rail — a faint band threading the trust tier
+                (Okta → Access Rules → Approval Gate), reminding the viewer
+                these three checks are one connected governance layer. */}
+            <path
+              d="M 545 175 C 660 235, 640 300, 660 380 S 690 460, 690 468"
+              fill="none"
+              stroke="#ffd166"
+              strokeOpacity={0.16}
+              strokeWidth={3}
+              strokeDasharray="2 6"
+            />
 
-            {/* Context chip (vacation flag) flashed near the FGA node. */}
+            {/* Context chip (vacation flag) flashed just above the FGA node. */}
             {contextChip && (
-              <g transform="translate(560, 258)">
+              <g transform="translate(640, 248)">
                 <rect x={-62} y={-12} width={124} height={22} rx={11} fill="#3a0f0f" stroke={C.deny} strokeWidth={1.5} />
                 <text textAnchor="middle" y={4} fontSize={10} fill={C.deny} fontFamily="monospace">
                   {contextChip}
@@ -812,7 +868,7 @@ export default function D3ArchitectureDiagram() {
 
             {/* Audit flash */}
             {auditFlash && (
-              <circle cx={560} cy={570} r={70} fill="none" stroke={auditFlash.deny ? C.deny : '#ffd166'} strokeWidth={2} opacity={0.4} />
+              <circle cx={466} cy={560} r={62} fill="none" stroke={auditFlash.deny ? C.deny : '#ffd166'} strokeWidth={2} opacity={0.4} />
             )}
 
             {/* Animated request packet. */}
