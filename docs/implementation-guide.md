@@ -116,7 +116,7 @@ Before diving into deployment, understand how the pieces fit together:
 │   │  • Chat interface (full-width, at /)                      │   │
 │   │  • Token/FGA/approval inspection (at /tokens)              │   │
 │   │  • User authentication (NextAuth.js + Okta)               │   │
-│   │  • Architecture + how-it-works pages (D3 diagrams)        │   │
+│   │  • Architecture page (D3 diagrams)                         │   │
 │   └───────────────────────────────────────────────────────────┘   │
 │                                                                   │
 │   URL: https://your-app.vercel.app                                │
@@ -204,12 +204,10 @@ packages/progear-sales-agent/src/
 │   ├── api/auth/           # NextAuth.js Okta integration
 │   ├── page.tsx            # Main chat UI (/)
 │   ├── tokens/page.tsx     # Token/FGA/approval inspection (/tokens)
-│   ├── architecture/page.tsx    # Interactive D3 diagrams (/architecture)
-│   └── how-it-works/page.tsx    # Static technical deep-dive
-├── components/             # AgentFlowCard, TokenExchangeCard, RawTokensCard,
-│                           # FGAExplanationCard, FGAControlsPanel,
+│   └── architecture/page.tsx    # Interactive D3 diagrams (/architecture)
+├── components/             # RawTokensCard, FGAExplanationCard, FGAControlsPanel,
 │                           # ApprovalStatusCard, D3ArchitectureDiagram,
-│                           # SequenceDiagram, OktaSystemLog, UserIdentityCard
+│                           # SequenceDiagram, UserIdentityCard
 └── lib/                    # NextAuth config, shared helpers
 ```
 

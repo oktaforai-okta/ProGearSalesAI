@@ -23,8 +23,7 @@ Pages in the running app:
 |---|---|
 | `/` | The chat UI ("CourtEdge ProGear") — talk to the sales assistant |
 | `/tokens` | Raw token exchanges, FGA checks, and pending approvals as they happen |
-| `/how-it-works` | Static technical deep-dive: audit log sample, ID-JAG sequence diagram, live Okta config, LangGraph orchestration, MCP security notes |
-| `/architecture` | Interactive D3.js diagrams — a relationship graph and a UML-style sequence walkthrough of 4 scenarios (happy path, access denied, blocked on vacation, needs approval) |
+| `/architecture` | Interactive D3.js diagrams — a relationship graph (with the four business domains — Inventory, Customer, Pricing, Sales — as separate boxes) and a UML-style sequence walkthrough of 4 scenarios (happy path, access denied, blocked on vacation, needs approval) |
 
 ## What This Demo Shows
 
@@ -122,7 +121,7 @@ ProGearSalesAI/
 │   ├── services/                   # OIG approval client and other services
 │   └── data/                       # demo_store.py, initial_data.json (seed data)
 ├── packages/
-│   ├── progear-sales-agent/        # Next.js frontend (chat, /tokens, /how-it-works, /architecture)
+│   ├── progear-sales-agent/        # Next.js frontend (chat, /tokens, /architecture)
 │   └── progear-sales-mcp-server/   # Standalone JWT-validating MCP server (not yet wired into the chat flow)
 ├── docs/                           # architecture.md, implementation-guide.md, etc.
 ├── .env.example                    # Environment variable template (names only, no real secrets)

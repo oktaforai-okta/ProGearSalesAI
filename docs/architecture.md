@@ -209,7 +209,9 @@ Execution is idempotent: a JSON ledger file (`backend/data/approvals_ledger.json
 
 ## 8. Audit trail
 
-Every ID-JAG exchange — granted or denied — is a token-grant event in **Okta's System Log**, a queryable, tamper-evident stream that exists independently of this app's own logging. `GET /api/okta/logs` in `backend/api/main.py` queries the real Okta System Log API (`/api/v1/logs`, authenticated with `OKTA_API_TOKEN`) for `token.grant`/token-exchange events and reshapes them for the UI: which agent (actor) acted, on behalf of which user (target), against which Custom Authorization Server, and which scopes were requested versus actually granted. This is Okta's own audit record, not a log table this app maintains.
+Every ID-JAG exchange — granted or denied — is a token-grant event in **Okta's System Log**, a queryable, tamper-evident stream that exists independently of this app's own logging. `GET /api/okta/logs` in `backend/api/main.py` queries the real Okta System Log API (`/api/v1/logs`, authenticated with `OKTA_API_TOKEN`) for `token.grant`/token-exchange events and reshapes them into a consistent shape: which agent (actor) acted, on behalf of which user (target), against which Custom Authorization Server, and which scopes were requested versus actually granted. This is Okta's own audit record, not a log table this app maintains.
+
+**Honest limitation:** the endpoint above is real and callable, but the frontend page that rendered it (`OktaSystemLog`, on the now-removed `/how-it-works` page) is gone — there's currently no UI surfacing this data, only the API.
 
 ---
 
@@ -235,10 +237,9 @@ Both halves deploy from this single repo and auto-deploy on every push to `main`
 
 ## 11. See it live, interactively
 
-Two pages in the running frontend exist specifically to make this architecture visible and explorable, beyond this document:
+One page in the running frontend exists specifically to make this architecture visible and explorable, beyond this document:
 
-- **`/architecture`** — interactive D3.js diagrams (`D3ArchitectureDiagram` component): a hub-and-spoke relationship graph you can hover/click to trace connections, and a UML-style sequence-diagram walkthrough of 4 real scenarios (happy path, access denied, blocked on vacation, needs human approval).
-- **`/how-it-works`** — a static technical deep-dive: a sample audit log, the ID-JAG sequence diagram, a live readout of the current Okta configuration, an explanation of the LangGraph orchestration, and notes on MCP security.
+- **`/architecture`** — interactive D3.js diagrams (`D3ArchitectureDiagram` component): a hub-and-spoke relationship graph you can hover/click to trace connections — the resource tier is four separate boxes (Inventory, Customer, Pricing, Sales) rather than one bundled node, so each domain's own access rules are traceable — and a UML-style sequence-diagram walkthrough of 4 real scenarios (happy path, access denied, blocked on vacation, needs human approval). Steps stay lit as playback advances, so the whole path taken so far is always visible, not just the current step.
 
 There's also a **`/tokens`** page showing the raw token exchanges, FGA checks, and pending approvals as they happen in real time for the current session — useful for watching the mechanisms above fire on an actual request instead of just reading about them.
 
