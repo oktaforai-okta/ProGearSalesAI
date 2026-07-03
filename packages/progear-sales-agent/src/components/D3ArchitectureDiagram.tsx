@@ -136,14 +136,14 @@ const NODES: DiagramNode[] = [
     detail: {
       body: "Reads your question and routes it to the right systems. It never decides what you're allowed to see — that's Okta's job, not the AI's.",
       callouts: ['Has its own Okta identity (a Workload Principal)', 'No standing access of its own'],
-      architect: 'The AI is powered by a language model (Claude, via the raw Anthropic SDK) for wording and routing only. It is not the security boundary. Step 1 of the token exchange proves the pairing below — which user this agent is acting for — before any scope is even discussed.',
+      architect: 'Claude via the raw Anthropic SDK — wording and routing only, not the security boundary.',
       tokenExample: {
-        label: 'Step 1 output: the ID-JAG assertion (proves "agent acting for user")',
+        label: 'Step 1: the ID-JAG assertion',
         json: `{
-  "iss": "https://your-org.okta.com/oauth2/ausMAIN...",
-  "sub": "mike.manager@example.com",
-  "act": { "sub": "wlp8x5q7mvH86KvFJ0g7" },
-  "iat": 1751500000,
+  "sub": "mike@example.com",
+  "act": {
+    "sub": "wlp8x5q7..."
+  },
   "exp": 1751500060
 }`,
       },
@@ -166,19 +166,18 @@ const NODES: DiagramNode[] = [
         'The AI never holds a master key. It gets a fresh, narrow pass each time.',
       ],
       callouts: ['Passes are scoped per system + per action', "All-or-nothing: if a role can't do it, the whole request is refused"],
-      architect: 'Under the hood this is a two-step token exchange (ID-JAG). Step 1 (shown on the AI Assistant node) trades your login token for an assertion naming both you and the agent, at the Org Authorization Server. Step 2, below, trades that for a scoped access token at a per-domain Custom Authorization Server (one each for sales, inventory, customer, pricing) — each with its own issuer/audience, so a token minted here cannot be replayed against another domain. The agent authenticates with an RSA keypair, never a shared secret. No down-scoping: an ungrantable scope fails the whole exchange with access_denied.',
+      architect: 'Two-step ID-JAG exchange. 4 separate Custom Authorization Servers (one per domain) — no down-scoping.',
       tokenExample: {
-        label: 'Step 2 output: the scoped access token (this is what actually unlocks Inventory)',
+        label: 'Step 2: the scoped access token',
         json: `{
-  "iss": "https://your-org.okta.com/oauth2/ausINVENTORY...",
-  "aud": "api://progear-inventory",
-  "sub": "mike.manager@example.com",
-  "act": { "sub": "wlp8x5q7mvH86KvFJ0g7" },
-  "scp": ["inventory:write"],
+  "aud": "progear-inventory",
+  "sub": "mike@example.com",
+  "scp": [
+    "inventory:write"
+  ],
   "Manager": true,
   "Vacation": false,
   "Clearance": 5,
-  "iat": 1751500000,
   "exp": 1751500300
 }`,
       },
@@ -201,7 +200,7 @@ const NODES: DiagramNode[] = [
         "Context: a live flag (for example 'on vacation') can block access this second, with no code change.",
       ],
       callouts: ['Blocks instantly on context change', 'No redeploy needed to revoke'],
-      architect: "This is Auth0 FGA (Fine-Grained Authorization), a Zanzibar-style relationship graph. A manager relation is 'active' only while not on vacation; reads map to a can_view relation and writes to can_update, each requiring both the relationship check and a clearance-level check (1-10, higher includes lower). Vacation is a contextual tuple passed per-request, not stored — flipping it takes effect on the very next check.",
+      architect: "Auth0 FGA (Zanzibar-style relationship graph). Vacation is a contextual tuple, not stored — takes effect next check.",
     },
   },
   {
@@ -220,7 +219,7 @@ const NODES: DiagramNode[] = [
         'Nothing happens to the business system until sign-off lands.',
       ],
       callouts: ['Human-in-the-loop', 'Auto-resumes once approved'],
-      architect: 'This is a real Okta Identity Governance (OIG) Access Request, created automatically once a parsed write quantity crosses the 500-unit threshold. A background poller resumes the pending write once the request is approved in Okta.',
+      architect: 'A real Okta Identity Governance (OIG) Access Request, created once a write crosses the 500-unit threshold.',
     },
   },
   {
@@ -253,7 +252,7 @@ const NODES: DiagramNode[] = [
     detail: {
       body: "Every access decision — granted or denied — is logged instantly. Answers 'who did what, when, why' without trusting the AI to self-report.",
       callouts: ['Queryable', 'Covers grants AND denials'],
-      architect: "This is Okta's System Log — a queryable, tamper-evident event stream, separate from (and more trustworthy than) any logging the application itself does.",
+      architect: "Okta's System Log — a queryable, tamper-evident stream separate from this app's own logging.",
     },
   },
   {
@@ -745,7 +744,7 @@ export default function D3ArchitectureDiagram({ title = 'Architecture' }: D3Arch
                       {selectedNode.detail.tokenExample && (
                         <div className="mt-2.5">
                           <div className="text-[9.5px] text-slate-500 mb-1">{selectedNode.detail.tokenExample.label}</div>
-                          <pre className="text-[9.5px] text-emerald-300/90 bg-black/40 border border-white/10 rounded-lg p-2 overflow-x-auto leading-snug whitespace-pre">
+                          <pre className="text-[9.5px] text-emerald-300/90 bg-black/40 border border-white/10 rounded-lg p-2 leading-snug whitespace-pre-wrap break-all">
                             {selectedNode.detail.tokenExample.json}
                           </pre>
                           <div className="text-[9px] text-slate-600 mt-1">Illustrative example — not a real token.</div>
