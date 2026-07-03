@@ -330,11 +330,23 @@ export default function RawTokensCard({ exchanges, idTokenClaims, idTokenRaw }: 
       {/* Expanded Content */}
       {isExpanded && (
         <div className="p-4 space-y-3">
+          {/* Token Flow legend -- lives at the top now (right-aligned) so
+              it's the first thing read, rather than a footer someone has
+              to scroll past every step to find. */}
+          {hasAnyTokens && (
+            <div className="pb-3 border-b border-gray-100">
+              <div className="text-[10px] text-gray-500 flex items-center justify-end gap-1.5">
+                <KeySquare className="w-3 h-3" />
+                <span className="font-semibold">Token Flow:</span> ID Token → ID-JAG Token → Access Token
+              </div>
+            </div>
+          )}
+
           {/* ID Token (User's original token) -- categories are already
               labeled inline within each expanded step below, so a separate
               top-level legend here was pure duplication. */}
           <TokenSection
-            title="Step 1: User Authenticated to Okta for AI Agent Interface"
+            title="Step 1: User Authenticated to Okta for AI Agent Interface (ID Token)"
             claims={idTokenClaims}
             rawToken={idTokenRaw}
             color="#007dc1"
@@ -347,7 +359,7 @@ export default function RawTokensCard({ exchanges, idTokenClaims, idTokenRaw }: 
               {/* ID-JAG Token (intermediate) */}
               {(exchange.id_jag_token || exchange.id_jag_claims) && (
                 <TokenSection
-                  title={`Step 2: Cross-App Access Ticket Issued for ${exchange.agent_name}`}
+                  title={`Step 2: Cross-App Access Ticket Issued for ${exchange.agent_name} (ID-JAG Token)`}
                   claims={exchange.id_jag_claims}
                   rawToken={exchange.id_jag_token}
                   color="#6366f1"  // Indigo for ID-JAG
@@ -358,7 +370,7 @@ export default function RawTokensCard({ exchanges, idTokenClaims, idTokenRaw }: 
               {/* Access Token (final) */}
               {(exchange.access_token || exchange.token_claims) && (
                 <TokenSection
-                  title={`Step 3: ${exchange.agent_name} Granted Access to Business Data`}
+                  title={`Step 3: ${exchange.agent_name} Granted Access to Business Data (Access Token)`}
                   claims={exchange.token_claims}
                   rawToken={exchange.access_token}
                   color={exchange.color}
@@ -374,16 +386,6 @@ export default function RawTokensCard({ exchanges, idTokenClaims, idTokenRaw }: 
               <Key className="w-6 h-6 mx-auto mb-2 opacity-50" />
               <p className="text-sm">No token data available</p>
               <p className="text-xs">Send a message to see token exchanges</p>
-            </div>
-          )}
-
-          {/* Token Flow Legend */}
-          {hasAnyTokens && (
-            <div className="pt-3 border-t border-gray-100">
-              <div className="text-[10px] text-gray-500 flex items-center gap-1.5">
-                <KeySquare className="w-3 h-3" />
-                <span className="font-semibold">Token Flow:</span> ID Token → ID-JAG Token → Access Token
-              </div>
             </div>
           )}
         </div>
