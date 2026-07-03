@@ -95,7 +95,6 @@ const SCENARIOS: Scenario[] = [
     question: 'How many climbing helmets do we have in stock?',
     messages: [
       { from: 'you', to: 'ai', kind: 'call', label: 'asks a question', caption: 'Sarah asks the assistant a question in plain English.' },
-      { from: 'ai', to: 'ai', kind: 'self', label: 'works out which systems it needs', caption: "The assistant works out which systems could answer, but it can't touch them yet." },
       { from: 'ai', to: 'okta', kind: 'call', label: "requests a pass, on Sarah's behalf", caption: "Before touching anything, the assistant asks Okta for permission, on Sarah's behalf." },
       { from: 'okta', to: 'ai', kind: 'return', label: 'issues a short-lived, scoped pass', caption: "Okta confirms it's really Sarah, and issues a pass good for ONE system, ONE purpose.", note: 'scope: inventory:read' },
       { from: 'ai', to: 'rules', kind: 'call', label: 'checks context', caption: "The assistant checks the live access rules for Sarah's relationship and context." },
@@ -113,7 +112,6 @@ const SCENARIOS: Scenario[] = [
     question: 'Set climbing-helmet stock to 50.',
     messages: [
       { from: 'you', to: 'ai', kind: 'call', label: 'asks to change inventory', caption: 'Sarah asks the assistant to change inventory: "Set climbing-helmet stock to 50."' },
-      { from: 'ai', to: 'ai', kind: 'self', label: 'works out which systems it needs', caption: "The assistant works out which systems could answer, but it can't touch them yet." },
       { from: 'ai', to: 'okta', kind: 'call', label: 'requests a write pass', caption: "The assistant asks Okta for permission to write, on Sarah's behalf." },
       { from: 'okta', to: 'ai', kind: 'deny', label: 'role not allowed — refused', caption: "Sarah's role can read inventory but not change it. Okta refuses — the whole request stops.", note: 'requested: inventory:write' },
     ],
@@ -166,6 +164,29 @@ const MARGIN_X = 76;
 const HEADER_H = 82;
 const ROW_H = 44;
 const ROW_TOP = HEADER_H + 18;
+// A row whose message carries a note chip (e.g. "scope: inventory:read")
+// packs a label, an arrow, AND a chip into one row -- more content than a
+// plain row. Giving every row the same flat ROW_H left note rows cramped
+// (label/chip crowding the next row's label). Only note rows get this
+// extra height, so the fix doesn't undo the "fit on one screen" sizing
+// for the ~80% of rows that don't have a note.
+const NOTE_ROW_EXTRA_H = 20;
+
+function rowHeight(m: Message): number {
+  return ROW_H + (m.note ? NOTE_ROW_EXTRA_H : 0);
+}
+
+// Cumulative row centers, since rows are no longer a uniform height.
+function computeRowCenters(messages: Message[]): number[] {
+  const centers: number[] = [];
+  let cursor = ROW_TOP;
+  for (const m of messages) {
+    const h = rowHeight(m);
+    centers.push(cursor + h / 2);
+    cursor += h;
+  }
+  return centers;
+}
 
 // How long the active arrow takes to draw itself, and how long it sits fully
 // drawn before the next step begins. Slower than a typical UI transition on
@@ -327,8 +348,10 @@ export default function SequenceDiagram({ title = 'Sequence' }: Props) {
     [isPlaying, awaitingDecision, drawActiveArrow]
   );
 
-  const svgHeight = ROW_TOP + messages.length * ROW_H + 32;
-  const lifelineBottom = ROW_TOP + messages.length * ROW_H + 10;
+  const rowCenters = useMemo(() => computeRowCenters(messages), [messages]);
+  const totalRowsHeight = useMemo(() => messages.reduce((sum, m) => sum + rowHeight(m), 0), [messages]);
+  const svgHeight = ROW_TOP + totalRowsHeight + 32;
+  const lifelineBottom = ROW_TOP + totalRowsHeight + 10;
 
   // "You"'s sublabel reflects whichever persona this scenario is about —
   // the sequence is inherently persona-specific (the approval/vacation
@@ -473,7 +496,7 @@ export default function SequenceDiagram({ title = 'Sequence' }: Props) {
           })}
 
           {messages.map((m, i) => {
-            const y = ROW_TOP + i * ROW_H + ROW_H / 2;
+            const y = rowCenters[i];
             const fromX = laneX(actorIndex(m.from), ACTORS.length);
             const toX = laneX(actorIndex(m.to), ACTORS.length);
             const isActive = i === played - 1;
