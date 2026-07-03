@@ -335,7 +335,7 @@ export default function RawTokensCard({ exchanges, idTokenClaims, idTokenRaw }: 
               to scroll past every step to find. */}
           {hasAnyTokens && (
             <div className="pb-3 border-b border-gray-100">
-              <div className="text-[10px] text-gray-500 flex items-center justify-end gap-1.5">
+              <div className="text-[10px] text-gray-500 flex items-center justify-start gap-1.5">
                 <KeySquare className="w-3 h-3" />
                 <span className="font-semibold">Token Flow:</span> ID Token → ID-JAG Token → Access Token
               </div>
