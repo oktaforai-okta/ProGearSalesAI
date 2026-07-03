@@ -330,25 +330,14 @@ export default function RawTokensCard({ exchanges, idTokenClaims, idTokenRaw }: 
       {/* Expanded Content */}
       {isExpanded && (
         <div className="p-4 space-y-3">
-          {/* Category legend */}
-          <div className="flex flex-wrap gap-x-3 gap-y-1 pb-2 border-b border-gray-100">
-            {CATEGORY_ORDER.map((cat) => {
-              const meta = CATEGORIES[cat];
-              const Icon = meta.icon;
-              return (
-                <div key={cat} className={`flex items-center gap-1 text-[10px] ${meta.text}`}>
-                  <Icon className="w-3 h-3" />
-                  {meta.label}
-                </div>
-              );
-            })}
-          </div>
-
-          {/* ID Token (User's original token) */}
+          {/* ID Token (User's original token) -- categories are already
+              labeled inline within each expanded step below, so a separate
+              top-level legend here was pure duplication. */}
           <TokenSection
             title="Step 1: User Authenticated to Okta for AI Agent Interface"
             claims={idTokenClaims}
             rawToken={idTokenRaw}
+            color="#007dc1"
             defaultOpen={true}
           />
 

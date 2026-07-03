@@ -50,12 +50,6 @@ interface NodeDetail {
   tokenExample?: { label: string; json: string };
 }
 
-interface BusinessChild {
-  label: string;
-  sublabel: string;
-  body: string;
-}
-
 interface DiagramNode {
   id: string;
   label: string;
@@ -71,7 +65,6 @@ interface DiagramNode {
   order?: number;
   description: string;
   detail: NodeDetail;
-  children?: BusinessChild[];
 }
 
 interface PhysicalEdge {
@@ -114,7 +107,7 @@ const VIEW_H = 620;
 const NODES: DiagramNode[] = [
   {
     id: 'you',
-    label: 'You',
+    label: 'User',
     sublabel: 'Signed-in person',
     x: 76, y: 320, w: 150, h: 70,
     accent: C.purple,
@@ -127,7 +120,7 @@ const NODES: DiagramNode[] = [
   },
   {
     id: 'ai',
-    label: 'AI Assistant',
+    label: 'AI Agent',
     sublabel: 'Understands + routes',
     x: 300, y: 320, w: 150, h: 70,
     accent: C.oktaBlue,
@@ -223,22 +216,48 @@ const NODES: DiagramNode[] = [
     },
   },
   {
-    id: 'business',
-    label: 'Business Systems',
-    sublabel: '4 domains',
+    id: 'inventory',
+    label: 'Inventory',
+    sublabel: 'read / write / alerts',
+    x: 945, y: 160, w: 150, h: 70,
+    accent: C.green,
+    description: 'Stock levels and adjustments.',
+    detail: {
+      body: 'Stock levels and adjustments. Reading is broadly allowed; large writes need approval and a manager relationship.',
+    },
+  },
+  {
+    id: 'customer',
+    label: 'Customer',
+    sublabel: 'read',
+    x: 945, y: 280, w: 150, h: 70,
+    accent: C.green,
+    description: 'Customer accounts and history.',
+    detail: {
+      body: 'Customer accounts and history.',
+    },
+  },
+  {
+    id: 'pricing',
+    label: 'Pricing',
+    sublabel: 'read',
     x: 945, y: 400, w: 150, h: 70,
     accent: C.green,
-    order: 6,
-    description: 'Your real company systems: inventory, pricing, customers, and sales.',
+    description: 'Product and deal pricing.',
     detail: {
-      body: "Your real company systems — inventory, pricing, customers, sales. Each needs its own pass; the AI only reaches what you're cleared for.",
+      body: 'Product and deal pricing.',
     },
-    children: [
-      { label: 'Inventory', sublabel: 'read / write / alerts', body: 'Stock levels and adjustments. Reading is broadly allowed; large writes need approval and a manager relationship.' },
-      { label: 'Pricing', sublabel: 'read', body: 'Product and deal pricing.' },
-      { label: 'Customers', sublabel: 'read', body: 'Customer accounts and history.' },
-      { label: 'Sales', sublabel: 'read', body: 'Orders, quotes, and pipeline.' },
-    ],
+  },
+  {
+    id: 'sales',
+    label: 'Sales',
+    sublabel: 'read',
+    x: 945, y: 520, w: 150, h: 70,
+    accent: C.green,
+    description: 'Orders, quotes, and pipeline.',
+    detail: {
+      body: 'Orders, quotes, and pipeline.',
+    },
   },
   {
     id: 'audit',
@@ -247,7 +266,7 @@ const NODES: DiagramNode[] = [
     x: 762, y: 120, w: 150, h: 70,
     accent: C.slate,
     dim: true,
-    order: 7,
+    order: 6,
     description: 'A permanent, searchable record of every pass issued and every allow/deny decision.',
     detail: {
       body: "Every access decision — granted or denied — is logged instantly. Answers 'who did what, when, why' without trusting the AI to self-report.",
@@ -271,12 +290,22 @@ const NODES: DiagramNode[] = [
   },
 ];
 
+// The four business-domain boxes are siblings reached by one shared "bus"
+// out of the AI hub, not a sequential chain -- this list is the single
+// source of truth for that grouping so edge/highlight logic below never
+// has to hardcode all four ids separately.
+const BUSINESS_NODE_IDS = ['inventory', 'customer', 'pricing', 'sales'];
+const BUSINESS_EDGE_IDS = BUSINESS_NODE_IDS.map((id) => `ai_${id}`);
+
 const EDGES: PhysicalEdge[] = [
   { id: 'you_ai', source: 'you', target: 'ai' },
   { id: 'ai_okta', source: 'ai', target: 'okta' },
   { id: 'ai_fga', source: 'ai', target: 'fga' },
   { id: 'ai_approval', source: 'ai', target: 'approval' },
-  { id: 'ai_business', source: 'ai', target: 'business' },
+  { id: 'ai_inventory', source: 'ai', target: 'inventory' },
+  { id: 'ai_customer', source: 'ai', target: 'customer' },
+  { id: 'ai_pricing', source: 'ai', target: 'pricing' },
+  { id: 'ai_sales', source: 'ai', target: 'sales' },
   { id: 'okta_audit', source: 'okta', target: 'audit' },
   { id: 'fga_audit', source: 'fga', target: 'audit' },
 ];
@@ -296,13 +325,18 @@ const linkPath = line<[number, number]>()
   .y((d) => d[1])
   .curve(curveBumpX);
 
-// ai_business is a genuine multi-point bent path, not a straight two-point
-// curve: it arcs DOWN out of the AI hub and through the open lane between
+// Every business-domain edge shares the same first two waypoints, so they
+// draw on top of each other from the AI hub through the open lane between
 // the FGA box (bottom y=335) and the Approval Gate (top y=473) — around
-// y=400 — so its long reach to the resource tier never crosses the AI's
-// other spokes nor the okta_audit / fga_audit edges.
+// y=400 — reading as one trunk that only splits into four once it's clear
+// of the trust tier. From the branch point (870,400) each edge takes its
+// own short final hop up/down to its box, so none crosses the AI's other
+// spokes nor the okta_audit / fga_audit edges.
 const EDGE_WAYPOINTS: Record<string, Array<[number, number]>> = {
-  ai_business: [[470, 400]],
+  ai_inventory: [[470, 400], [870, 400], [870, 160]],
+  ai_customer: [[470, 400], [870, 400], [870, 280]],
+  ai_pricing: [[470, 400], [870, 400]],
+  ai_sales: [[470, 400], [870, 400], [870, 520]],
 };
 
 function edgePoints(edge: PhysicalEdge, nodes: DiagramNode[]): Array<[number, number]> {
@@ -343,7 +377,10 @@ const EDGE_LABELS: Record<string, string> = {
   ai_okta: 'requests a pass ↔ issues one',
   ai_fga: 'checks context ↔ confirms',
   ai_approval: 'high-impact action',
-  ai_business: 'uses the pass ↔ returns data',
+  // Shown once, on the shared trunk -- applies to all four business edges,
+  // so the other three intentionally have no entry here (see edge-label
+  // render: a missing key just skips the label).
+  ai_pricing: 'uses the pass ↔ returns data',
   okta_audit: 'logs the decision',
   fga_audit: 'logs the check',
 };
@@ -356,7 +393,7 @@ const EDGE_LABEL_OFFSET: Record<string, number> = {
   ai_okta: -12,
   ai_fga: 16,
   ai_approval: 18,
-  ai_business: -20,
+  ai_pricing: -20,
   okta_audit: 50,
   fga_audit: -16,
 };
@@ -446,8 +483,9 @@ export default function D3ArchitectureDiagram({ title = 'Architecture' }: D3Arch
   // --- Hover/select highlight — pure attr update, no re-join. ---------------
   // Kill Switch has no edges of its own, so selecting it doesn't fall out of
   // the generic "edges touching the active node" rule below. Instead it's a
-  // special case: it visualizes WHAT gets cut — the AI's reach into Business
-  // Systems — by forcing that one edge into a red, dashed "severed" state.
+  // special case: it visualizes WHAT gets cut — the AI's reach into every
+  // business domain — by forcing all four of those edges into a red, dashed
+  // "severed" state.
   useEffect(() => {
     const g = edgesRef.current;
     if (!g) return;
@@ -457,27 +495,27 @@ export default function D3ArchitectureDiagram({ title = 'Architecture' }: D3Arch
     select(g)
       .selectAll<SVGPathElement, PhysicalEdge>('path.edge')
       .attr('stroke', (d) =>
-        killSwitchActive && d.id === 'ai_business'
+        killSwitchActive && BUSINESS_EDGE_IDS.includes(d.id)
           ? C.deny
           : activeNode && (d.source === activeNode || d.target === activeNode)
           ? C.edgeActive
           : C.edge
       )
       .attr('stroke-opacity', (d) =>
-        killSwitchActive && d.id === 'ai_business'
+        killSwitchActive && BUSINESS_EDGE_IDS.includes(d.id)
           ? 1
           : activeNode && (d.source === activeNode || d.target === activeNode)
           ? 0.95
           : 0.4
       )
       .attr('stroke-width', (d) =>
-        killSwitchActive && d.id === 'ai_business'
+        killSwitchActive && BUSINESS_EDGE_IDS.includes(d.id)
           ? 3.5
           : activeNode && (d.source === activeNode || d.target === activeNode)
           ? 3.5
           : 2.5
       )
-      .attr('stroke-dasharray', (d) => (killSwitchActive && d.id === 'ai_business' ? '7 5' : 'none'));
+      .attr('stroke-dasharray', (d) => (killSwitchActive && BUSINESS_EDGE_IDS.includes(d.id) ? '7 5' : 'none'));
   }, [hoveredId, selectedId]);
 
   return (
@@ -549,8 +587,13 @@ export default function D3ArchitectureDiagram({ title = 'Architecture' }: D3Arch
                     perpendicular normal and backed by a pill so it stays
                     legible over any edge or glow. */}
                 {EDGES.map((e) => {
-                  const isKillCut = selectedId === 'killswitch' && e.id === 'ai_business';
-                  const label = isKillCut ? 'access cut' : EDGE_LABELS[e.id];
+                  const isKillCut = selectedId === 'killswitch' && BUSINESS_EDGE_IDS.includes(e.id);
+                  // All four business edges turn red/dashed (see the D3
+                  // highlight effect above), but they share a trunk, so
+                  // only one of them renders the "access cut" text itself
+                  // -- otherwise four labels stack exactly on top of each
+                  // other where the trunk splits.
+                  const label = isKillCut ? (e.id === 'ai_pricing' ? 'access cut' : null) : EDGE_LABELS[e.id];
                   if (!label) return null;
                   const detached = EDGE_LABEL_DETACHED[e.id];
                   const pillW = label.length * 5.6 + 8;
@@ -619,12 +662,12 @@ export default function D3ArchitectureDiagram({ title = 'Architecture' }: D3Arch
                   const isSelected = n.id === selectedId;
                   const isHovered = n.id === hoveredId;
                   // Kill Switch has no edges of its own (see the highlight effect
-                  // above), so its two "victims" — the AI Assistant and Business
-                  // Systems boxes the red cut line actually connects — need to be
+                  // above), so its "victims" — the AI Agent and the four business
+                  // domain boxes the red cut lines actually connect — need to be
                   // explicitly lit up here too. Otherwise selecting Kill Switch
-                  // dims everything else on the canvas, including the very two
-                  // nodes the whole point is to draw attention to.
-                  const isKillEndpoint = selectedId === 'killswitch' && (n.id === 'ai' || n.id === 'business');
+                  // dims everything else on the canvas, including the very nodes
+                  // the whole point is to draw attention to.
+                  const isKillEndpoint = selectedId === 'killswitch' && (n.id === 'ai' || BUSINESS_NODE_IDS.includes(n.id));
                   const isActive = isSelected || isHovered || isKillEndpoint;
                   const dim = (hoveredId ?? selectedId) && !isActive;
                   const label = n.sublabel;
@@ -640,13 +683,6 @@ export default function D3ArchitectureDiagram({ title = 'Architecture' }: D3Arch
                       onClick={() => setSelectedId((cur) => (cur === n.id ? null : n.id))}
                       style={{ transition: 'opacity 150ms ease' }}
                     >
-                      {n.id === 'business' && (
-                        <>
-                          <rect x={-n.w / 2 + 6} y={-n.h / 2 + 8} width={n.w} height={n.h} rx={12} fill={C.nodeFill} stroke={n.accent} strokeOpacity={0.35} strokeWidth={1} />
-                          <rect x={-n.w / 2 + 3} y={-n.h / 2 + 4} width={n.w} height={n.h} rx={12} fill={C.nodeFill} stroke={n.accent} strokeOpacity={0.6} strokeWidth={1} />
-                        </>
-                      )}
-
                       <rect
                         x={-n.w / 2}
                         y={-n.h / 2}
@@ -719,20 +755,6 @@ export default function D3ArchitectureDiagram({ title = 'Architecture' }: D3Arch
                         >
                           {c}
                         </span>
-                      ))}
-                    </div>
-                  )}
-
-                  {selectedNode.children && (
-                    <div className="mt-3 space-y-1.5">
-                      {selectedNode.children.map((c) => (
-                        <div key={c.label} className="rounded-lg border border-white/10 bg-white/[0.02] p-2">
-                          <div className="flex items-center justify-between">
-                            <span className="text-[11px] font-semibold text-slate-200">{c.label}</span>
-                            <span className="text-[9px] text-slate-500">{c.sublabel}</span>
-                          </div>
-                          <p className="text-[10px] text-slate-400 mt-1">{c.body}</p>
-                        </div>
                       ))}
                     </div>
                   )}

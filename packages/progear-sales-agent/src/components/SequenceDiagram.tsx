@@ -52,11 +52,11 @@ interface Actor {
 
 // Fixed lanes, left to right. Order is deliberate: the request flows
 // rightward into the trust/governance actors, then rightward again to the
-// business system; returns point back left. The AI Assistant only routes
+// business system; returns point back left. The AI Agent only routes
 // and phrases — it is deliberately NOT styled as a trust node.
 const ACTORS: Actor[] = [
-  { id: 'you', label: 'You', sublabel: 'Signed-in person', accent: C.purple, icon: '\u{1F464}' },
-  { id: 'ai', label: 'AI Assistant', sublabel: 'Routes only', accent: C.oktaBlue, icon: '\u{1F916}' },
+  { id: 'you', label: 'User', sublabel: 'Signed-in person', accent: C.purple, icon: '\u{1F464}' },
+  { id: 'ai', label: 'AI Agent', sublabel: 'Routes only', accent: C.oktaBlue, icon: '\u{1F916}' },
   { id: 'okta', label: 'Okta', sublabel: 'Identity + pass', accent: C.oktaBlue, icon: '\u{1F510}' },
   { id: 'rules', label: 'Access Rules', sublabel: 'Relationship + context', accent: C.accent, icon: '\u{1F5C2}' },
   { id: 'approver', label: 'Approver', sublabel: 'Human sign-off', accent: C.purple, icon: '\u{1F44D}' },
@@ -353,7 +353,7 @@ export default function SequenceDiagram({ title = 'Sequence' }: Props) {
   const svgHeight = ROW_TOP + totalRowsHeight + 32;
   const lifelineBottom = ROW_TOP + totalRowsHeight + 10;
 
-  // "You"'s sublabel reflects whichever persona this scenario is about —
+  // "User"'s sublabel reflects whichever persona this scenario is about —
   // the sequence is inherently persona-specific (the approval/vacation
   // stories only make sense for a warehouse manager), so it's derived from
   // the scenario rather than an independent switcher.
@@ -502,7 +502,12 @@ export default function SequenceDiagram({ title = 'Sequence' }: Props) {
             const isActive = i === played - 1;
             const isPlayed = i < played;
             const isFuture = i >= played;
-            const rowOpacity = isActive ? 1 : isPlayed ? 0.5 : 0.14;
+            // Once a step has played it stays fully lit -- only steps not
+            // yet reached are dimmed. isActive still separately drives the
+            // brighter "in progress" arrow color/weight below, so the
+            // current step reads as distinct even though it shares full
+            // opacity with everything already played.
+            const rowOpacity = isPlayed ? 1 : 0.14;
             const isDeny = m.kind === 'deny';
             const isPause = m.kind === 'approvalPause';
 

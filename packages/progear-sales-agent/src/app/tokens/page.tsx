@@ -4,8 +4,6 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSession } from 'next-auth/react';
 import { ArrowLeft } from 'lucide-react';
-import AgentFlowCard from '@/components/AgentFlowCard';
-import TokenExchangeCard from '@/components/TokenExchangeCard';
 import RawTokensCard from '@/components/RawTokensCard';
 import FGAExplanationCard from '@/components/FGAExplanationCard';
 import ApprovalStatusCard, { type ApprovalStatus } from '@/components/ApprovalStatusCard';
@@ -82,10 +80,6 @@ export default function TokensPage() {
       </header>
 
       <div className="max-w-4xl mx-auto p-6 space-y-4">
-        <AgentFlowCard steps={agentFlow} />
-
-        <TokenExchangeCard exchanges={tokenExchanges} />
-
         <RawTokensCard
           exchanges={tokenExchanges}
           idTokenClaims={session?.idToken ? decodeJwtPayload(session.idToken) ?? undefined : undefined}
