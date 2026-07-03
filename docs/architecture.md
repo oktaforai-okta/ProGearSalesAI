@@ -197,7 +197,7 @@ Execution is idempotent: a JSON ledger file (`backend/data/approvals_ledger.json
 
 ## 6. The demo data layer
 
-`backend/data/demo_store.py` is the only place business data lives — there's no database. It loads `backend/data/initial_data.json` (the seed dataset: 72 inventory SKUs across 8 categories, 24 customers) into `backend/data/live_data.json` on first boot if that file doesn't exist, and thereafter reads/writes `live_data.json` directly. `live_data.json` is **gitignored** — it's a runtime snapshot regenerated from the seed file, never something to commit or hand-edit. Resetting the demo means deleting `live_data.json` (or calling the store's reset method) so it re-derives from `initial_data.json`.
+`backend/data/demo_store.py` is the only place business data lives — there's no database. It loads `backend/data/initial_data.json` (the seed dataset: 90 inventory SKUs across 8 categories, 34 customers) into `backend/data/live_data.json` on first boot if that file doesn't exist, and thereafter reads/writes `live_data.json` directly. `live_data.json` is **gitignored** — it's a runtime snapshot regenerated from the seed file, never something to commit or hand-edit. Resetting the demo means deleting `live_data.json` (or calling the store's reset method) so it re-derives from `initial_data.json`.
 
 ---
 
