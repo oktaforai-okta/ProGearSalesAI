@@ -1,214 +1,133 @@
-# ProGear Sales AI - Okta AI Agent Governance Demo
+# ProGear Sales AI — Okta AI Agent Governance + Auth0 FGA Demo
 
-> **Enterprise AI Agent security demonstration** showcasing Okta AI Agent Governance with Cross App Access (XAA), ID-JAG token exchange, and role-based access control.
+> A sales-demo app for **CourtEdge ProGear**, a basketball-equipment retailer. An AI shopping/sales assistant is secured end-to-end with **Okta AI Agent Governance** (Workload Principal identity, ID-JAG token exchange), **Auth0 Fine-Grained Authorization (FGA)** for relationship- and context-aware inventory checks, and **Okta Identity Governance (OIG)** for human-in-the-loop approval on large orders.
 
-![Okta AI Agent](https://img.shields.io/badge/Okta-AI%20Agent%20Governance-blue)
-![Cross App Access](https://img.shields.io/badge/XAA-ID--JAG-green)
+![Okta AI Agent Governance](https://img.shields.io/badge/Okta-AI%20Agent%20Governance-blue)
+![Auth0 FGA](https://img.shields.io/badge/Auth0-FGA-orange)
 ![Next.js](https://img.shields.io/badge/Next.js-14-black)
 ![FastAPI](https://img.shields.io/badge/FastAPI-Python-green)
 ![LangGraph](https://img.shields.io/badge/LangGraph-Orchestration-purple)
 
-## What This Demo Shows
-
-This application demonstrates **Okta AI Agent Governance** using **Cross App Access (XAA)** - the emerging standard for enterprise AI agent authentication that MCP (Model Context Protocol) has officially adopted.
-
-### The Security Problem
-
-When AI agents access enterprise data on behalf of users, you need to answer:
-- **WHO** requested this access? (Which user?)
-- **WHAT** AI system performed the action? (Which agent?)
-- **WHEN** did it happen?
-- **CAN** we revoke access immediately?
-
-### What This Demo Proves
-
-This demo implements **Scenario 2** from our [four scenarios framework](docs/okta-security-value.md#the-four-scenarios-how-ai-agents-access-your-data):
-
-| Feature | Description |
-|---------|-------------|
-| **Cross App Access (XAA)** | Industry-standard pattern adopted by MCP for enterprise AI authentication |
-| **ID-JAG Token Exchange** | Identity Assertion JWT Authorization Grant - every token contains user + agent identity |
-| **Workload Principal (`wlp`)** | First-class AI agent identity in Okta Universal Directory |
-| **Role-Based Access Control** | User group membership determines which scopes are granted |
-| **Complete Audit Trail** | Every token exchange logged with who, what, when, why |
-| **Instant Revocation** | One-click deactivation of any AI agent |
-
-### Live Demo
-
-- **Frontend**: [progear-sales-agent.vercel.app](https://progear-sales-agent.vercel.app)
-- **Backend API**: [courtedge-progear-backend.onrender.com](https://courtedge-progear-backend.onrender.com)
-
-### 📚 Documentation
+## Live Demo
 
 | | |
 |---|---|
-| **[Security & Governance Guide](docs/okta-security-value.md)** | Understand the four scenarios, XAA/ID-JAG concepts, and why this matters |
-| **[Implementation Guide](docs/implementation-guide.md)** | Deploy your own instance with step-by-step Okta configuration |
+| **Frontend** | [progear-sales-aiagent.vercel.app](https://progear-sales-aiagent.vercel.app) |
+| **Backend API** | [progearsalesai-p2wm.onrender.com](https://progearsalesai-p2wm.onrender.com) |
 
----
+Both are deployed from this single repo and auto-deploy on every push to `main` (Vercel builds `packages/progear-sales-agent`; Render builds the `backend/` service).
 
-## Architecture Overview
+Pages in the running app:
 
-```
-┌───────────────────────────────────────────────────────────────┐
-│                         User Browser                          │
-│  ┌─────────────────────────────────────────────────────────┐  │
-│  │  ProGear Sales Agent (Next.js 14 + React)               │  │
-│  │  - Chat interface with AI agent                         │  │
-│  │  - Real-time token exchange visualization               │  │
-│  │  - Agent flow tracking                                  │  │
-│  └─────────────────────────────────────────────────────────┘  │
-└───────────────────────────────┬───────────────────────────────┘
-                                │ HTTPS
-                                ▼
-┌───────────────────────────────────────────────────────────────┐
-│            FastAPI Backend (LangGraph Orchestrator)           │
-│  ┌─────────────────────────────────────────────────────────┐  │
-│  │  Multi-Agent Workflow (LangGraph)                       │  │
-│  │                                                         │  │
-│  │  router → exchange_tokens → process_agents → response   │  │
-│  │                                                         │  │
-│  │  - Intent-based scope detection                         │  │
-│  │  - ID-JAG token exchange per MCP                        │  │
-│  │  - Graceful access denial handling                      │  │
-│  └─────────────────────────────────────────────────────────┘  │
-└───────────────────────────────┬───────────────────────────────┘
-                                │
-      ┌───────────┬─────────────┼─────────────┬───────────┐
-      │           │             │             │           │
-      ▼           ▼             ▼             ▼           ▼
-┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐
-│  Sales   │ │ Inventory│ │ Customer │ │ Pricing  │ │   Okta   │
-│   MCP    │ │   MCP    │ │   MCP    │ │   MCP    │ │   IdP    │
-└──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘
-```
+| Route | What it shows |
+|---|---|
+| `/` | The chat UI ("CourtEdge ProGear") — talk to the sales assistant |
+| `/tokens` | Raw token exchanges, FGA checks, and pending approvals as they happen |
+| `/how-it-works` | Static technical deep-dive: audit log sample, ID-JAG sequence diagram, live Okta config, LangGraph orchestration, MCP security notes |
+| `/architecture` | Interactive D3.js diagrams — a relationship graph and a UML-style sequence walkthrough of 4 scenarios (happy path, access denied, blocked on vacation, needs approval) |
 
-## Key Components
+## What This Demo Shows
 
-### 1. Frontend (Next.js 14)
-- **Location**: `packages/progear-sales-agent/`
-- **Auth**: NextAuth.js with Okta OIDC provider
-- **Features**: Chat interface, token exchange visualization, architecture overview
+An AI sales agent needs to read and write real business data (inventory, pricing, customer records) on a user's behalf. This demo answers the questions that matter for enterprise AI agent security:
 
-### 2. Backend (FastAPI + LangGraph)
-- **Location**: `backend/`
-- **Orchestrator**: LangGraph workflow for multi-agent coordination
-- **Auth**: Okta AI SDK for ID-JAG token exchange
-- **LLM**: Anthropic Claude for routing and response generation
+- **WHO** requested this access, and **WHAT** agent acted on their behalf?
+- **WHICH** scopes were actually granted, per agent, per user?
+- **CAN** a second, contextual check (relationship, clearance, vacation status) still block an otherwise-authorized action?
+- **WHEN** does a human need to approve before an action executes?
+- **CAN** access be revoked instantly?
 
-### 3. MCP Servers (4 Protected APIs)
-Each MCP server has its own Okta Authorization Server:
+| Layer | Technology | What it does |
+|---|---|---|
+| Identity for the agent | Okta AI Agent Governance | The AI has its own Workload Principal (`wlp`) identity, distinct from any human user |
+| Token exchange | ID-JAG (Identity Assertion JWT Authorization Grant) | Two-step exchange: ID token → ID-JAG assertion (Org Authorization Server) → scoped access token (per-domain Custom Authorization Server). RSA keypair auth, no shared secret. No down-scoping — an ungrantable scope fails the whole exchange. |
+| Fine-grained authorization | Auth0 FGA | Second layer for inventory actions — relationship checks (active manager), clearance-level checks, and a live vacation-flag check, on top of Okta's coarse-grained RBAC |
+| Human-in-the-loop | Okta Identity Governance (OIG) | Large inventory writes (≥500 units by default) route to an approval workflow instead of executing immediately |
+| Orchestration | LangGraph | Routes each user query to the right domain agent(s) and coordinates multi-agent responses |
+| LLM calls | Anthropic Claude, via the raw Anthropic SDK | Each domain agent calls Claude directly (not through LangChain's LLM wrapper) for routing/response generation |
 
-| MCP Server | Audience | Scopes |
-|------------|----------|--------|
-| Sales | `api://progear-sales` | `sales:read`, `sales:quote`, `sales:order` |
-| Inventory | `api://progear-inventory` | `inventory:read`, `inventory:write`, `inventory:alert` |
-| Customer | `api://progear-customer` | `customer:read`, `customer:lookup`, `customer:history` |
-| Pricing | `api://progear-pricing` | `pricing:read`, `pricing:margin`, `pricing:discount` |
+For the full technical walkthrough — sequence diagrams, token shapes, FGA model, approval flow — see **[docs/architecture.md](docs/architecture.md)**.
 
-### 4. Okta AI Agent Governance
-- **Workload Principal (`wlp`)**: AI agent identity in Okta Universal Directory - first-class identity like users
-- **Authentication**: JWT Bearer with RS256 private key (no shared secrets)
-- **Token Exchange**: ID-JAG (Identity Assertion JWT Authorization Grant) - user + agent in every token
-- **RBAC**: Group-based access policies - same model as human access
-- **Governance**: Mandatory owner, instant revocation, complete audit trail
+## The 4 Domain Agents
 
-## Role-Based Access Control
+Each agent has its own Okta Custom Authorization Server and its own scopes — a user's group membership determines which agents (and which scopes within each agent) they can actually invoke.
 
-Three user groups with different access levels:
+| Agent | Scopes |
+|---|---|
+| Sales | `sales:read`, `sales:quote`, `sales:order` |
+| Inventory | `inventory:read`, `inventory:write`, `inventory:alert` |
+| Customer | `customer:read`, `customer:lookup`, `customer:history` |
+| Pricing | `pricing:read`, `pricing:margin`, `pricing:discount` |
 
-| Group | Sales MCP | Inventory MCP | Customer MCP | Pricing MCP |
-|-------|-----------|---------------|--------------|-------------|
-| **ProGear-Sales** | Full access | Read only | Full access | Full access |
-| **ProGear-Warehouse** | No access | Full access | No access | No access |
-| **ProGear-Finance** | No access | No access | No access | Full access |
+## Demo Data
 
-## Token Exchange Flow
+72 inventory SKUs across 8 categories (Basketballs, Hoops & Backboards, Nets & Accessories, Uniforms & Apparel, Training Equipment, Footwear, Court & Game Equipment, Bags & Storage) and 24 customers, defined in `backend/data/initial_data.json` and served through `backend/data/demo_store.py`. On boot, the backend regenerates a runtime snapshot at `backend/data/live_data.json` (gitignored — it's derived state, never commit it and never hand-edit it).
 
-```
-1. User Login → Okta OIDC → ID Token
-2. Chat Query → LangGraph Router → Determine agents + scopes needed
-3. For each MCP:
-   a. ID Token → Okta (ID-JAG Exchange) → ID-JAG Token
-   b. ID-JAG Token → Auth Server → MCP Access Token (or DENIED)
-4. Process with authorized agents
-5. Generate unified response
+## Tech Stack
+
+| Area | Stack |
+|---|---|
+| Frontend | Next.js 14 (App Router), TypeScript, Tailwind CSS, NextAuth.js (Okta OIDC), D3.js (architecture visualizations) |
+| Backend | Python, FastAPI (`backend/api/main.py`) |
+| Orchestration | LangGraph (`langgraph>=0.2.0` — a real dependency, not just a label) — `backend/orchestrator/orchestrator.py` |
+| LLM integration | Anthropic Python SDK, called directly per agent (no LangChain LLM wrapper) |
+| AuthN/AuthZ | Okta AI Agent Governance (ID-JAG), Auth0 FGA (`openfga-sdk`), Okta Identity Governance |
+| Deployment | Vercel (frontend), Render (backend) |
+
+### A known, honest limitation
+
+There's a real, working MCP server in this repo (`packages/progear-sales-mcp-server` — a JWT-validating Express server that verifies tokens against Okta's JWKS endpoint), deployed separately. **It is not currently in the live request path.** The backend's domain agents call `demo_store` in-process rather than calling out to that MCP server over HTTP. The MCP server exists and works, but wiring it into the chat flow is future work, not something already happening in production today.
+
+## Quickstart
+
+This repo is an npm workspaces monorepo (`packages/progear-sales-agent`, `packages/progear-sales-mcp-server`) plus a standalone Python `backend/`.
+
+```bash
+# Frontend
+npm install
+npm run dev --workspace=packages/progear-sales-agent
+
+# Backend
+cd backend
+pip install -r requirements.txt
+uvicorn api.main:app --reload
 ```
 
-## Deploy Your Own
+Copy `.env.example` to `.env` and fill in real values before running anything — see it for every variable name used across the frontend, backend, and MCP server (Okta org/app/agent config, Anthropic key, Auth0 FGA store, etc.).
 
-Want to deploy this demo with your own Okta org? Follow the **[Implementation Guide](docs/implementation-guide.md)** for complete instructions on:
-
-1. Configuring Okta (AI Agent, Authorization Servers, Users, Groups)
-2. Deploying the frontend to **Vercel**
-3. Deploying the backend to **Render**
-4. Connecting everything together
+For a full walkthrough — Okta org setup (AI Agent, Custom Authorization Servers, groups), Auth0 FGA store setup, and deploying to Vercel + Render — see **[docs/implementation-guide.md](docs/implementation-guide.md)**.
 
 ## Documentation
 
 | Document | Audience | Description |
-|----------|----------|-------------|
-| **[Security & Governance Guide](docs/okta-security-value.md)** | Security teams, architects | The four scenarios framework, XAA/ID-JAG concepts, MCP adoption, governance model |
-| **[Implementation Guide](docs/implementation-guide.md)** | Developers, DevOps | Complete deployment walkthrough for Vercel + Render with Okta configuration |
-| **[Live Architecture Page](https://progear-sales-agent.vercel.app/architecture)** | Everyone | Interactive visualization of the token exchange flow in the running demo |
-
-## Technology Stack
-
-| Component | Technology |
-|-----------|------------|
-| Frontend | Next.js 14, React 18, Tailwind CSS, NextAuth.js |
-| Backend | FastAPI, LangGraph, LangChain, Python 3.9+ |
-| LLM | Anthropic Claude (claude-sonnet-4-20250514) |
-| Auth | Okta OIDC, Cross App Access (XAA), ID-JAG Token Exchange |
-| Deployment | Vercel (frontend), Render (backend) |
-
-## Environment Variables
-
-See `.env.example` for the complete list. Key variables:
-
-```bash
-# Okta
-OKTA_DOMAIN=https://your-org.okta.com
-OKTA_AI_AGENT_ID=wlp...
-OKTA_AI_AGENT_PRIVATE_KEY={"kty":"RSA",...}
-
-# Authorization Servers (one per MCP)
-OKTA_SALES_AUTH_SERVER_ID=aus...
-OKTA_INVENTORY_AUTH_SERVER_ID=aus...
-OKTA_CUSTOMER_AUTH_SERVER_ID=aus...
-OKTA_PRICING_AUTH_SERVER_ID=aus...
-
-# LLM
-ANTHROPIC_API_KEY=sk-ant-...
-```
+|---|---|---|
+| **[docs/architecture.md](docs/architecture.md)** | Anyone who wants to understand how it works | Full system walkthrough: token exchange sequence, FGA model, approval flow, MCP notes |
+| **[docs/implementation-guide.md](docs/implementation-guide.md)** | Developers, DevOps | Complete deployment walkthrough — Okta configuration, Vercel + Render setup |
+| **[docs/okta-security-value.md](docs/okta-security-value.md)** | Security teams, architects | The broader security framing and scenario catalog this demo draws on |
+| **[/architecture](https://progear-sales-aiagent.vercel.app/architecture)** (live) | Everyone | Interactive D3.js diagrams of the token exchange and access-control flows |
 
 ## Project Structure
 
 ```
-courtedge-ai-demo/
+ProGearSalesAI/
 ├── backend/
-│   ├── api/main.py              # FastAPI endpoints
+│   ├── api/main.py                 # FastAPI app and endpoints
+│   ├── agents/                     # Sales, Inventory, Customer, Pricing agents
 │   ├── auth/
-│   │   ├── agent_config.py      # Agent configuration
-│   │   ├── multi_agent_auth.py  # ID-JAG token exchange
-│   │   └── okta_auth.py         # Okta authentication
-│   └── orchestrator/
-│       └── orchestrator.py      # LangGraph workflow
+│   │   ├── agent_config.py         # Per-agent Okta config (IDs, keys, scopes)
+│   │   ├── multi_agent_auth.py     # ID-JAG token exchange
+│   │   └── fga_client.py           # Auth0 FGA checks (relationship, clearance, vacation)
+│   ├── orchestrator/
+│   │   └── orchestrator.py         # LangGraph workflow + direct Anthropic SDK calls
+│   ├── services/                   # OIG approval client and other services
+│   └── data/                       # demo_store.py, initial_data.json (seed data)
 ├── packages/
-│   └── progear-sales-agent/     # Next.js frontend
-│       ├── src/app/
-│       │   ├── page.tsx         # Chat interface
-│       │   └── architecture/    # Architecture page
-│       ├── src/components/      # React components
-│       └── src/lib/auth.ts      # NextAuth config
-├── .env.example                 # Environment template
-└── README.md                    # This file
+│   ├── progear-sales-agent/        # Next.js frontend (chat, /tokens, /how-it-works, /architecture)
+│   └── progear-sales-mcp-server/   # Standalone JWT-validating MCP server (not yet wired into the chat flow)
+├── docs/                           # architecture.md, implementation-guide.md, etc.
+├── .env.example                    # Environment variable template (names only, no real secrets)
+└── README.md                       # This file
 ```
 
 ## License
 
-MIT License - See LICENSE file for details.
-
----
-
-**Built to demonstrate Okta AI Agent Governance with Cross App Access (XAA)** - the same pattern MCP has adopted for enterprise AI authentication.
+MIT (see `package.json`).

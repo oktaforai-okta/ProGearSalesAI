@@ -13,10 +13,11 @@
 5. [The Four Ways AI Can Access Your Data](#the-four-ways-ai-can-access-your-data)
 6. [What Makes Okta Different](#what-makes-okta-different)
 7. [Real-World Scenarios with Examples](#real-world-scenarios-with-examples)
-8. [Why This Matters for Your Business](#why-this-matters-for-your-business)
-9. [The Industry is Moving This Way](#the-industry-is-moving-this-way)
-10. [Common Questions](#common-questions)
-11. [The Bottom Line](#the-bottom-line)
+8. [A Closer Look: Two More Safety Checks for High-Stakes Actions](#a-closer-look-two-more-safety-checks-for-high-stakes-actions)
+9. [Why This Matters for Your Business](#why-this-matters-for-your-business)
+10. [The Industry is Moving This Way](#the-industry-is-moving-this-way)
+11. [Common Questions](#common-questions)
+12. [The Bottom Line](#the-bottom-line)
 
 ---
 
@@ -101,6 +102,29 @@ With Okta, every AI agent has a visible ID badge, and there's a security guard (
 - Revoke their badge instantly if needed
 
 **Real-world impact:** When auditors ask "Who accessed customer data?", you pull up the log and show them: "Sarah from Sales asked our AI assistant about customer order history at 2:34 PM on Tuesday. Here's the complete record."
+
+### Why Two Checks Instead of One?
+
+Notice the badge system above actually does two things, not one: first the front desk confirms *who you are and who you're visiting on behalf of*, and only then does the checkpoint for the specific floor you're heading to decide *what you're allowed to do once you're there*.
+
+Why not combine those into a single check? Because they're answering two different questions, and mixing them together would make the whole building less safe, not more convenient:
+
+- The front-desk check just needs to confirm identity: "Yes, this is really the ProGear AI Agent, and yes, it's here on behalf of Sarah, who really did just badge in." It doesn't need to know anything about what Floor 2 vs. Floor 4's rules are.
+- Each floor's checkpoint only needs to know its own rules: "Given that this really is Sarah, is she allowed on this specific floor?" It doesn't need to re-verify who Sarah is - that was already handled downstairs.
+
+If you collapsed this into one check, that single checkpoint would either need to know every floor's rules at once (turning it into a single point of failure for the whole building), or it would need to hand out one all-purpose pass that works on every floor (which is just the master-key problem again, dressed up with a name on it). Keeping the two checks separate means the identity check and the "what can you do here" check can never be confused with each other.
+
+### Why Four Separate Checkpoints Instead of One for the Whole Building?
+
+Go back to the four-floor building: Sales, Inventory, Customer, Pricing. It would be simpler to install one shared badge reader for the whole building instead of a separate one per floor. It would also be much less safe, for a very concrete reason.
+
+**With one shared badge reader for every floor:** every floor trusts the same reader and the same set of rules. If that shared reader is ever misconfigured - say, a setup mistake accidentally lets warehouse badges open the Pricing floor - there's nothing else standing in the way. The mistake is immediately live everywhere, because every floor was relying on the same system to get it right.
+
+**With a separate checkpoint on each floor:** a badge that opens the Inventory floor is *physically the wrong shape* for the Pricing floor's reader - it's not that the Pricing floor's rules happen to reject it, it's that the badge itself doesn't fit that door. If the Inventory floor's checkpoint is ever misconfigured, the mistake is contained to the Inventory floor. It cannot spread to Sales, Customer, or Pricing, because those floors were never relying on the same checkpoint in the first place.
+
+This is also why, when the AI asks for several permissions at once and even one of them isn't allowed, the whole request gets turned away rather than quietly handing over a smaller, "safer" set of the ones that were fine. The system doesn't guess at a partial compromise - it says no cleanly, and that clean "no" is only meaningful because each floor's checkpoint is a genuinely separate gate to begin with, not four labels on the same gate.
+
+**Business translation:** if your AI's credentials ever leaked, or a setup mistake ever happened on one system, the exposure is contained to that one system - inventory operations, say - and does not automatically extend to customer records, pricing, or sales data. That containment is the entire point of having four separate checkpoints instead of one shared one.
 
 ---
 
@@ -643,6 +667,8 @@ Reason:            User not in required group (needs ProGear-Sales)
 - Clear reasons for each denial
 - Pattern is visible if Mike repeatedly tries to access unauthorized data
 
+**One more thing worth knowing about that "Update basketball count to 9,000" row:** Mike's job role clearing him to make inventory updates at all is only the first of three checks. Before a change of that size actually happens, two more things get verified automatically: is Mike specifically responsible for *this* warehouse right now (not currently out on vacation, for instance), and is a change this large sent to a human to sign off on first? See "A Closer Look" below for why those extra checks exist.
+
 ### Scenario 3: The Finance Analyst (Specialized Access)
 
 **Meet Frank Finance**
@@ -734,6 +760,39 @@ Mike Manager (ProGear-Warehouse):
 - Finding the right credentials to revoke would take time
 - Other systems might be affected
 - Logs might not have enough detail to investigate
+
+---
+
+## A Closer Look: Two More Safety Checks for High-Stakes Actions
+
+Everything above - the badge system, the "on behalf of" model, the four separate checkpoints - answers one question: **is this person's role allowed to do this kind of thing at all?** That's an important question, and it's a mostly stable one: it doesn't change hour to hour.
+
+But for the highest-stakes actions - the ones with real business consequences if they go wrong - "the role is allowed to do this" isn't the whole story. Two more checks run underneath it, and they answer questions that a role-based badge system was never designed to answer.
+
+### Check #2: Does the situation actually hold right now?
+
+Think about it this way: Mike's badge says "Warehouse Manager," and that badge is real and current. But a badge doesn't say "Warehouse Manager, except while on vacation" or "Warehouse Manager, but only for shipments below a certain sensitivity level." Those facts change too often, and are too specific to the moment, to print on a badge.
+
+So this demo adds a second, automatic check that looks past the badge and asks about the actual, current situation:
+- Is this specific person responsible for *this specific* warehouse, right now - not on vacation, not off the assignment?
+- Does this specific person's clearance level actually cover *this specific* item they're trying to change?
+
+**Why not just make the badge system handle this?** Because you'd need a different badge for every combination of warehouse, manager, vacation status, and clearance level - and you'd need to reissue that badge every time any one of those facts changed, for every employee, potentially several times a week. Badge systems (and Okta's role-based access) are built to answer "does your job title entitle you to this category of access" - a question that changes rarely. They were never built to track "is this specific fact true about this specific person right at this moment" - a question that changes constantly. Trying to force the second kind of question into the first kind of system creates a losing game of constantly reissuing badges that are stale the moment anyone's situation changes. So instead, a purpose-built check runs alongside the badge system, checking the live facts every single time, without ever needing to touch the badge itself.
+
+**In plain terms:** Mike's role clears him to update inventory. But if Mike happens to be on vacation that day, or the item requires a higher clearance level than he currently holds, the update still doesn't happen - even though his badge was completely valid.
+
+### Check #3: Should a human still look at this one?
+
+Even after both of the above say yes, one more question remains: is this action, at this size, something a computer should be allowed to finish on its own?
+
+In this demo, an inventory change above a set size (500 units, by default) doesn't happen automatically - even for a fully-authorized, on-duty, properly-cleared manager. Instead, it's routed as a request, with a required explanation, to a human who has to approve it before it's carried out.
+
+**Why require a person to sign off on something that's already fully authorized?** Because "is this allowed" and "is this a good idea right now" are genuinely different questions:
+
+- "Is this allowed" is a fact about permission - the same, correctly-authorized 5-unit change and 5,000-unit change look identical on that front. Same person, same role, same clearance.
+- "Is this a good idea right now" is a fact about business risk - and the 5,000-unit change is not identical on that front. It's harder to undo, and more costly if it turns out to be a mistake, or an authorized account being used in an unusual way. That's exactly the kind of action that financial and operational controls (the same category of rule as SOX and similar regulations) require a second person to review, precisely *because* the system has already said the action is permitted - permission was never meant to be the only safeguard on the biggest, hardest-to-reverse actions.
+
+Put the two checks together and the picture is complete: a role tells you who's generally allowed to do a kind of thing; the live-situation check tells you whether the specific circumstances actually support it right now; and the human sign-off tells you whether the size of this particular action calls for a second opinion before it becomes permanent. None of the three can be skipped by getting past the other two.
 
 ---
 
@@ -871,13 +930,21 @@ Whether you have 1 AI agent or 100, the management model is the same.
 
 ### "How is this different from just giving the AI a service account?"
 
-A service account is like giving someone a key to the building. Once they have it, they can come and go freely.
+A service account is like giving someone a master key to the building. Once they have it, they can come and go freely - and here's the problem: every time that key is used, the security log just says "someone used the master key." It doesn't say who they were let in for.
 
-Okta AI Agent Governance is like having a security checkpoint. Every entry is:
-- Verified: "Who are you and who sent you?"
-- Authorized: "Are you allowed to go where you're going?"
-- Logged: "Record of exactly what happened"
+That's the real issue with a shared credential, not just that it's old-fashioned. If your AI has one set of credentials it uses for every employee's request, then:
+
+- **Every action looks identical**, whether the AI is helping Sarah, helping Mike, or - if that credential is ever stolen - helping someone who has no business being there at all. Nothing in the log tells them apart.
+- **If that one credential leaks, the damage isn't limited to one person's access - it's every floor the AI was ever allowed into**, for every employee it has ever worked with. There's no way to say "just cut off the bad part" because the credential never distinguished good usage from bad usage in the first place.
+- **You can't say "Sarah can, but Mike can't"** through the credential itself. That rule would have to be coded into the AI application by hand, somewhere no security team or auditor can see it.
+
+Okta AI Agent Governance is like having a security checkpoint that checks two badges on every single entry, not one: the AI's own badge, and the badge of the person it's currently working for. Every entry is:
+- Verified: "Who are you, and who sent you?" (both identities, every time - never just one)
+- Authorized: "Is this specific person allowed where they're going?"
+- Logged: "Record of exactly what happened, and for whom"
 - Controlled: "Your pass is temporary and limited"
+
+Because the AI's badge always travels paired with a specific person's badge, a stolen or misused AI credential shows up immediately as unusual pairings in the log - not as an invisible blur of "the app did something." And revoking the AI's badge doesn't require touching anyone's actual account; the two identities were always separate.
 
 ### "What if an AI agent needs to work without a user?"
 
@@ -936,6 +1003,10 @@ AI agents are powerful tools. They can access customer data, financial informati
 - The same access controls for AI as for human employees
 - Every action tied to a specific user with complete audit trail
 - One-click ability to deactivate any AI agent instantly
+- A live check that the actual situation (not just the job title) supports the request
+- Human sign-off automatically required before the highest-stakes actions complete
+
+No single one of these is enough on its own. Identity without the live-situation check would let a valid role push through a change the current facts don't support. The live-situation check without identity would have nothing to verify a person against. And none of it matters if the biggest, hardest-to-reverse actions can still complete without anyone reviewing them. It's the combination - and each layer being unable to override the others - that makes the whole thing trustworthy.
 
 **The simple principle:** Your AI agents should be as governed as your employees.
 
@@ -973,7 +1044,7 @@ Reading about security is one thing. Watching it work is another.
 
 ## Ready to Learn More?
 
-- **For technical details:** See [okta-ai-security-for-developers.md](./okta-ai-security-for-developers.md)
+- **For technical details:** See [okta-security-value.md](./okta-security-value.md)
 - **For architecture overview:** See [architecture.md](./architecture.md)
 - **For implementation guide:** See [implementation-guide.md](./implementation-guide.md)
 

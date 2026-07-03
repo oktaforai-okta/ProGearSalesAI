@@ -16,8 +16,10 @@
 8. [The Workload Principal: Your AI Agent's Identity](#the-workload-principal-your-ai-agents-identity)
 9. [Proof: What You See in Audit Logs](#proof-what-you-see-in-audit-logs)
 10. [The Governance Model](#the-governance-model)
-11. [Real Demo Scenarios with Evidence](#real-demo-scenarios-with-evidence)
-12. [Security and Governance FAQ](#security-and-governance-faq)
+11. [Layer Two: Fine-Grained Authorization with Auth0 FGA](#layer-two-fine-grained-authorization-with-auth0-fga)
+12. [Layer Three: Human Approval for High-Risk Actions](#layer-three-human-approval-for-high-risk-actions-okta-identity-governance)
+13. [Real Demo Scenarios with Evidence](#real-demo-scenarios-with-evidence)
+14. [Security and Governance FAQ](#security-and-governance-faq)
 
 ---
 
@@ -189,6 +191,17 @@ Cross App Access (XAA) using the Identity Assertion JWT Authorization Grant (ID-
         ▼                       ▼                       ▼
 ```
 
+### Why Two Steps, Not One Hop?
+
+Look closely at the arrows above: there are two separate exchanges, not one.
+
+1. **Step 1 - ID token → ID-JAG, at Okta's Org Authorization Server.** The agent proves, once, "I am really the ProGear Sales Agent, and I am acting on behalf of Sarah Sales, who just authenticated." Okta issues an ID-JAG assertion binding those two identities together.
+2. **Step 2 - ID-JAG → scoped access token, at a per-domain Custom Authorization Server.** The agent presents that assertion to *one specific domain's* Custom Authorization Server (Sales, Inventory, Customer, or Pricing), and that server - and only that server - decides what the (agent, user) pair is allowed to do *there*.
+
+Collapsing this into a single hop would force one of two bad outcomes. Either the Org AS would need to own every domain's authorization policy up front (which defeats the purpose of having separate domains at all), or a single token minted once would need to carry every domain's scopes simultaneously - reintroducing the "master key" problem from Scenario 1, just with better attribution attached to it.
+
+The two-step design keeps those concerns cleanly separated: **identity proof** (step 1, who is this agent, who is it acting for) never has to know anything about Sales vs. Inventory vs. Pricing policy, and **the domain-specific authorization decision** (step 2) never has to re-verify who the agent and user are - it just decides what that already-verified pair may do here. The result is that the same agent, acting for the same user, ends up holding four different, independently-scoped, independently-revocable credentials - one per domain - instead of a single credential that spans all of them. Deactivating or narrowing access to one domain's Custom Authorization Server has zero effect on the other three.
+
 ### The Token
 
 ```json
@@ -254,6 +267,19 @@ This demo implements Scenario 2 with four internal authorization servers:
 - ProGear Pricing API (`api://progear-pricing`)
 
 **This works today. No external dependencies. No waiting for anyone.**
+
+### Why Four Separate Authorization Servers Instead of One Shared One?
+
+This is the design decision that matters most for blast-radius reasoning, so it's worth spelling out the alternative that was rejected.
+
+**The alternative:** one shared Custom Authorization Server, with all twelve scopes defined on it - `sales:read`, `sales:quote`, `sales:order`, `inventory:read`, `inventory:write`, `inventory:alert`, `customer:read`, `customer:lookup`, `customer:history`, `pricing:read`, `pricing:margin`, `pricing:discount` - and a single policy engine deciding who gets which. It looks simpler to stand up. It is structurally weaker:
+
+- **Same issuer, same audience, one trust boundary for everything.** Every token that server mints carries the same `aud` claim. A policy misconfiguration that grants `pricing:discount` to the warehouse group by mistake produces a token that is *structurally valid* for the Pricing API - the only thing standing between that mistake and a real exposure is application code correctly reading the `scp` claim, on every code path, every time, forever.
+- **A compromised or over-broad token is replayable across domains.** If Inventory and Pricing shared an authorization server, a token minted for one carries that server's issuer and audience - identical to a token meant for the other. A resource server that's even slightly too permissive about which scopes it enforces (a common implementation bug, not a hypothetical one) will accept it, because nothing about the token itself says "this belongs to Inventory, not Pricing."
+
+**What four separate Custom Authorization Servers actually buy you:** each domain has its own issuer/audience pair (`api://progear-sales`, `api://progear-inventory`, `api://progear-customer`, `api://progear-pricing`). A token minted for Inventory does not pass `aud` validation against the Pricing API - not because a scope check caught it, but because the token's own shape is wrong for that audience. The isolation is enforced by the token itself, not by application-layer logic that has to get it right every single time. If Pricing's Custom Authorization Server is ever misconfigured, the blast radius is Pricing. It structurally cannot leak into Sales, Inventory, or Customer, because those live behind entirely different issuers.
+
+This is also why the "no down-scoping" behavior you saw in the denied audit log above matters. When the ProGear Sales Agent requests `customer:read customer:lookup` on behalf of Mike Manager (in `ProGear-Warehouse`, not `ProGear-Sales`), the exchange doesn't quietly grant a smaller, safer subset of those scopes and drop the rest - the *entire* token exchange fails (`no_matching_policy`). Okta refuses to partially satisfy a request rather than silently narrowing it. That all-or-nothing behavior is only meaningful *because* each domain's Custom Authorization Server is a genuinely separate trust boundary to begin with. Fail-closed on a shared server still leaves you trusting that scope-checking logic downstream gets every call right, on every domain, forever; fail-closed on four separate servers means the failure is contained to one domain by construction.
 
 ### Admin Console Visibility
 
@@ -458,6 +484,24 @@ If you implement AI Agent Governance today (Scenarios 2 or 3), you're building o
 
 A **Workload Principal** (ID starts with `wlp`) is Okta's identity type for AI agents and automated workloads. It's not a service account. It's not an API key. It's a first-class identity designed for AI systems.
 
+### Why Not Just Give the App an API Key?
+
+The simpler alternative is Scenario 1: give the AI application a single API key or client credential, and let it call your APIs directly. It fails for one structural reason: **a shared app credential has no way to carry per-user identity.**
+
+Every call the AI makes with that key looks identical in your logs - "AI-Sales-Service called the Inventory API" - whether the AI is:
+
+- Acting for Sarah Sales, looking up her own accounts,
+- Acting for Mike Manager, checking warehouse stock,
+- Or someone who stole the key and is making calls that look exactly like every other call the app has ever made.
+
+There is no way to tell these apart after the fact, because the credential authenticates the *app*, not the *request*. Concretely, that means:
+
+- **The blast radius of a stolen credential is every user the AI has ever acted for**, not one user. Rotating the key doesn't surgically cut off an attacker - it cuts off the AI entirely, including its next thousand legitimate requests, because there's no way to revoke "just the bad usage" of a credential that never distinguished usage in the first place.
+- **You cannot answer "who did this?"** for any single action - the exact question an incident responder or auditor asks first.
+- **You cannot apply different policy to different users** through the credential itself. Any per-user restriction has to be reimplemented in application code, invisible to Okta and absent from your audit trail - which means it's also invisible to whoever is supposed to be reviewing access.
+
+A Workload Principal fixes this by giving the AI its own identity that travels *alongside*, but never replaces, the user's identity on every request (the `act` claim you'll see below). The AI cannot make a request that omits whose behalf it's acting on. That one design choice is the foundation everything else in this document depends on: the audit trail, per-user policy enforcement, and instant revocation all require the underlying credential to carry "acting for whom" - none of them work if it can't.
+
 ### Key Properties
 
 | Property | What It Means | Why It Matters |
@@ -643,6 +687,57 @@ If an AI agent is compromised or behaving unexpectedly:
 
 ---
 
+## Layer Two: Fine-Grained Authorization with Auth0 FGA
+
+Everything above - Workload Principals, ID-JAG, four Custom Authorization Servers - answers one question well: **is this role/group allowed to use this scope at all?** That's Okta's job, and it's a coarse, mostly-static question, checked once per token exchange: is the user in `ProGear-Warehouse`? Does that group's policy grant `inventory:write` on the Inventory Custom Authorization Server?
+
+That question is necessary, but it is not sufficient for every access decision. This demo adds a second layer - **Auth0 FGA** (Fine-Grained Authorization) - that runs *after* Okta has already said yes, to answer a different question: **does the live relationship, clearance, or context hold right now, for this specific object?**
+
+### Why not just make Okta's policy more granular?
+
+Consider what it would take to enforce, using Okta group policy alone: "a warehouse manager can update an inventory item only if they manage that specific warehouse, they are not currently on vacation, and their clearance level covers that item's required sensitivity."
+
+To express that with Okta groups and policies, you would need a distinct group for every combination of *(warehouse × manager × vacation-state × clearance-level)*, and you would need to move people between groups the moment any one of those facts changes - potentially several times a week, per person, as vacations start and end or clearance gets reviewed. Okta's directory and policy model was built to answer "does this person's role entitle them to this class of access," not "is this specific person, in this specific moment, cleared for this specific object." Forcing the second question into the first tool doesn't scale - it turns group membership into a combinatorial explosion that's stale the moment anyone's status changes, and staleness in an access control system is its own security problem.
+
+### What FGA actually checks (the real model behind this demo)
+
+FGA runs on top of the Okta scope check, for the Inventory domain, only after Okta has already granted `inventory:read` or `inventory:write`:
+
+| Okta already checked (coarse, role-based) | FGA checks next (fine-grained, contextual) |
+|---|---|
+| Is the user in a group that can request `inventory:read` / `inventory:write` at all? | Is this specific user an **active manager** (or viewer) **of this specific warehouse**, right now? |
+| - | Is this specific user **currently on vacation**? (evaluated as a live fact at request time, not something stored and left to go stale) |
+| - | Does this specific user hold **clearance at or above** this specific inventory item's required clearance level? |
+
+`inventory:read` maps to an FGA `can_view` check (active manager or viewer, and not on vacation). `inventory:write` maps to a stricter `can_update` check (active manager *and* sufficient clearance for that item). `inventory:alert` skips FGA entirely - alerts are informational and don't touch protected data, so there's nothing to gate.
+
+**Concretely:** Mike Manager's Okta group membership grants him the `inventory:write` scope, and his ID-JAG token exchange with the Inventory Custom Authorization Server succeeds. But if Mike is currently marked on vacation, or the specific item he's trying to update requires a clearance level he doesn't hold, FGA denies the write anyway - *after* Okta already said yes. Two independent systems, checking two different kinds of facts, both have to agree before a write executes.
+
+### Why this is a second layer, not duplicated work
+
+Okta and FGA aren't answering the same question twice - they're answering two questions that change at two very different rates. Roles and group membership change occasionally (a promotion, a team transfer). Relationships and context change constantly (vacation starts and ends, clearance gets reviewed, warehouse assignments shift). Baking the fast-changing, relationship-shaped question into Okta's policy engine would mean re-provisioning groups every time any of those facts changed for any user - a maintenance burden Okta's group model was never designed to absorb. FGA is purpose-built to answer exactly this kind of live, relationship-shaped question cheaply, without ever touching the identity layer.
+
+---
+
+## Layer Three: Human Approval for High-Risk Actions (Okta Identity Governance)
+
+An action can pass both layers above - the right Okta scope, the right FGA relationship and clearance - and still be worth stopping for a human to look at, purely because of its *scale*.
+
+In this demo, an inventory write above a configurable quantity threshold (500 units by default, `APPROVAL_QUANTITY_THRESHOLD`) does not execute automatically - even for a fully-authorized active manager, with sufficient clearance, who is not on vacation. Instead it opens an access request through **Okta Identity Governance (OIG)**, with a required justification, and waits for a human approver before the write is committed.
+
+### Why add a third gate when the first two already said yes?
+
+Because "is this action within policy" and "is this action a good idea right now" are different questions, answered by different mechanisms:
+
+- **Authorization (Okta + FGA) asks:** does this identity, with this relationship, in this context, have the *right* to perform this action? That is a question about permission, decided in milliseconds by a token exchange and a fine-grained check.
+- **Governance (the approval gate) asks:** given that they have the right, is doing it *at this scale, right now, without a second set of eyes* an acceptable business risk? That is a question about risk and controls, not permission - and it's not one a policy engine can decide, because "acceptable risk" is a judgment call, not a fact about relationships.
+
+A correctly-authorized 5-unit inventory adjustment and a correctly-authorized 5,000-unit inventory adjustment are identical from an authorization standpoint - same user, same relationship, same clearance. They are not identical from a business-risk standpoint: the larger one is harder to reverse and more consequential if it turns out to be a mistake, or an authorized session behaving in an unusual way. That is exactly the kind of action that segregation-of-duties controls - SOX, financial controls, and equivalent frameworks in regulated industries - require a second person to review, *specifically because* the system already confirmed the action was permitted, and permission was never meant to be the only control on irreversible or high-magnitude actions.
+
+Routing this through Okta Identity Governance, rather than a bespoke approval box bolted onto the app, matters for the same reason the rest of this document does: the request, the justification, and the approval decision all land in the same governance system that already owns your access-review and audit story, instead of creating a second, disconnected place your auditors have to go find.
+
+---
+
 ## Real Demo Scenarios with Evidence
 
 ### Scenario: Full Access User (Sarah Sales)
@@ -680,6 +775,8 @@ If an AI agent is compromised or behaving unexpectedly:
 | Pricing MCP | **DENIED** | - |
 
 **Audit Trail:** 1 success, 3 denials - all logged with Mike Manager as the user.
+
+**Note on the `inventory:write` grant above:** the token exchange succeeding means Okta confirmed Mike's *role* allows him to request inventory writes at all - it is necessary, not sufficient. Whether a specific write actually executes still depends on the FGA check (is he an active manager of this warehouse, right now, and cleared for this item?) and, above the quantity threshold, on a human approving the request in Okta Identity Governance. See [Layer Two](#layer-two-fine-grained-authorization-with-auth0-fga) and [Layer Three](#layer-three-human-approval-for-high-risk-actions-okta-identity-governance) above.
 
 ---
 
@@ -731,10 +828,15 @@ If an AI agent is compromised or behaving unexpectedly:
 │   ✓ Same pattern extends to external SaaS (Scenario 4)          │
 │   ✓ Validated by MCP adoption of Cross App Access               │
 │                                                                 │
+│   ✓ Layer 2: FGA for live, relationship-based context           │
+│   ✓ Layer 3: Human approval for high-magnitude actions          │
+│                                                                 │
 │   Your AI agents should be as governed as your employees.       │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+No single layer above is sufficient by itself. Identity without fine-grained context would let a correctly-scoped token update an item its holder has no clearance for. Fine-grained context without identity would have nothing to check a relationship against. And authorization without governance would let a fully-permitted action execute at any scale, unreviewed. The value isn't any one control - it's that all three are independently enforced, by three different systems, none of which the other two can silently bypass.
 
 ---
 

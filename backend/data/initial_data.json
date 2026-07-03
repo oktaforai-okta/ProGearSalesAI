@@ -575,6 +575,150 @@
       "quantity": 678,
       "status": "good",
       "reorder_point": 150
+    },
+    "BB-STR-001": {
+      "name": "Street Basketball",
+      "sku": "BB-STR-001",
+      "category": "Basketballs",
+      "quantity": 2234,
+      "status": "good",
+      "reorder_point": 400
+    },
+    "BB-PRAC2-001": {
+      "name": "Composite Practice Basketball (Bulk 6-Pack)",
+      "sku": "BB-PRAC2-001",
+      "category": "Basketballs",
+      "quantity": 567,
+      "status": "good",
+      "reorder_point": 120
+    },
+    "HP-YSYS-001": {
+      "name": "Adjustable Youth Hoop System",
+      "sku": "HP-YSYS-001",
+      "category": "Hoops & Backboards",
+      "quantity": 289,
+      "status": "good",
+      "reorder_point": 100
+    },
+    "HP-ACR54-001": {
+      "name": "Acrylic Backboard 54\"",
+      "sku": "HP-ACR54-001",
+      "category": "Hoops & Backboards",
+      "quantity": 112,
+      "status": "good",
+      "reorder_point": 50
+    },
+    "AC-REP-001": {
+      "name": "Ball Repair Kit",
+      "sku": "AC-REP-001",
+      "category": "Nets & Accessories",
+      "quantity": 1789,
+      "status": "good",
+      "reorder_point": 300
+    },
+    "AC-HOOK-001": {
+      "name": "Net Hook Set (4-pack)",
+      "sku": "AC-HOOK-001",
+      "category": "Nets & Accessories",
+      "quantity": 2345,
+      "status": "good",
+      "reorder_point": 400
+    },
+    "UNI-POLO-001": {
+      "name": "Coach's Polo",
+      "sku": "UNI-POLO-001",
+      "category": "Uniforms & Apparel",
+      "quantity": 892,
+      "status": "good",
+      "reorder_point": 200
+    },
+    "UNI-TANK-001": {
+      "name": "Team Warmup Tank",
+      "sku": "UNI-TANK-001",
+      "category": "Uniforms & Apparel",
+      "quantity": 1567,
+      "status": "good",
+      "reorder_point": 300
+    },
+    "UNI-PIN-001": {
+      "name": "Practice Pinnies (set of 12)",
+      "sku": "UNI-PIN-001",
+      "category": "Uniforms & Apparel",
+      "quantity": 345,
+      "status": "good",
+      "reorder_point": 80
+    },
+    "TR-SNSR-001": {
+      "name": "Shot Tracking Sensor",
+      "sku": "TR-SNSR-001",
+      "category": "Training Equipment",
+      "quantity": 178,
+      "status": "good",
+      "reorder_point": 60
+    },
+    "TR-ROLL-001": {
+      "name": "Recovery Foam Roller",
+      "sku": "TR-ROLL-001",
+      "category": "Training Equipment",
+      "quantity": 934,
+      "status": "good",
+      "reorder_point": 200
+    },
+    "TR-VJT-001": {
+      "name": "Vertical Jump Trainer",
+      "sku": "TR-VJT-001",
+      "category": "Training Equipment",
+      "quantity": 267,
+      "status": "good",
+      "reorder_point": 75
+    },
+    "FW-CCH-001": {
+      "name": "Coach's Court Shoe",
+      "sku": "FW-CCH-001",
+      "category": "Footwear",
+      "quantity": 456,
+      "status": "good",
+      "reorder_point": 100
+    },
+    "FW-REFN-001": {
+      "name": "Slip-Resistant Referee Shoe",
+      "sku": "FW-REFN-001",
+      "category": "Footwear",
+      "quantity": 198,
+      "status": "good",
+      "reorder_point": 60
+    },
+    "CG-SUB-001": {
+      "name": "Player Substitution Board",
+      "sku": "CG-SUB-001",
+      "category": "Court & Game Equipment",
+      "quantity": 89,
+      "status": "good",
+      "reorder_point": 30
+    },
+    "CG-BNCH-001": {
+      "name": "Team Bench (8-seat)",
+      "sku": "CG-BNCH-001",
+      "category": "Court & Game Equipment",
+      "quantity": 34,
+      "status": "good",
+      "reorder_point": 15
+    },
+    "BG-CLIP-001": {
+      "name": "Coach's Clipboard Case",
+      "sku": "BG-CLIP-001",
+      "category": "Bags & Storage",
+      "quantity": 267,
+      "status": "good",
+      "reorder_point": 80
+    },
+    "BG-GARM-001": {
+      "name": "Uniform Garment Bag",
+      "sku": "BG-GARM-001",
+      "category": "Bags & Storage",
+      "quantity": 789,
+      "status": "good",
+      "reorder_point": 150
     }
   },
   "pricing": {
@@ -937,6 +1081,96 @@
       "price": 64.99,
       "cost": 24.0,
       "margin": 63.1
+    },
+    "BB-STR-001": {
+      "price": 22.99,
+      "cost": 8.5,
+      "margin": 63.0
+    },
+    "BB-PRAC2-001": {
+      "price": 99.99,
+      "cost": 38.0,
+      "margin": 62.0
+    },
+    "HP-YSYS-001": {
+      "price": 249.99,
+      "cost": 105.0,
+      "margin": 58.0
+    },
+    "HP-ACR54-001": {
+      "price": 449.99,
+      "cost": 200.0,
+      "margin": 55.6
+    },
+    "AC-REP-001": {
+      "price": 8.99,
+      "cost": 2.25,
+      "margin": 75.0
+    },
+    "AC-HOOK-001": {
+      "price": 6.99,
+      "cost": 1.75,
+      "margin": 75.0
+    },
+    "UNI-POLO-001": {
+      "price": 39.99,
+      "cost": 14.0,
+      "margin": 65.0
+    },
+    "UNI-TANK-001": {
+      "price": 27.99,
+      "cost": 9.5,
+      "margin": 66.1
+    },
+    "UNI-PIN-001": {
+      "price": 54.99,
+      "cost": 19.0,
+      "margin": 65.4
+    },
+    "TR-SNSR-001": {
+      "price": 129.99,
+      "cost": 52.0,
+      "margin": 60.0
+    },
+    "TR-ROLL-001": {
+      "price": 24.99,
+      "cost": 8.0,
+      "margin": 68.0
+    },
+    "TR-VJT-001": {
+      "price": 219.99,
+      "cost": 90.0,
+      "margin": 59.1
+    },
+    "FW-CCH-001": {
+      "price": 89.99,
+      "cost": 36.0,
+      "margin": 60.0
+    },
+    "FW-REFN-001": {
+      "price": 94.99,
+      "cost": 38.0,
+      "margin": 60.0
+    },
+    "CG-SUB-001": {
+      "price": 64.99,
+      "cost": 24.0,
+      "margin": 63.1
+    },
+    "CG-BNCH-001": {
+      "price": 549.99,
+      "cost": 230.0,
+      "margin": 58.2
+    },
+    "BG-CLIP-001": {
+      "price": 34.99,
+      "cost": 12.0,
+      "margin": 65.7
+    },
+    "BG-GARM-001": {
+      "price": 29.99,
+      "cost": 10.0,
+      "margin": 66.7
     }
   },
   "customers": {
@@ -1155,6 +1389,96 @@
       "tier": "Bronze",
       "total_spent": 4800,
       "location": "Indianapolis, IN"
+    },
+    "CUST-025": {
+      "id": "CUST-025",
+      "name": "Coastal Basketball Academy",
+      "contact": "Emily Rodriguez",
+      "email": "erodriguez@coastalba.com",
+      "tier": "Platinum",
+      "total_spent": 108900,
+      "location": "San Antonio, TX"
+    },
+    "CUST-026": {
+      "id": "CUST-026",
+      "name": "Midwest Collegiate League",
+      "contact": "Steven Clark",
+      "email": "sclark@midwestcl.org",
+      "tier": "Platinum",
+      "total_spent": 132400,
+      "location": "Kansas City, MO"
+    },
+    "CUST-027": {
+      "id": "CUST-027",
+      "name": "Bright Future Youth Sports",
+      "contact": "Angela Turner",
+      "email": "aturner@brightfutureys.org",
+      "tier": "Gold",
+      "total_spent": 61300,
+      "location": "Charlotte, NC"
+    },
+    "CUST-028": {
+      "id": "CUST-028",
+      "name": "Riverside Prep Academy",
+      "contact": "George Kim",
+      "email": "gkim@riversideprep.edu",
+      "tier": "Gold",
+      "total_spent": 55700,
+      "location": "Salt Lake City, UT"
+    },
+    "CUST-029": {
+      "id": "CUST-029",
+      "name": "Union Athletic Club",
+      "contact": "Patricia Nguyen",
+      "email": "pnguyen@unionathletic.org",
+      "tier": "Silver",
+      "total_spent": 24800,
+      "location": "Pittsburgh, PA"
+    },
+    "CUST-030": {
+      "id": "CUST-030",
+      "name": "Maple Grove Rec League",
+      "contact": "Frank Sullivan",
+      "email": "fsullivan@maplegrove.org",
+      "tier": "Silver",
+      "total_spent": 17200,
+      "location": "Milwaukee, WI"
+    },
+    "CUST-031": {
+      "id": "CUST-031",
+      "name": "Horizon Middle School",
+      "contact": "Diane Foster",
+      "email": "dfoster@horizonms.edu",
+      "tier": "Silver",
+      "total_spent": 14900,
+      "location": "Albuquerque, NM"
+    },
+    "CUST-032": {
+      "id": "CUST-032",
+      "name": "Sunrise Community Gym",
+      "contact": "Carlos Mendez",
+      "email": "cmendez@sunrisegym.com",
+      "tier": "Bronze",
+      "total_spent": 3600,
+      "location": "Tucson, AZ"
+    },
+    "CUST-033": {
+      "id": "CUST-033",
+      "name": "Westside Boys & Girls Club",
+      "contact": "Laura Bennett",
+      "email": "lbennett@westsidebgc.org",
+      "tier": "Bronze",
+      "total_spent": 2100,
+      "location": "Baltimore, MD"
+    },
+    "CUST-034": {
+      "id": "CUST-034",
+      "name": "Pineview Elementary PTA",
+      "contact": "Ryan Coleman",
+      "email": "rcoleman@pineviewpta.org",
+      "tier": "Bronze",
+      "total_spent": 1700,
+      "location": "Louisville, KY"
     }
   },
   "discounts": {

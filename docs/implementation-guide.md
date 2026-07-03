@@ -33,7 +33,7 @@ This guide is designed for two types of users:
 If you want to understand how to build a multi-agent AI chatbot with enterprise-grade security using Okta AI Agent Governance, this guide walks through every configuration step. You'll learn:
 - How AI agents authenticate and act on behalf of users
 - How to implement Role-Based Access Control (RBAC) with Okta groups
-- How MCP (Model Context Protocol) servers integrate with Okta authorization
+- How per-domain Okta Custom Authorization Servers scope what each agent can do
 - How token exchange flows preserve user identity through the AI pipeline
 
 **2. Quick Deployers**
@@ -113,10 +113,10 @@ Before diving into deployment, understand how the pieces fit together:
 │   ┌───────────────────────────────────────────────────────────┐   │
 │   │                   Next.js Application                     │   │
 │   │                                                           │   │
-│   │  • Chat interface                                         │   │
-│   │  • Token exchange visualization                           │   │
+│   │  • Chat interface (full-width, at /)                      │   │
+│   │  • Token/FGA/approval inspection (at /tokens)              │   │
 │   │  • User authentication (NextAuth.js + Okta)               │   │
-│   │  • Security dashboard                                     │   │
+│   │  • Architecture + how-it-works pages (D3 diagrams)        │   │
 │   └───────────────────────────────────────────────────────────┘   │
 │                                                                   │
 │   URL: https://your-app.vercel.app                                │
@@ -131,9 +131,11 @@ Before diving into deployment, understand how the pieces fit together:
 │   │                   FastAPI Application                     │   │
 │   │                                                           │   │
 │   │  • LangGraph orchestrator (routes to agents)              │   │
-│   │  • Okta token exchange (ID → ID-JAG → MCP token)          │   │
-│   │  • 4 MCP servers (Sales, Inventory, Customer, Pricing)    │   │
-│   │  • Claude AI integration                                  │   │
+│   │  • Okta token exchange (ID -> ID-JAG -> scoped token)      │   │
+│   │  • 4 in-process domain agents (Sales, Inventory,          │   │
+│   │    Customer, Pricing) -- each with its own Custom AS       │   │
+│   │  • Auth0 FGA + Okta Identity Governance checks            │   │
+│   │  • Claude via the raw Anthropic SDK                       │   │
 │   └───────────────────────────────────────────────────────────┘   │
 │                                                                   │
 │   URL: https://your-backend.onrender.com                          │
@@ -146,9 +148,9 @@ Before diving into deployment, understand how the pieces fit together:
 │                                                                   │
 │   • User authentication (OIDC)                                    │
 │   • AI Agent identity (wlp...)                                    │
-│   • 4 Authorization servers (MCP APIs)                            │
+│   • Org AS (step 1) + 4 per-domain Custom AS (step 2)              │
 │   • Group-based access policies                                   │
-│   • Audit logging                                                 │
+│   • Audit logging (System Log)                                    │
 │                                                                   │
 │   URL: https://your-org.okta.com                                  │
 └───────────────────────────────────────────────────────────────────┘
@@ -161,10 +163,10 @@ When a user sends a message:
 ```
 1. User authenticates via Okta → Frontend receives ID token
 2. Frontend sends message + ID token to Backend
-3. Backend exchanges ID token → ID-JAG token (AI Agent acting for user)
-4. Backend exchanges ID-JAG → MCP access tokens (one per agent)
+3. Backend exchanges ID token → ID-JAG assertion at the Org AS (AI Agent acting for user)
+4. Backend exchanges the ID-JAG → a scoped access token per agent, at that agent's own Custom Authorization Server
 5. If user's group doesn't match policy → token denied (access control!)
-6. Backend calls MCP servers with granted tokens
+6. Backend invokes each authorized domain agent in-process with its granted scopes (see docs/architecture.md for the current, honest MCP-server status)
 7. Response flows back to user with visualization of what was granted/denied
 ```
 
@@ -197,16 +199,18 @@ When a user sends a message:
 ### What Vercel Hosts in This Demo
 
 ```
-packages/progear-sales-agent/
-├── app/                    # Next.js pages and API routes
+packages/progear-sales-agent/src/
+├── app/
 │   ├── api/auth/           # NextAuth.js Okta integration
-│   ├── api/chat/           # Proxy to backend
-│   └── page.tsx            # Main chat interface
-├── components/             # React components
-│   ├── ChatInterface.tsx   # Chat UI
-│   ├── TokenExchangeCard.tsx
-│   └── AgentFlowCard.tsx
-└── public/                 # Static assets
+│   ├── page.tsx            # Main chat UI (/)
+│   ├── tokens/page.tsx     # Token/FGA/approval inspection (/tokens)
+│   ├── architecture/page.tsx    # Interactive D3 diagrams (/architecture)
+│   └── how-it-works/page.tsx    # Static technical deep-dive
+├── components/             # AgentFlowCard, TokenExchangeCard, RawTokensCard,
+│                           # FGAExplanationCard, FGAControlsPanel,
+│                           # ApprovalStatusCard, D3ArchitectureDiagram,
+│                           # SequenceDiagram, OktaSystemLog, UserIdentityCard
+└── lib/                    # NextAuth config, shared helpers
 ```
 
 ### Vercel Pricing
@@ -246,18 +250,24 @@ packages/progear-sales-agent/
 ```
 backend/
 ├── api/
-│   └── main.py             # FastAPI app, CORS, routes
-├── mcp_servers/
-│   ├── sales_mcp.py        # Sales data and tools
-│   ├── inventory_mcp.py    # Inventory data and tools
-│   ├── customer_mcp.py     # Customer data and tools
-│   └── pricing_mcp.py      # Pricing data and tools
-├── workflows/
-│   └── okta_langgraph_workflow.py  # LangGraph orchestrator
-├── services/
-│   └── okta_auth.py        # Token exchange logic
-└── requirements.txt        # Python dependencies
+│   └── main.py              # FastAPI app, CORS, routes, approval poller
+├── agents/                  # Sales, Inventory, Customer, Pricing agents
+│                             # (each calls demo_store in-process + the
+│                             #  raw Anthropic SDK -- not separate MCP
+│                             #  servers; see docs/architecture.md §7)
+├── orchestrator/
+│   └── orchestrator.py      # LangGraph workflow (router -> token
+│                             # exchange -> FGA check -> approval gate ->
+│                             # process agents -> generate response)
+├── auth/
+│   ├── multi_agent_auth.py  # The real ID-JAG token exchange
+│   └── fga_client.py        # Auth0 FGA checks
+├── services/                # OIG approval client, intent parsing
+├── data/                    # demo_store.py, initial_data.json (seed)
+└── requirements.txt         # Python dependencies
 ```
+
+There's also a real, separately-deployed MCP server (`packages/progear-sales-mcp-server`) that validates JWTs against Okta's JWKS endpoint — but the backend agents above don't call it over the network today; see [architecture.md](./architecture.md#7-known-honest-limitation-the-mcp-server-isnt-in-the-live-path-yet) for the full explanation.
 
 ### Render Pricing
 
@@ -294,7 +304,8 @@ backend/
 │                                                           │
 │  • Authenticates users (issues ID tokens to frontend)     │
 │  • Validates AI Agent identity (backend JWT assertion)    │
-│  • Issues MCP tokens based on user's group membership     │
+│  • Issues scoped access tokens based on user's group      │
+│    membership + policy evaluation                          │
 └───────────────────────────────────────────────────────────┘
 ```
 
@@ -932,7 +943,7 @@ In Render, go to **Environment** and add these variables:
 | `OKTA_CLIENT_ID` | Your OIDC client ID |
 | `OKTA_AI_AGENT_ID` | Your AI Agent ID (`wlp...`) |
 | `OKTA_AI_AGENT_PRIVATE_KEY` | Your JWK private key (entire JSON on one line) |
-| `OKTA_MAIN_AUTH_SERVER_ID` | (Optional) Can be any valid auth server ID - SDK ignores this for Step 1 |
+| `OKTA_MAIN_AUTH_SERVER_ID` | (Optional) Used for Step 1. Defaults to `"default"` (Okta's alias for the Org Authorization Server) if unset -- leave it out unless you specifically need Step 1 to hit a non-default server |
 | `OKTA_SALES_AUTH_SERVER_ID` | Your Sales auth server ID |
 | `OKTA_SALES_AUDIENCE` | `api://progear-sales` |
 | `OKTA_INVENTORY_AUTH_SERVER_ID` | Your Inventory auth server ID |
@@ -1011,14 +1022,14 @@ Expected response:
 | `OKTA_CLIENT_SECRET` | Vercel | Yes | OIDC application client secret |
 | `OKTA_AI_AGENT_ID` | Render | Yes | AI Agent entity ID (`wlp...`) |
 | `OKTA_AI_AGENT_PRIVATE_KEY` | Render | Yes | JWK private key (JSON string) |
-| `OKTA_MAIN_AUTH_SERVER_ID` | Render | No | (Optional) Not used by SDK - Step 1 always uses Org AS |
-| `OKTA_SALES_AUTH_SERVER_ID` | Render | Yes | Sales MCP auth server ID |
+| `OKTA_MAIN_AUTH_SERVER_ID` | Render | No | Defaults to `"default"` (Org AS) for Step 1 -- only set if you need a non-default server |
+| `OKTA_SALES_AUTH_SERVER_ID` | Render | Yes | Sales domain's Custom Authorization Server ID |
 | `OKTA_SALES_AUDIENCE` | Render | Yes | `api://progear-sales` |
-| `OKTA_INVENTORY_AUTH_SERVER_ID` | Render | Yes | Inventory MCP auth server ID |
+| `OKTA_INVENTORY_AUTH_SERVER_ID` | Render | Yes | Inventory domain's Custom Authorization Server ID |
 | `OKTA_INVENTORY_AUDIENCE` | Render | Yes | `api://progear-inventory` |
-| `OKTA_CUSTOMER_AUTH_SERVER_ID` | Render | Yes | Customer MCP auth server ID |
+| `OKTA_CUSTOMER_AUTH_SERVER_ID` | Render | Yes | Customer domain's Custom Authorization Server ID |
 | `OKTA_CUSTOMER_AUDIENCE` | Render | Yes | `api://progear-customer` |
-| `OKTA_PRICING_AUTH_SERVER_ID` | Render | Yes | Pricing MCP auth server ID |
+| `OKTA_PRICING_AUTH_SERVER_ID` | Render | Yes | Pricing domain's Custom Authorization Server ID |
 | `OKTA_PRICING_AUDIENCE` | Render | Yes | `api://progear-pricing` |
 | `NEXTAUTH_URL` | Vercel | Yes | Your Vercel URL |
 | `NEXTAUTH_SECRET` | Vercel | Yes | Generate: `openssl rand -base64 32` |
