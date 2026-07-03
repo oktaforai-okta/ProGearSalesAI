@@ -162,7 +162,7 @@ const SCENARIOS: Scenario[] = [
 const VIEW_W = 980;
 const MARGIN_X = 76;
 const HEADER_H = 82;
-const ROW_H = 44;
+const ROW_H = 48;
 const ROW_TOP = HEADER_H + 18;
 // A row whose message carries a note chip (e.g. "scope: inventory:read")
 // packs a label, an arrow, AND a chip into one row -- more content than a
@@ -170,7 +170,7 @@ const ROW_TOP = HEADER_H + 18;
 // (label/chip crowding the next row's label). Only note rows get this
 // extra height, so the fix doesn't undo the "fit on one screen" sizing
 // for the ~80% of rows that don't have a note.
-const NOTE_ROW_EXTRA_H = 20;
+const NOTE_ROW_EXTRA_H = 26;
 
 function rowHeight(m: Message): number {
   return ROW_H + (m.note ? NOTE_ROW_EXTRA_H : 0);
@@ -536,8 +536,8 @@ export default function SequenceDiagram({ title = 'Sequence' }: Props) {
 
             return (
               <g key={`row-${i}`} opacity={rowOpacity} style={{ transition: 'opacity 250ms' }}>
-                <rect x={0} y={y - ROW_H / 2} width={VIEW_W} height={ROW_H} fill="transparent" className={isPlayed && !isPlaying ? 'cursor-pointer' : ''} onClick={() => isPlayed && !isPlaying && scrubTo(i + 1)} />
-                <text x={midX} y={y - 9} textAnchor="middle" fontSize={11} fontWeight={isActive ? 600 : 400} fill={isDeny ? C.deny : isActive ? C.text : C.textDim} className="select-none">
+                <rect x={0} y={y - rowHeight(m) / 2} width={VIEW_W} height={rowHeight(m)} fill="transparent" className={isPlayed && !isPlaying ? 'cursor-pointer' : ''} onClick={() => isPlayed && !isPlaying && scrubTo(i + 1)} />
+                <text x={midX} y={y - 13} textAnchor="middle" fontSize={11} fontWeight={isActive ? 600 : 400} fill={isDeny ? C.deny : isActive ? C.text : C.textDim} className="select-none">
                   {m.label}
                 </text>
                 <line
