@@ -20,13 +20,19 @@ interface Message {
   fgaChecks?: any[];
 }
 
-const exampleQuestions = [
-  { text: "Can we fulfill 1500 basketballs for State University?", icon: "🏀" },
-  { text: "What basketball hoops do we have in stock?", icon: "🏀" },
-  { text: "Look up State University's account", icon: "👥" },
-  { text: "What's our margin on pro basketballs?", icon: "💰" },
-  { text: "Show me recent bulk equipment orders", icon: "📦" },
-  { text: "Which customers have Platinum tier?", icon: "⭐" },
+// Kept deliberately simple: 2 reads (left column) + 2 writes (right
+// column), both about inventory. Earlier versions mixed in
+// customer/pricing/margin questions, but those don't exercise the
+// read-vs-write security story this demo is actually about, so they were
+// dropped per explicit feedback. The two write prompts are picked to
+// straddle the OIG approval threshold (500 units) on purpose: 50 auto-
+// executes, 600 pauses for human approval -- same mechanism, visibly
+// different outcome.
+const exampleQuestions: { text: string; action: 'read' | 'write' }[] = [
+  { text: "What basketball hoops do we have in stock?", action: 'read' },
+  { text: "Add 50 basketballs to inventory", action: 'write' },
+  { text: "How many basketballs are in stock?", action: 'read' },
+  { text: "Add 600 basketballs to inventory", action: 'write' },
 ];
 
 const CHAT_STORAGE_KEY = 'progear-chat-messages';
@@ -497,22 +503,29 @@ export default function Home() {
                   Your AI-powered basketball equipment sales assistant is ready. Ask about orders, inventory, pricing, or customers.
                 </p>
 
-                {/* Example Questions */}
+                {/* Example Questions -- left column = read, right column = write */}
                 <div className="grid grid-cols-2 gap-3 text-left">
-                  {exampleQuestions.map((question, idx) => (
-                    <button
-                      key={idx}
-                      onClick={() => handleSendMessage(question.text)}
-                      className="group p-4 bg-white/95 backdrop-blur-sm border-2 border-accent/20 hover:border-accent hover:shadow-xl rounded-xl transition-all text-left flex items-start space-x-3"
-                    >
-                      <div className="w-8 h-8 bg-gradient-to-br from-accent/20 to-court-orange/20 rounded-lg flex items-center justify-center flex-shrink-0 group-hover:from-accent group-hover:to-court-orange transition-all">
-                        <span className="text-lg group-hover:scale-110 transition-transform">{question.icon}</span>
-                      </div>
-                      <span className="text-sm text-gray-700 group-hover:text-primary font-medium leading-relaxed">
-                        {question.text}
-                      </span>
-                    </button>
-                  ))}
+                  {exampleQuestions.map((question, idx) => {
+                    const isWrite = question.action === 'write';
+                    return (
+                      <button
+                        key={idx}
+                        onClick={() => handleSendMessage(question.text)}
+                        className="group p-4 bg-white/95 backdrop-blur-sm border-2 border-accent/20 hover:border-accent hover:shadow-xl rounded-xl transition-all text-left flex items-start space-x-3"
+                      >
+                        <span
+                          className={`flex-shrink-0 px-2 py-1 rounded-md text-[10px] font-bold tracking-wide uppercase ${
+                            isWrite ? 'bg-court-orange/15 text-court-orange' : 'bg-emerald-100 text-emerald-700'
+                          }`}
+                        >
+                          {isWrite ? 'Write' : 'Read'}
+                        </span>
+                        <span className="text-sm text-gray-700 group-hover:text-primary font-medium leading-relaxed">
+                          {question.text}
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             )}

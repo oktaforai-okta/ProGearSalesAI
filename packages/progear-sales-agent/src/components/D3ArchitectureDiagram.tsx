@@ -44,6 +44,10 @@ interface NodeDetail {
   subpoints?: string[];
   callouts?: string[];
   architect?: string;
+  // A decoded (illustrative, not real) token payload shown to architects
+  // so they can see the actual claim shape instead of just prose about
+  // it. Values are made up for illustration -- never a real token.
+  tokenExample?: { label: string; json: string };
 }
 
 interface BusinessChild {
@@ -117,7 +121,7 @@ const NODES: DiagramNode[] = [
     order: 1,
     description: 'The signed-in person asking a question in plain English.',
     detail: {
-      body: "This is the human driving the conversation. When you sign in, Okta confirms who you are and hands your session a verified identity badge. Everything the AI does next is done on your behalf and within your limits, never with its own free-standing power.",
+      body: "The signed-in person asking a question. Okta verifies who you are — the AI acts on your behalf, within your limits, never on its own.",
       callouts: ['Verified by Okta login', 'Role determines what you can do'],
     },
   },
@@ -130,9 +134,19 @@ const NODES: DiagramNode[] = [
     order: 2,
     description: 'The chatbot that understands your request and figures out which systems it needs.',
     detail: {
-      body: "The assistant reads your question and decides which business systems could answer it. Important: it only routes and phrases. It never decides what you're allowed to see. That decision is made by Okta and the governance layer, not by the AI. So even a confused or manipulated AI cannot hand out data you aren't cleared for.",
+      body: "Reads your question and routes it to the right systems. It never decides what you're allowed to see — that's Okta's job, not the AI's.",
       callouts: ['Has its own Okta identity (a Workload Principal)', 'No standing access of its own'],
-      architect: 'The AI is powered by a language model (Claude, via the raw Anthropic SDK) for wording and routing only. It is not the security boundary.',
+      architect: 'The AI is powered by a language model (Claude, via the raw Anthropic SDK) for wording and routing only. It is not the security boundary. Step 1 of the token exchange proves the pairing below — which user this agent is acting for — before any scope is even discussed.',
+      tokenExample: {
+        label: 'Step 1 output: the ID-JAG assertion (proves "agent acting for user")',
+        json: `{
+  "iss": "https://your-org.okta.com/oauth2/ausMAIN...",
+  "sub": "mike.manager@example.com",
+  "act": { "sub": "wlp8x5q7mvH86KvFJ0g7" },
+  "iat": 1751500000,
+  "exp": 1751500060
+}`,
+      },
     },
   },
   {
@@ -145,14 +159,29 @@ const NODES: DiagramNode[] = [
     order: 3,
     description: 'Issues a short-lived, single-purpose pass every time the AI needs to touch a system.',
     detail: {
-      body: "Before the AI can reach any system, it must ask Okta for permission. Okta checks two things: who you are and whether your role is allowed to do this specific thing. If yes, Okta issues a short-lived pass that works for one system and one purpose only. If your role isn't allowed, Okta refuses and nothing is issued.",
+      body: "Before the AI touches any system, it asks Okta for permission. Okta checks who you are and whether your role allows this — then issues a short-lived, single-purpose pass, or refuses.",
       subpoints: [
         "Every system has its own separate pass. A pass for pricing can't open inventory.",
         'Passes expire in minutes, so a leaked one is near-worthless.',
         'The AI never holds a master key. It gets a fresh, narrow pass each time.',
       ],
       callouts: ['Passes are scoped per system + per action', "All-or-nothing: if a role can't do it, the whole request is refused"],
-      architect: 'Under the hood this is a two-step token exchange (ID-JAG). Step 1 trades your login token for an assertion that names both you and the agent, at the Org Authorization Server. Step 2 trades that for a scoped access token at a per-domain Custom Authorization Server (one each for sales, inventory, customer, pricing). The agent authenticates with an RSA keypair, never a shared secret. Okta does not down-scope: if any requested scope is not grantable for your role, the entire exchange returns access_denied.',
+      architect: 'Under the hood this is a two-step token exchange (ID-JAG). Step 1 (shown on the AI Assistant node) trades your login token for an assertion naming both you and the agent, at the Org Authorization Server. Step 2, below, trades that for a scoped access token at a per-domain Custom Authorization Server (one each for sales, inventory, customer, pricing) — each with its own issuer/audience, so a token minted here cannot be replayed against another domain. The agent authenticates with an RSA keypair, never a shared secret. No down-scoping: an ungrantable scope fails the whole exchange with access_denied.',
+      tokenExample: {
+        label: 'Step 2 output: the scoped access token (this is what actually unlocks Inventory)',
+        json: `{
+  "iss": "https://your-org.okta.com/oauth2/ausINVENTORY...",
+  "aud": "api://progear-inventory",
+  "sub": "mike.manager@example.com",
+  "act": { "sub": "wlp8x5q7mvH86KvFJ0g7" },
+  "scp": ["inventory:write"],
+  "Manager": true,
+  "Vacation": false,
+  "Clearance": 5,
+  "iat": 1751500000,
+  "exp": 1751500300
+}`,
+      },
     },
   },
   {
@@ -165,7 +194,7 @@ const NODES: DiagramNode[] = [
     order: 4,
     description: 'A live check of your relationships and current context, like whether you manage this warehouse or are on vacation.',
     detail: {
-      body: "Roles alone aren't always enough. This layer answers the human questions: do you actually manage this warehouse? Is your clearance high enough? Are you on vacation right now? It checks live relationships and real-time context, not just a static job title. If your situation doesn't fit, access is blocked instantly, even if your role would normally allow it.",
+      body: "A live check beyond your role: do you manage this warehouse? Is your clearance high enough? Are you on vacation? Any mismatch blocks access instantly.",
       subpoints: [
         'Relationship: are you the manager or an approved viewer of this specific warehouse?',
         'Clearance: higher clearance automatically includes everything below it.',
@@ -184,7 +213,7 @@ const NODES: DiagramNode[] = [
     order: 5,
     description: 'High-impact actions (like a large inventory change) pause here for a human to approve.',
     detail: {
-      body: "Some actions are too consequential to auto-approve. When the AI tries to make a large change, for example writing a big inventory adjustment, the request pauses and a real person is asked to approve or deny it. The AI cannot push it through on its own. Once approved, the action completes automatically.",
+      body: "High-impact writes pause for a real person to approve or deny. The AI can't push them through on its own.",
       subpoints: [
         'Triggered by impact (a write of 500 units or more), not by every action.',
         'A named human approves or denies. Fully audited.',
@@ -203,7 +232,7 @@ const NODES: DiagramNode[] = [
     order: 6,
     description: 'Your real company systems: inventory, pricing, customers, and sales.',
     detail: {
-      body: "These are the real systems the assistant can draw on. Each one is protected separately and requires its own pass from Okta. The AI can only reach the ones your role and situation permit for the question you asked.",
+      body: "Your real company systems — inventory, pricing, customers, sales. Each needs its own pass; the AI only reaches what you're cleared for.",
     },
     children: [
       { label: 'Inventory', sublabel: 'read / write / alerts', body: 'Stock levels and adjustments. Reading is broadly allowed; large writes need approval and a manager relationship.' },
@@ -222,7 +251,7 @@ const NODES: DiagramNode[] = [
     order: 7,
     description: 'A permanent, searchable record of every pass issued and every allow/deny decision.',
     detail: {
-      body: "Every single access decision, granted or denied, is written to a tamper-evident log the moment it happens. Security and compliance teams can answer 'who accessed what, when, and why' for any request the AI ever made, without trusting the AI to self-report.",
+      body: "Every access decision — granted or denied — is logged instantly. Answers 'who did what, when, why' without trusting the AI to self-report.",
       callouts: ['Queryable', 'Covers grants AND denials'],
       architect: "This is Okta's System Log — a queryable, tamper-evident event stream, separate from (and more trustworthy than) any logging the application itself does.",
     },
@@ -237,7 +266,7 @@ const NODES: DiagramNode[] = [
     chip: true,
     description: "Turn off the AI's access instantly by deactivating its identity or flipping a context flag.",
     detail: {
-      body: "If anything looks wrong, an admin can cut the AI's access in one step: deactivate its identity in Okta, or flip a context flag in the access rules. Because every pass is short-lived and re-issued each time, revocation takes effect almost immediately. No code change, no redeploy.",
+      body: "One step cuts the AI's access: deactivate its identity, or flip a context flag. Takes effect almost immediately — no redeploy.",
       callouts: ['Deactivate identity — OR — flip a context flag'],
     },
   },
@@ -713,6 +742,15 @@ export default function D3ArchitectureDiagram({ title = 'Architecture' }: D3Arch
                     <div className="mt-3 pt-2 border-t border-white/10">
                       <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-1">For architects</div>
                       <p className="text-[11px] text-slate-400 leading-relaxed">{selectedNode.detail.architect}</p>
+                      {selectedNode.detail.tokenExample && (
+                        <div className="mt-2.5">
+                          <div className="text-[9.5px] text-slate-500 mb-1">{selectedNode.detail.tokenExample.label}</div>
+                          <pre className="text-[9.5px] text-emerald-300/90 bg-black/40 border border-white/10 rounded-lg p-2 overflow-x-auto leading-snug whitespace-pre">
+                            {selectedNode.detail.tokenExample.json}
+                          </pre>
+                          <div className="text-[9px] text-slate-600 mt-1">Illustrative example — not a real token.</div>
+                        </div>
+                      )}
                     </div>
                   )}
 
