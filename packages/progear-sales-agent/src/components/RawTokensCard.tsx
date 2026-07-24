@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import {
-  Key, ChevronDown, ChevronUp, ChevronRight, Copy, Check, ExternalLink, KeySquare,
+  Key, ChevronDown, ChevronUp, ChevronRight, Copy, Check, ExternalLink, KeySquare, ShieldOff,
 } from 'lucide-react';
 
 interface TokenExchange {
@@ -13,6 +13,8 @@ interface TokenExchange {
   access_denied: boolean;
   status: string;
   scopes: string[];
+  error?: string;
+  fga_denied?: boolean;
   token_claims?: Record<string, any>;
   access_token?: string;  // Raw access token JWT
   id_jag_token?: string;  // Raw ID-JAG token (intermediate)
@@ -65,18 +67,39 @@ function CopyButton({ text, label }: { text: string; label: string }) {
 // credibility: a self-built decoded-claims panel can look like theater to a
 // skeptical viewer, but a real signed token that decodes cleanly on jwt.io
 // (an independent, well-known tool nobody thinks we control) can't be faked.
+//
+// When a step was blocked rather than just not-yet-reached, say so explicitly
+// instead of the generic "No token available" - the absence of a token here
+// is the point being demonstrated (a policy denial), not a gap in the demo.
 function TokenSection({
   title,
   rawToken,
   color,
   defaultOpen = false,
+  blockedReason,
 }: {
   title: string;
   rawToken?: string;
   color?: string;
   defaultOpen?: boolean;
+  blockedReason?: string;
 }) {
   const [isOpen, setIsOpen] = useState(defaultOpen);
+
+  if (blockedReason) {
+    return (
+      <div className="border border-red-200 rounded-lg overflow-hidden">
+        <div className="flex items-center gap-2 px-3 py-2 bg-red-50 text-red-700 text-sm">
+          <ShieldOff className="w-4 h-4 flex-shrink-0" />
+          <span className="font-medium">{title}</span>
+          <span className="text-xs text-red-600 ml-auto flex-shrink-0">Blocked by policy</span>
+        </div>
+        <div className="px-3 py-2 bg-white text-xs text-red-700 border-t border-red-100">
+          {blockedReason}
+        </div>
+      </div>
+    );
+  }
 
   if (!rawToken) {
     return (
@@ -141,21 +164,24 @@ function TokenSection({
 export default function RawTokensCard({ exchanges, idTokenRaw }: Props) {
   const [isExpanded, setIsExpanded] = useState(false);
 
-  // Filter exchanges that have token data and keep only the latest per agent
+  // Keep the latest record per agent - either it has token data, or it was
+  // explicitly denied (access_denied), both are worth showing as a step.
+  // An agent that was simply never invoked this turn has neither and is
+  // correctly left out.
   const latestExchanges = exchanges.reduce((acc, exchange) => {
-    const hasTokenData = exchange.access_token || exchange.id_jag_token;
-    if (hasTokenData) {
+    const isRelevant = exchange.access_token || exchange.id_jag_token || exchange.access_denied;
+    if (isRelevant) {
       acc[exchange.agent] = exchange; // Keep only latest per agent
     }
     return acc;
   }, {} as Record<string, TokenExchange>);
 
-  const exchangesWithTokens = Object.values(latestExchanges);
-  const hasAnyTokens = !!idTokenRaw || exchangesWithTokens.length > 0;
+  const relevantExchanges = Object.values(latestExchanges);
+  const hasAnyTokens = !!idTokenRaw || relevantExchanges.length > 0;
 
   // Count total tokens (ID Token + ID-JAG tokens + Access tokens)
   const tokenCount = (idTokenRaw ? 1 : 0) +
-    exchangesWithTokens.reduce((count, e) => {
+    relevantExchanges.reduce((count, e) => {
       let c = 0;
       if (e.id_jag_token) c++;
       if (e.access_token) c++;
@@ -211,29 +237,36 @@ export default function RawTokensCard({ exchanges, idTokenRaw }: Props) {
           />
 
           {/* Agent Token Exchanges - ID-JAG and Access Token for each */}
-          {exchangesWithTokens.map((exchange, idx) => (
-            <div key={idx} className="space-y-2">
-              {/* ID-JAG Token (intermediate) */}
-              {exchange.id_jag_token && (
-                <TokenSection
-                  title={`Step 2: Cross-App Access Ticket Issued for ${exchange.agent_name} (ID-JAG Token)`}
-                  rawToken={exchange.id_jag_token}
-                  color="#6366f1"  // Indigo for ID-JAG
-                  defaultOpen={false}
-                />
-              )}
+          {relevantExchanges.map((exchange, idx) => {
+            const blocked = exchange.access_denied
+              ? exchange.error || `Access denied for ${exchange.agent_name}`
+              : undefined;
+            return (
+              <div key={idx} className="space-y-2">
+                {/* ID-JAG Token (intermediate) */}
+                {(exchange.id_jag_token || blocked) && (
+                  <TokenSection
+                    title={`Step 2: Cross-App Access Ticket Issued for ${exchange.agent_name} (ID-JAG Token)`}
+                    rawToken={exchange.id_jag_token}
+                    color="#6366f1"  // Indigo for ID-JAG
+                    defaultOpen={false}
+                    blockedReason={blocked}
+                  />
+                )}
 
-              {/* Access Token (final) */}
-              {exchange.access_token && (
-                <TokenSection
-                  title={`Step 3: ${exchange.agent_name} Granted Access to Business Data (Access Token)`}
-                  rawToken={exchange.access_token}
-                  color={exchange.color}
-                  defaultOpen={false}
-                />
-              )}
-            </div>
-          ))}
+                {/* Access Token (final) */}
+                {(exchange.access_token || blocked) && (
+                  <TokenSection
+                    title={`Step 3: ${exchange.agent_name} Granted Access to Business Data (Access Token)`}
+                    rawToken={exchange.access_token}
+                    color={exchange.color}
+                    defaultOpen={false}
+                    blockedReason={blocked}
+                  />
+                )}
+              </div>
+            );
+          })}
 
           {/* No tokens message */}
           {!hasAnyTokens && (

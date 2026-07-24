@@ -501,8 +501,13 @@ Return ONLY the JSON object, no other text."""
             if result.allowed:
                 allowed_agents.append(agent_type)
             else:
-                # FGA denied - update the existing token_exchange record to show denial
-                # Token was already exchanged, but FGA blocks the action
+                # FGA denied - update the existing token_exchange record to show denial.
+                # A token (real or demo) may have already been issued by Okta's coarser
+                # scope grant before this finer-grained FGA check ran - clear it out so
+                # the record is never "access_denied: true" AND "here's a token" at the
+                # same time. The UI treats presence of a token as proof of a real grant,
+                # so a stale one left behind here reads as a bypassed policy, not a
+                # denied one.
                 for tx in state["token_exchanges"]:
                     if tx.get("agent") == agent_type:
                         tx["success"] = False
@@ -510,6 +515,11 @@ Return ONLY the JSON object, no other text."""
                         tx["status"] = "denied"
                         tx["error"] = f"FGA: {result.reason}"
                         tx["fga_denied"] = True  # Flag for UI to show FGA-specific styling
+                        tx["access_token"] = None
+                        tx["id_jag_token"] = None
+                        tx["token_claims"] = None
+                        tx["id_jag_claims"] = None
+                        tx["demo_mode"] = False
                         break
                 else:
                     # Fallback: add new record if not found (shouldn't happen)
