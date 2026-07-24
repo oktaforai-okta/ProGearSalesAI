@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, type ReactNode } from 'react';
 import { useSession, signOut } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Key, GitBranch } from 'lucide-react';
+import { Key, GitBranch, ShieldCheck } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { type ApprovalStatus } from '@/components/ApprovalStatusCard';
@@ -459,6 +459,14 @@ export default function Home() {
             >
               <GitBranch className="w-4 h-4" />
               <span className="hidden sm:inline">Architecture</span>
+            </Link>
+            <Link
+              href="/fga"
+              className="px-4 py-2.5 bg-white/10 hover:bg-accent/30 text-white rounded-lg transition border border-white/20 hover:border-accent/50 flex items-center gap-2 text-sm"
+              title="Fine-Grained Authorization checks and demo controls"
+            >
+              <ShieldCheck className="w-4 h-4" />
+              <span className="hidden sm:inline">FGA</span>
             </Link>
           </div>
 

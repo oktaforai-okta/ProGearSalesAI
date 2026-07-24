@@ -44,3 +44,4 @@ coverage/
 # prefers this file over initial_data.json if it exists, so a committed
 # live_data.json silently shadows every future edit to the seed data.
 backend/data/live_data.json
+.env*

@@ -29,7 +29,7 @@ from typing import Optional, List, Dict, Any
 from auth.okta_auth import get_okta_auth
 from auth.agent_config import get_all_agent_configs, DEMO_AGENTS
 from auth.fga_client import close_fga_client
-from auth.demo_admin import toggle_demo_attribute, reset_demo_attributes, ALLOWED_ATTRIBUTES
+from auth.demo_admin import toggle_demo_attribute, reset_demo_attributes, get_demo_status, ALLOWED_ATTRIBUTES
 from orchestrator.orchestrator import Orchestrator
 from dataclasses import asdict
 from data.demo_store import demo_store
@@ -605,6 +605,24 @@ async def _resolve_caller_user_id(authorization: Optional[str]) -> str:
     if not user_id:
         raise HTTPException(status_code=401, detail="Token missing subject/email")
     return user_id
+
+
+@app.get("/api/admin/demo-status")
+async def demo_status(authorization: Optional[str] = Header(None, alias="Authorization")):
+    """
+    Demo-only, read-only: the signed-in user's current is_on_vacation /
+    is_a_manager / clearance_level values, so the UI can show which state is
+    actually active instead of a static button style.
+    """
+    user_id = await _resolve_caller_user_id(authorization)
+
+    try:
+        return await get_demo_status(user_id)
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        logger.error(f"demo_status failed: {e}")
+        raise HTTPException(status_code=502, detail=f"Okta lookup failed: {e}")
 
 
 @app.post("/api/admin/demo-toggle")

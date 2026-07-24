@@ -5,26 +5,11 @@ import Link from 'next/link';
 import { useSession } from 'next-auth/react';
 import { ArrowLeft } from 'lucide-react';
 import RawTokensCard from '@/components/RawTokensCard';
-import FGAExplanationCard from '@/components/FGAExplanationCard';
 import ApprovalStatusCard, { type ApprovalStatus } from '@/components/ApprovalStatusCard';
-import FGAControlsPanel from '@/components/FGAControlsPanel';
 
 const AGENT_FLOW_STORAGE_KEY = 'progear-agent-flow';
 const TOKEN_EXCHANGE_STORAGE_KEY = 'progear-token-exchanges';
-const FGA_CHECKS_STORAGE_KEY = 'progear-fga-checks';
 const PENDING_APPROVAL_STORAGE_KEY = 'progear-pending-approval';
-
-// Decode JWT payload (for display only, no validation)
-function decodeJwtPayload(token: string): Record<string, any> | null {
-  try {
-    const parts = token.split('.');
-    if (parts.length !== 3) return null;
-    const decoded = atob(parts[1].replace(/-/g, '+').replace(/_/g, '/'));
-    return JSON.parse(decoded);
-  } catch {
-    return null;
-  }
-}
 
 // Reads the exact same sessionStorage the chat page (/) already writes on
 // every response - no backend or API changes needed to power this page.
@@ -32,21 +17,18 @@ export default function TokensPage() {
   const { data: session } = useSession();
   const [agentFlow, setAgentFlow] = useState<any[]>([]);
   const [tokenExchanges, setTokenExchanges] = useState<any[]>([]);
-  const [fgaChecks, setFgaChecks] = useState<any[]>([]);
   const [pendingApproval, setPendingApproval] = useState<ApprovalStatus | null>(null);
 
   const loadFromStorage = () => {
     try {
       const flow = sessionStorage.getItem(AGENT_FLOW_STORAGE_KEY);
       const exchanges = sessionStorage.getItem(TOKEN_EXCHANGE_STORAGE_KEY);
-      const checks = sessionStorage.getItem(FGA_CHECKS_STORAGE_KEY);
       const approval = sessionStorage.getItem(PENDING_APPROVAL_STORAGE_KEY);
       if (flow) setAgentFlow(JSON.parse(flow));
       if (exchanges) setTokenExchanges(JSON.parse(exchanges));
-      if (checks) setFgaChecks(JSON.parse(checks));
       if (approval) setPendingApproval(JSON.parse(approval));
     } catch (e) {
-      console.error('Error loading token/FGA data:', e);
+      console.error('Error loading token data:', e);
     }
   };
 
@@ -72,8 +54,8 @@ export default function TokensPage() {
               <span className="text-sm">Back to Chat</span>
             </Link>
             <div>
-              <h1 className="text-white text-xl font-bold">Tokens &amp; Governance</h1>
-              <p className="text-gray-300 text-xs">Agent flow, token exchanges, and Fine-Grained Authorization</p>
+              <h1 className="text-white text-xl font-bold">Token Flow</h1>
+              <p className="text-gray-300 text-xs">Agent flow and the raw token exchange chain</p>
             </div>
           </div>
         </div>
@@ -82,13 +64,8 @@ export default function TokensPage() {
       <div className="max-w-4xl mx-auto p-6 space-y-4">
         <RawTokensCard
           exchanges={tokenExchanges}
-          idTokenClaims={session?.idToken ? decodeJwtPayload(session.idToken) ?? undefined : undefined}
           idTokenRaw={session?.idToken}
         />
-
-        <FGAExplanationCard checks={fgaChecks} />
-
-        <FGAControlsPanel onApplied={loadFromStorage} />
 
         {pendingApproval && (
           <ApprovalStatusCard key={pendingApproval.request_id} initial={pendingApproval} />
@@ -101,7 +78,7 @@ export default function TokensPage() {
               <Link href="/" className="text-okta-blue underline">
                 chat page
               </Link>{' '}
-              to see token exchanges and FGA checks appear here.
+              to see token exchanges appear here.
             </p>
           </div>
         )}

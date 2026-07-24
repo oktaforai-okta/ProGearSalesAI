@@ -56,6 +56,15 @@ async def _get_profile(user_id: str, domain: str, api_token: str) -> Dict[str, A
         return resp.json()["profile"]
 
 
+async def get_demo_status(user_id: str) -> Dict[str, Any]:
+    """Read-only: the caller's current values for the toggleable attributes,
+    so the UI can highlight which state is actually active instead of
+    guessing."""
+    domain, api_token = _require_config()
+    profile = await _get_profile(user_id, domain, api_token)
+    return {attr: profile.get(attr) for attr in ALLOWED_ATTRIBUTES}
+
+
 async def toggle_demo_attribute(user_id: str, attribute: str, value: Any) -> Dict[str, Any]:
     """Set one allow-listed profile attribute on the caller's own Okta user."""
     if attribute not in ALLOWED_ATTRIBUTES:
