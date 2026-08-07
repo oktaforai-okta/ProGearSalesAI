@@ -118,13 +118,13 @@ Traditional OAuth 2.0 token exchange (RFC 8693) between applications. This is wh
 
 ```json
 {
-  "sub": "0oa8x5nsjp8aDUpB70g7",
+  "sub": "0oaEXAMPLEAPPCLIENT",
   "scp": ["inventory:read"],
   "aud": "api://progear-inventory"
 }
 ```
 
-**Problem:** Who is `0oa8x5nsjp8aDUpB70g7`? Is this a user? A service? An AI agent? Who authorized this access?
+**Problem:** Who is `0oaEXAMPLEAPPCLIENT`? Is this a user? A service? An AI agent? Who authorized this access?
 
 ### The Audit Log
 
@@ -132,7 +132,7 @@ Traditional OAuth 2.0 token exchange (RFC 8693) between applications. This is wh
 {
   "eventType": "app.oauth2.as.token.grant",
   "actor": {
-    "id": "0oa8x5nsjp8aDUpB70g7",
+    "id": "0oaEXAMPLEAPPCLIENT",
     "type": "PublicClientApp",
     "displayName": "AI-Sales-Service"
   },
@@ -208,14 +208,14 @@ The two-step design keeps those concerns cleanly separated: **identity proof** (
 {
   "sub": "sarah.sales@progear-demo.com",
   "act": {
-    "sub": "wlp8x5q7mvH86KvFJ0g7"
+    "sub": "wlpuoor63yK6LYFEh1d7"
   },
   "scp": ["inventory:read"],
   "aud": "api://progear-inventory"
 }
 ```
 
-**Clear Answer:** Sarah Sales (`sub`) is the user. The AI agent `wlp8x5q7mvH86KvFJ0g7` (`act.sub`) is acting on her behalf.
+**Clear Answer:** Sarah Sales (`sub`) is the user. The AI agent `wlpuoor63yK6LYFEh1d7` (`act.sub`) is acting on her behalf.
 
 ### The Audit Log
 
@@ -223,7 +223,7 @@ The two-step design keeps those concerns cleanly separated: **identity proof** (
 {
   "eventType": "app.oauth2.token.grant.id_jag",
   "actor": {
-    "id": "wlp8x5q7mvH86KvFJ0g7",
+    "id": "wlpuoor63yK6LYFEh1d7",
     "type": "AI Agent",
     "displayName": "ProGear Sales Agent"
   },
@@ -272,7 +272,7 @@ This demo implements Scenario 2 with four internal authorization servers:
 
 This is the design decision that matters most for blast-radius reasoning, so it's worth spelling out the alternative that was rejected.
 
-**The alternative:** one shared Custom Authorization Server, with all twelve scopes defined on it - `sales:read`, `sales:quote`, `sales:order`, `inventory:read`, `inventory:write`, `inventory:alert`, `customer:read`, `customer:lookup`, `customer:history`, `pricing:read`, `pricing:margin`, `pricing:discount` - and a single policy engine deciding who gets which. It looks simpler to stand up. It is structurally weaker:
+**The alternative:** one shared Custom Authorization Server, with all twelve scopes defined on it - `sales:read`, `sales:quote`, `sales:order`, `inventory:read`, `inventory:write`, `customer:read`, `customer:lookup`, `customer:history`, `pricing:read`, `pricing:margin`, `pricing:discount` - and a single policy engine deciding who gets which. It looks simpler to stand up. It is structurally weaker:
 
 - **Same issuer, same audience, one trust boundary for everything.** Every token that server mints carries the same `aud` claim. A policy misconfiguration that grants `pricing:discount` to the warehouse group by mistake produces a token that is *structurally valid* for the Pricing API - the only thing standing between that mistake and a real exposure is application code correctly reading the `scp` claim, on every code path, every time, forever.
 - **A compromised or over-broad token is replayable across domains.** If Inventory and Pricing shared an authorization server, a token minted for one carries that server's issuer and audience - identical to a token meant for the other. A resource server that's even slightly too permissive about which scopes it enforces (a common implementation bug, not a hypothetical one) will accept it, because nothing about the token itself says "this belongs to Inventory, not Pricing."
@@ -289,7 +289,7 @@ This is also why the "no down-scoping" behavior you saw in the denied audit log 
 ├─────────────────────────────────────────────────────────────────────┤
 │                                                                     │
 │  ProGear Sales Agent                                                │
-│  ID: wlp8x5q7mvH86KvFJ0g7                                           │
+│  ID: wlpuoor63yK6LYFEh1d7                                           │
 │  Owner: john.admin@company.com                                      │
 │  Status: ● Active                                                   │
 │  Managed Connections: 4 APIs                                        │
@@ -353,7 +353,7 @@ def token_exchange(subject_token):
 
     # 2. Extract identities
     user_id = claims["sub"]           # "sarah.sales@company.com"
-    agent_id = claims["act"]["sub"]   # "wlp8x5q7mvH86KvFJ0g7"
+    agent_id = claims["act"]["sub"]   # "wlpuoor63yK6LYFEh1d7"
 
     # 3. Make policy decision
     scopes = determine_scopes(user_id, agent_id)
@@ -506,10 +506,10 @@ A Workload Principal fixes this by giving the AI its own identity that travels *
 
 | Property | What It Means | Why It Matters |
 |----------|---------------|----------------|
-| **Unique ID** | `wlp8x5q7mvH86KvFJ0g7` | Every agent has a trackable identity |
+| **Unique ID** | `wlpuoor63yK6LYFEh1d7` | Every agent has a trackable identity |
 | **Mandatory Owner** | A real person is responsible | Governance and accountability |
 | **Cryptographic Credentials** | RS256 key pair (no passwords) | Secure, rotatable authentication |
-| **Linked Applications** | Which apps can trigger this agent | Controlled entry points |
+| **Direct User access** | Which assigned users can sign in to the agent-bound OIDC app | Controlled entry points |
 | **Managed Connections** | Which APIs this agent can access | Explicit scope boundaries |
 | **Enable/Disable Toggle** | One click to activate or deactivate | Instant revocation capability |
 
@@ -529,10 +529,10 @@ A Workload Principal fixes this by giving the AI its own identity that travels *
 │                                                                   │
 │   AI AGENTS (Workload Principals)       ← First-class identity    │
 │   ┌─────────────────────────────────────────────────────┐         │
-│   │ ProGear Sales Agent (wlp8x5q7mvH86KvFJ0g7)          │         │
+│   │ ProGear Sales Agent (wlpuoor63yK6LYFEh1d7)          │         │
 │   │   • Owner: admin@company.com                        │         │
 │   │   • Credentials: RS256 key pair                     │         │
-│   │   • Linked Apps: ProGear Sales Agent App            │         │
+│   │   • Direct User access: ProGear Sales Agent         │         │
 │   │   • Status: ACTIVE                                  │         │
 │   └─────────────────────────────────────────────────────┘         │
 │                                                                   │
@@ -570,7 +570,7 @@ When Sarah Sales asks the AI agent to check inventory:
   },
   "published": "2024-12-15T14:23:47.123Z",
   "actor": {
-    "id": "wlp8x5q7mvH86KvFJ0g7",
+    "id": "wlpuoor63yK6LYFEh1d7",
     "type": "AI Agent",
     "displayName": "ProGear Sales Agent"
   },
@@ -582,7 +582,7 @@ When Sarah Sales asks the AI agent to check inventory:
       "alternateId": "sarah.sales@progear-demo.com"
     },
     {
-      "id": "aus8xdg1oaSVfDgxa0g7",
+      "id": "ausuoodihgxiDhdJH1d7",
       "type": "AuthorizationServer",
       "displayName": "ProGear Inventory MCP"
     }
@@ -599,7 +599,7 @@ When Sarah Sales asks the AI agent to check inventory:
 | Field | Value | Security Insight |
 |-------|-------|------------------|
 | `actor.displayName` | "ProGear Sales Agent" | **WHICH AI** performed this action |
-| `actor.id` | `wlp8x5q7mvH86KvFJ0g7` | Unique, trackable agent ID |
+| `actor.id` | `wlpuoor63yK6LYFEh1d7` | Unique, trackable agent ID |
 | `target[0].displayName` | "Sarah Sales" | **WHICH USER** the agent acted for |
 | `target[1].displayName` | "ProGear Inventory MCP" | **WHICH API** was accessed |
 | `grantedScopes` | "inventory:read" | **WHAT PERMISSIONS** were granted |
@@ -620,7 +620,7 @@ When Mike Manager (warehouse team) tries to access customer data:
   },
   "published": "2024-12-15T14:25:12.456Z",
   "actor": {
-    "id": "wlp8x5q7mvH86KvFJ0g7",
+    "id": "wlpuoor63yK6LYFEh1d7",
     "type": "AI Agent",
     "displayName": "ProGear Sales Agent"
   },
@@ -632,7 +632,7 @@ When Mike Manager (warehouse team) tries to access customer data:
       "alternateId": "mike.manager@progear-demo.com"
     },
     {
-      "id": "aus8xdfti92mIRSAE0g7",
+      "id": "ausuop8bitEQYw3mc1d7",
       "type": "AuthorizationServer",
       "displayName": "ProGear Customer MCP"
     }
@@ -709,7 +709,7 @@ FGA runs on top of the Okta scope check, for the Inventory domain, only after Ok
 | - | Is this specific user **currently on vacation**? (evaluated as a live fact at request time, not something stored and left to go stale) |
 | - | Does this specific user hold **clearance at or above** this specific inventory item's required clearance level? |
 
-`inventory:read` maps to an FGA `can_view` check (active manager or viewer, and not on vacation). `inventory:write` maps to a stricter `can_update` check (active manager *and* sufficient clearance for that item). `inventory:alert` skips FGA entirely - alerts are informational and don't touch protected data, so there's nothing to gate.
+`inventory:read` maps to an FGA `can_view` check (active manager or viewer, and not on vacation). `inventory:write` maps to a stricter `can_update` check (active manager *and* sufficient clearance for that item). Low-stock alerts are read operations and therefore use `inventory:read`.
 
 **Concretely:** Mike Manager's Okta group membership grants him the `inventory:write` scope, and his ID-JAG token exchange with the Inventory Custom Authorization Server succeeds. But if Mike is currently marked on vacation, or the specific item he's trying to update requires a clearance level he doesn't hold, FGA denies the write anyway - *after* Okta already said yes. Two independent systems, checking two different kinds of facts, both have to agree before a write executes.
 
@@ -770,7 +770,7 @@ Routing this through Okta Identity Governance, rather than a bespoke approval bo
 | Agent/API | Access Level | Scopes Granted |
 |-----------|--------------|----------------|
 | Sales MCP | **DENIED** | - |
-| Inventory MCP | Full | `inventory:read`, `inventory:write`, `inventory:alert` |
+| Inventory MCP | Full | `inventory:read`, `inventory:write` |
 | Customer MCP | **DENIED** | - |
 | Pricing MCP | **DENIED** | - |
 

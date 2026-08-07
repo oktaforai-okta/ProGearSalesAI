@@ -77,8 +77,7 @@ def get_agent_config(agent_type: str) -> Optional[AgentConfig]:
                 os.getenv("OKTA_AI_AGENT_SALES_PRIVATE_KEY",
                          os.getenv("OKTA_AI_AGENT_PRIVATE_KEY", ""))
             ),
-            auth_server_id=os.getenv("OKTA_SALES_AUTH_SERVER_ID",
-                                    os.getenv("OKTA_MCP_AUTH_SERVER_ID", "")),
+            auth_server_id=os.getenv("OKTA_SALES_AUTH_SERVER_ID", ""),
             audience=os.getenv("OKTA_SALES_AUDIENCE", "api://progear-sales"),
             scopes=["sales:read", "sales:quote", "sales:order"],
             description="Orders, quotes, and sales pipeline",
@@ -93,10 +92,9 @@ def get_agent_config(agent_type: str) -> Optional[AgentConfig]:
                 os.getenv("OKTA_AI_AGENT_INVENTORY_PRIVATE_KEY",
                          os.getenv("OKTA_AI_AGENT_PRIVATE_KEY", ""))
             ),
-            auth_server_id=os.getenv("OKTA_INVENTORY_AUTH_SERVER_ID",
-                                    os.getenv("OKTA_MCP_AUTH_SERVER_ID", "")),
+            auth_server_id=os.getenv("OKTA_INVENTORY_AUTH_SERVER_ID", ""),
             audience=os.getenv("OKTA_INVENTORY_AUDIENCE", "api://progear-inventory"),
-            scopes=["inventory:read", "inventory:write", "inventory:alert"],
+            scopes=["inventory:read", "inventory:write"],
             description="Stock levels, products, and warehouse",
             color="#10b981",  # Green
         ),
@@ -109,8 +107,7 @@ def get_agent_config(agent_type: str) -> Optional[AgentConfig]:
                 os.getenv("OKTA_AI_AGENT_CUSTOMER_PRIVATE_KEY",
                          os.getenv("OKTA_AI_AGENT_PRIVATE_KEY", ""))
             ),
-            auth_server_id=os.getenv("OKTA_CUSTOMER_AUTH_SERVER_ID",
-                                    os.getenv("OKTA_MCP_AUTH_SERVER_ID", "")),
+            auth_server_id=os.getenv("OKTA_CUSTOMER_AUTH_SERVER_ID", ""),
             audience=os.getenv("OKTA_CUSTOMER_AUDIENCE", "api://progear-customer"),
             scopes=["customer:read", "customer:lookup", "customer:history"],
             description="Accounts, contacts, and purchase history",
@@ -125,8 +122,7 @@ def get_agent_config(agent_type: str) -> Optional[AgentConfig]:
                 os.getenv("OKTA_AI_AGENT_PRICING_PRIVATE_KEY",
                          os.getenv("OKTA_AI_AGENT_PRIVATE_KEY", ""))
             ),
-            auth_server_id=os.getenv("OKTA_PRICING_AUTH_SERVER_ID",
-                                    os.getenv("OKTA_MCP_AUTH_SERVER_ID", "")),
+            auth_server_id=os.getenv("OKTA_PRICING_AUTH_SERVER_ID", ""),
             audience=os.getenv("OKTA_PRICING_AUDIENCE", "api://progear-pricing"),
             scopes=["pricing:read", "pricing:margin", "pricing:discount"],
             description="Pricing, margins, and discounts",
@@ -175,7 +171,7 @@ DEMO_AGENTS = {
     AGENT_INVENTORY: {
         "name": "Inventory MCP",
         "display_name": "Inventory Agent",
-        "scopes": ["inventory:read", "inventory:write", "inventory:alert"],
+        "scopes": ["inventory:read", "inventory:write"],
         "color": "#10b981",
     },
     AGENT_CUSTOMER: {

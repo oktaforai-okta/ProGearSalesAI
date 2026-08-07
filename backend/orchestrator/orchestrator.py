@@ -90,9 +90,9 @@ SCOPE_DEFINITIONS = {
             "description": "Modify inventory"
         },
         "alert": {
-            "scope": "inventory:alert",
+            "scope": "inventory:read",
             "keywords": ["alert", "notify", "reorder", "low stock", "warning"],
-            "description": "Inventory alerts"
+            "description": "View inventory alerts"
         },
     },
     AGENT_PRICING: {
@@ -258,7 +258,6 @@ Available agents and their scopes:
 2. INVENTORY:
    - inventory:read - View stock levels, product availability (read-only queries like "what do we have", "check stock")
    - inventory:write - Add/update/modify inventory (write operations like "add 5000 basketballs", "update stock")
-   - inventory:alert - Manage inventory alerts
 
 3. CUSTOMER:
    - customer:read - View customer information

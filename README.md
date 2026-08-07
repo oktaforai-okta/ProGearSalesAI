@@ -17,6 +17,8 @@
 
 Both are deployed from this single repo and auto-deploy on every push to `main` (Vercel builds `packages/progear-sales-agent`; Render builds the `backend/` service).
 
+User sign-in uses Okta **direct User access** on the registered ProGear Sales Agent. The agent-bound OIDC app shares the agent's `wlp...` client ID and authenticates token requests with `private_key_jwt`; there is no separate sign-on client secret.
+
 Pages in the running app:
 
 | Route | What it shows |
@@ -53,7 +55,7 @@ Each agent has its own Okta Custom Authorization Server and its own scopes — a
 | Agent | Scopes |
 |---|---|
 | Sales | `sales:read`, `sales:quote`, `sales:order` |
-| Inventory | `inventory:read`, `inventory:write`, `inventory:alert` |
+| Inventory | `inventory:read`, `inventory:write` |
 | Customer | `customer:read`, `customer:lookup`, `customer:history` |
 | Pricing | `pricing:read`, `pricing:margin`, `pricing:discount` |
 

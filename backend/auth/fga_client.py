@@ -9,7 +9,6 @@ This demonstrates "Okta + FGA Better Together":
 Key Logic - Scope-Based FGA Check:
 - inventory:read  -> FGA check: can_view (active_manager)
 - inventory:write -> FGA check: can_update (active_manager + has_clearance)
-- inventory:alert -> NO FGA check (alert operations always allowed)
 
 This means:
 - User on vacation CANNOT VIEW or UPDATE inventory (active_manager blocks both)
@@ -872,7 +871,6 @@ async def check_agent_access(
     For inventory with new model:
     - inventory:read -> checks "can_view" on inventory_item (active_manager)
     - inventory:write -> checks "can_update" on inventory_item (active_manager + has_clearance)
-    - inventory:alert -> pass through (no FGA check)
 
     Args:
         user_email: User's email/login from Okta (e.g., "bob.manager@atko.email")
@@ -895,18 +893,6 @@ async def check_agent_access(
             user=f"user:{user_email}",
             context={"is_on_vacation": is_on_vacation},
             reason=f"No FGA model for {agent_type} - Okta RBAC only",
-            contextual_tuples=[],
-        )
-
-    # Alert operations pass through - no FGA check
-    if "inventory:alert" in scopes and "inventory:read" not in scopes and "inventory:write" not in scopes:
-        return FGACheckResult(
-            allowed=True,
-            relation="n/a",
-            object=f"inventory_system:warehouse",
-            user=f"user:{user_email}",
-            context={"is_on_vacation": is_on_vacation, "scopes": scopes},
-            reason=f"Alert operation - no FGA check required",
             contextual_tuples=[],
         )
 
@@ -968,10 +954,6 @@ def get_fga_model_info() -> Dict[str, Any]:
             "inventory:write": {
                 "fga_permission": "can_update",
                 "requirements": "active_manager + has_clearance"
-            },
-            "inventory:alert": {
-                "fga_permission": "n/a",
-                "requirements": "No FGA check"
             }
         },
         "tuples_seeded": {
