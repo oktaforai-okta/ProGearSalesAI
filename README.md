@@ -101,7 +101,7 @@ For a full walkthrough — Okta org setup (AI Agent, Custom Authorization Server
 
 <a href="https://colab.research.google.com/github/oktaforai-okta/ProGearSalesAI/blob/main/notebooks/progear-inventory-authorization-story.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open ProGear Inventory Authorization Story in Colab"/></a>
 
-**[One AI agent, different permissions](notebooks/progear-inventory-authorization-story.ipynb)** is a no-code-friendly walkthrough of the Sarah-versus-Mike inventory scenario. It explains direct user authentication, delegated identity, read-versus-write permissions, Okta policy decisions, and the user-friendly denial message. Optional cells simulate the policy locally without credentials or inventory changes.
+**[Secure your custom AI agent with Okta](notebooks/progear-inventory-authorization-story.ipynb)** is a layered business-to-implementation guide. New readers can follow the Sarah-versus-Mike story without code; architects and developers can map the pattern to a customer-owned agent, configure Okta for AI Agents, inspect the two-step ID-JAG exchange, use the platform-neutral Python reference module, validate resource tokens, and work through production and troubleshooting checklists. Default labs use only local examples or read-only checks and contain no credentials.
 
 ## Documentation
 
@@ -132,6 +132,8 @@ ProGearSalesAI/
 │   ├── progear-sales-agent/        # Next.js frontend (chat, /tokens, /architecture)
 │   └── progear-sales-mcp-server/   # Standalone JWT-validating MCP server (not yet wired into the chat flow)
 ├── docs/                           # architecture.md, implementation-guide.md, etc.
+├── notebooks/                      # Layered customer Colab integration guide
+├── examples/                       # Platform-neutral token exchange reference
 ├── .env.example                    # Environment variable template (names only, no real secrets)
 └── README.md                       # This file
 ```
