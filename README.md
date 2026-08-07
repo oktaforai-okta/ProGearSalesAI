@@ -97,6 +97,12 @@ Copy `.env.example` to `.env` and fill in real values before running anything �
 
 For a full walkthrough — Okta org setup (AI Agent, Custom Authorization Servers, groups), Auth0 FGA store setup, and deploying to Vercel + Render — see **[docs/implementation-guide.md](docs/implementation-guide.md)**.
 
+## Customer Learning Notebook
+
+<a href="https://colab.research.google.com/github/oktaforai-okta/ProGearSalesAI/blob/main/notebooks/progear-inventory-authorization-story.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open ProGear Inventory Authorization Story in Colab"/></a>
+
+**[One AI agent, different permissions](notebooks/progear-inventory-authorization-story.ipynb)** is a no-code-friendly walkthrough of the Sarah-versus-Mike inventory scenario. It explains direct user authentication, delegated identity, read-versus-write permissions, Okta policy decisions, and the user-friendly denial message. Optional cells simulate the policy locally without credentials or inventory changes.
+
 ## Documentation
 
 | Document | Audience | Description |
