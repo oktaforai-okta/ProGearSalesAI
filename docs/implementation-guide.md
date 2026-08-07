@@ -30,11 +30,11 @@ This guide is designed for two types of users:
 ### Who This Guide is For
 
 **1. Learners Building Their Own Chatbot**
-If you want to understand how to build a multi-agent AI chatbot with enterprise-grade security using Okta AI Agent Governance, this guide walks through every configuration step. You'll learn:
-- How AI agents authenticate and act on behalf of users
+If you want to understand how to build an AI chatbot with enterprise-grade security using Okta AI Agent Governance, this guide walks through every configuration step. The application may use multiple internal workflow components, but Okta governs one ProGear Sales Agent identity. You'll learn:
+- How the AI agent authenticates and acts on behalf of users
 - How to implement Role-Based Access Control (RBAC) with Okta groups
-- How per-domain Okta Custom Authorization Servers scope what each agent can do
-- How token exchange flows preserve user identity through the AI pipeline
+- How per-domain Okta Custom Authorization Servers scope what the agent can do in each resource domain
+- How token exchange preserves user identity through the AI pipeline
 
 **2. Quick Deployers**
 If you want to clone this repository, deploy it to Vercel and Render, and configure your own Okta instance to see the demo in action, follow the step-by-step deployment sections.
@@ -42,7 +42,7 @@ If you want to clone this repository, deploy it to Vercel and Render, and config
 ### What You'll Deploy
 
 A basketball equipment sales AI assistant with:
-- **4 AI Agents**: Sales, Inventory, Customer, and Pricing
+- **1 governed AI Agent**: ProGear Sales Agent, with four internal domain components for Sales, Inventory, Customer, and Pricing
 - **3 Demo Users**: Each with different access levels
 - **Role-Based Access Control**: Users only see data they're authorized to access
 - **Visual Token Exchange**: See exactly which scopes are granted/denied in real-time
@@ -130,10 +130,10 @@ Before diving into deployment, understand how the pieces fit together:
 │   ┌───────────────────────────────────────────────────────────┐   │
 │   │                   FastAPI Application                     │   │
 │   │                                                           │   │
-│   │  • LangGraph orchestrator (routes to agents)              │   │
+│   │  • LangGraph orchestrator (routes by resource domain)      │   │
 │   │  • Okta token exchange (ID -> ID-JAG -> scoped token)      │   │
-│   │  • 4 in-process domain agents (Sales, Inventory,          │   │
-│   │    Customer, Pricing) -- each with its own Custom AS       │   │
+│   │  • 4 in-process domain components (Sales, Inventory,      │   │
+│   │    Customer, Pricing) with separate Custom AS boundaries   │   │
 │   │  • Auth0 FGA + Okta Identity Governance checks            │   │
 │   │  • Claude via the raw Anthropic SDK                       │   │
 │   └───────────────────────────────────────────────────────────┘   │
@@ -164,9 +164,9 @@ When a user sends a message:
 1. User authenticates via Okta → Frontend receives ID token
 2. Frontend sends message + ID token to Backend
 3. Backend exchanges ID token → ID-JAG assertion at the Org AS (AI Agent acting for user)
-4. Backend exchanges the ID-JAG → a scoped access token per agent, at that agent's own Custom Authorization Server
-5. If user's group doesn't match policy → token denied (access control!)
-6. Backend invokes each authorized domain agent in-process with its granted scopes (see docs/architecture.md for the current, honest MCP-server status)
+4. Backend exchanges the ID-JAG → a scoped access token for each required resource domain, at that domain's Custom Authorization Server
+5. If the user's group doesn't match policy → token denied (access control!)
+6. Backend invokes each authorized internal domain component in-process with its granted scope (see docs/architecture.md for the current, honest MCP-server status)
 7. Response flows back to user with visualization of what was granted/denied
 ```
 
@@ -249,7 +249,7 @@ packages/progear-sales-agent/src/
 backend/
 ├── api/
 │   └── main.py              # FastAPI app, CORS, routes, approval poller
-├── agents/                  # Sales, Inventory, Customer, Pricing agents
+├── agents/                  # Internal Sales, Inventory, Customer, Pricing components
 │                             # (each calls demo_store in-process + the
 │                             #  raw Anthropic SDK -- not separate MCP
 │                             #  servers; see docs/architecture.md §7)
@@ -436,9 +436,9 @@ Create three groups to demonstrate RBAC:
 
    | User | Group | Access Level |
    |------|-------|--------------|
-   | Sarah Sales | `ProGear-Sales` | Full access to all 4 agents |
-   | Mike Manager | `ProGear-Warehouse` | Inventory agent only |
-   | Frank Finance | `ProGear-Finance` | Pricing agent only |
+   | Sarah Sales | `ProGear-Sales` | Agent access across all four resource domains |
+   | Mike Manager | `ProGear-Warehouse` | Agent access to the Inventory domain only |
+   | Frank Finance | `ProGear-Finance` | Agent access to the Pricing domain only |
 
    > **Verification:** Click on each user in **Directory** → **People** and check the **Groups** tab to confirm they're in the correct group.
 
@@ -1011,54 +1011,54 @@ Expected response:
 
 Three key scenarios to demonstrate RBAC and governance:
 
-### Scenario 1: Full Access (Sarah Sales)
+### Scenario 1: Access across all resource domains (Sarah Sales)
 
 **Login as**: Your sarah.sales user
 
 **Question**: "Can we fulfill an order of 1500 basketballs for State University at a bulk discount?"
 
 **What Happens**:
-1. Orchestrator routes to all 4 agents
-2. **Customer Agent** → Looks up State University (Platinum tier)
-3. **Inventory Agent** → Checks basketball stock (available)
-4. **Pricing Agent** → Calculates bulk discount
-5. **Sales Agent** → Generates quote
+1. The single ProGear Sales Agent routes across its Customer, Inventory, Pricing, and Sales domain components
+2. **Customer component** → Looks up State University (Platinum tier)
+3. **Inventory component** → Checks basketball stock (available)
+4. **Pricing component** → Calculates bulk discount
+5. **Sales component** → Generates quote
 
 **Expected Result**:
-- 4 successful token exchanges
+- Successful scoped token exchanges for the required resource domains
 - Full combined answer with customer, inventory, pricing, and quote
-- All scopes granted in the security panel
+- All required scopes granted in the security panel
 
-### Scenario 2: Limited Access (Mike Manager)
+### Scenario 2: Limited resource access (Mike Manager)
 
 **Login as**: Your mike.manager user
 
 **Question**: Same as above
 
 **What Happens**:
-1. Orchestrator tries to route to all agents
-2. **Customer Agent** → ACCESS DENIED (Mike not in ProGear-Sales)
-3. **Inventory Agent** → SUCCESS: "Stock available"
-4. **Pricing Agent** → ACCESS DENIED (Mike not in ProGear-Finance)
-5. **Sales Agent** → ACCESS DENIED
+1. The ProGear Sales Agent identifies the Customer, Inventory, Pricing, and Sales resource needs
+2. **Customer domain** → ACCESS DENIED (Mike is not in `ProGear-Sales`)
+3. **Inventory domain** → SUCCESS: "Stock available"
+4. **Pricing domain** → ACCESS DENIED (Mike is not in `ProGear-Finance`)
+5. **Sales domain** → ACCESS DENIED
 
 **Expected Result**:
-- 1 granted, 3 denied token exchanges
-- Partial answer: "I can see we have basketballs in stock, but I don't have access to customer or pricing information."
-- Demonstrates governance working
+- One resource decision granted and three denied
+- Partial answer with the information the agent is allowed to retrieve
+- Demonstrates governance working without introducing additional user-facing agents
 
-### Scenario 3: Finance Only (Frank Finance)
+### Scenario 3: One resource domain (Frank Finance)
 
 **Login as**: Your frank.finance user
 
 **Question**: "What's our profit margin on professional basketballs?"
 
 **What Happens**:
-1. Orchestrator routes to Pricing Agent only
-2. **Pricing Agent** → SUCCESS: Shows cost, wholesale, retail, margin %
+1. The agent routes to its Pricing domain component only
+2. **Pricing component** → SUCCESS: Shows cost, wholesale, retail, and margin percentage
 
 **Expected Result**:
-- Single token exchange (Pricing only)
+- Single token exchange for the Pricing resource domain
 - Complete pricing/margin information
 - No unnecessary access to other systems
 
@@ -1069,23 +1069,23 @@ Three key scenarios to demonstrate RBAC and governance:
 Use these talking points when presenting:
 
 ### Opening
-> "Let me show you how Okta AI Agent Governance secures AI access to enterprise data. We have a basketball equipment company with 4 AI agents - Sales, Inventory, Customer, and Pricing - each with different access to company resources."
+> "Let me show you how Okta AI Agent Governance secures AI access to enterprise data. ProGear has one governed Sales Agent that works across four protected resource domains: Sales, Inventory, Customer, and Pricing."
 
-### Demo 1: Full Access (Sarah)
-> "Sarah is a sales rep. Watch what happens when she asks about fulfilling an order..."
-> [Show 4 agents working, 4 token exchanges, full answer]
-> "Notice each agent got only the scopes it needed. The audit trail shows exactly who accessed what."
+### Demo 1: Access across all domains (Sarah)
+> "Sarah is a sales rep. Watch what happens when she asks the ProGear Sales Agent about fulfilling an order..."
+> [Show the four internal domain steps, scoped resource token exchanges, and the combined answer]
+> "Notice that the same agent obtained only the scopes needed for Sarah's request in each resource domain. The audit trail shows who accessed what."
 
-### Demo 2: Limited Access (Mike)
-> "Now let's see what happens when Mike, a warehouse manager, asks the same question..."
-> [Show 3 access denied, 1 success]
-> "Same app, same question, different access. Mike can only see inventory - not customers, not pricing."
+### Demo 2: Limited resource access (Mike)
+> "Now let's see what happens when Mike, a warehouse manager, asks the same agent the same question..."
+> [Show three resource decisions denied and Inventory allowed]
+> "Same agent, same question, different user permissions. Mike can see inventory, but not customer or pricing data."
 
 ### Demo 3: Governance in Action
-> "Notice in the Okta System Log - every token exchange is recorded. We see the AI Agent actor, the user it's acting for, the scopes requested, and whether access was granted or denied."
+> "Notice in the Okta System Log that every token exchange is recorded. We see the ProGear Sales Agent actor, the user it's acting for, the scopes requested, and whether access was granted or denied."
 
 ### Closing
-> "With Okta AI Agent Governance, you know exactly which AI agents are accessing your data, for which users, with what permissions. Full visibility, full control."
+> "With Okta AI Agent Governance, you know which governed agent is accessing each resource, for which user, and with which permissions. Full visibility, full control."
 
 ---
 
@@ -1221,11 +1221,12 @@ Use this checklist to verify your deployment is complete:
 - [ ] Token exchanges visible in security panel
 
 ### Demo Verification
-- [ ] Sarah can access all 4 agents
-- [ ] Mike can only access Inventory agent
-- [ ] Frank can only access Pricing agent
-- [ ] Access denied scenarios show clearly in UI
-- [ ] Okta System Log shows token exchange events
+- [ ] The same ProGear Sales Agent is shown for Sarah, Mike, and Frank
+- [ ] Sarah's request can obtain the required scopes across all four resource domains
+- [ ] Mike's request can obtain Inventory scopes only
+- [ ] Frank's request can obtain Pricing scopes only
+- [ ] Access denied scenarios show clear user-facing guidance
+- [ ] Okta System Log shows the single agent identity, user, resource, scope, and outcome for token exchange events
 
 ---
 

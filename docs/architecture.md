@@ -28,8 +28,8 @@ For deployment instructions, see [implementation-guide.md](./implementation-guid
 │  router → exchange_tokens → fga_check → approval_gate →             │
 │           process_agents → generate_response                       │
 │                                                                       │
-│    Sales Agent   Inventory Agent   Customer Agent   Pricing Agent   │
-│    (each: raw Anthropic SDK call, no LangChain LLM wrapper)         │
+│   Sales domain  Inventory domain  Customer domain  Pricing domain  │
+│   (internal components; each uses the raw Anthropic SDK)           │
 └───────────┬───────────────────────┬──────────────────────┬──────────┘
             │                       │                      │
             ▼                       ▼                      ▼
@@ -45,17 +45,17 @@ The backend never talks to a database — it reads/writes a JSON file (`backend/
 
 ## 1. Identity: the AI agent has its own Okta identity
 
-The AI is not "the user with extra code around it." It is registered in Okta as a **Workload Principal** — a distinct machine identity (Okta entity IDs for these start with `wlp...`). The same `wlp...` identifier is now the client ID of the OIDC app Okta permanently binds when **direct User access** is enabled. The Vercel web runtime authenticates its authorization-code and refresh-token requests with a dedicated `private_key_jwt` key (`OKTA_OIDC_PRIVATE_KEY`), while the backend uses its workload key for ID-JAG exchanges. Neither path uses a shared client secret. The backend workload key is supplied per agent as a JWK via environment variables (`OKTA_AI_AGENT_[TYPE]_PRIVATE_KEY`, falling back to a shared `OKTA_AI_AGENT_PRIVATE_KEY`) and consumed in `backend/auth/multi_agent_auth.py` and `backend/auth/agent_config.py`.
+The AI is not "the user with extra code around it." It is registered in Okta as a **Workload Principal**, a distinct machine identity whose entity ID starts with `wlp...`. The same `wlp...` identifier is the client ID of the OIDC app Okta permanently binds when **direct User access** is enabled. The Vercel web runtime authenticates its authorization-code and refresh-token requests with a dedicated `private_key_jwt` key (`OKTA_OIDC_PRIVATE_KEY`), while the backend uses its workload key for ID-JAG exchanges. Neither path uses a shared client secret. The production deployment uses one shared `OKTA_AI_AGENT_ID` / `OKTA_AI_AGENT_PRIVATE_KEY` identity across its internal domain configurations; the per-domain environment variables are optional code-level overrides, not four required Okta AI Agent registrations.
 
-Because the agent's identity is separate from the human user's identity, every access decision downstream can be phrased as "is Agent X, acting on behalf of User Y, allowed to do Z" — which is exactly the shape Okta's AI Agent Governance and the audit trail (Okta System Log) are built around.
+Because the agent's identity is separate from the human user's identity, every access decision downstream can be phrased as "is the ProGear Sales Agent, acting on behalf of User Y, allowed to do Z?" This is the shape Okta's AI Agent Governance and the audit trail in the Okta System Log are built around.
 
-There are actually **4 separate agent identities/configurations** in this demo — one per business domain — described below.
+The application has four internal business-domain components and four Custom Authorization Server boundaries, but Okta governs one ProGear Sales Agent identity.
 
 ---
 
 ## 2. Token exchange: two-step ID-JAG
 
-The core mechanism is the **Identity Assertion JWT Authorization Grant (ID-JAG)**, implemented in `backend/auth/multi_agent_auth.py`. It's a two-step exchange, and both steps happen on every chat request, per agent needed for that request:
+The core mechanism is the **Identity Assertion JWT Authorization Grant (ID-JAG)**, implemented in `backend/auth/multi_agent_auth.py`. It is a two-step exchange, and both steps run for each resource domain required by the request:
 
 **Step 1 — ID token → ID-JAG (at the Org Authorization Server)**
 The user's Okta ID token (from their NextAuth login) is exchanged for an ID-JAG assertion. This assertion names *both* the user and the agent — "Agent X is acting on behalf of User Y." This happens at Okta's Org AS (configured via `OKTA_MAIN_AUTH_SERVER_ID`), using the agent's RSA keypair, not the user's credentials.
@@ -65,9 +65,9 @@ The ID-JAG assertion is then exchanged for an actual access token at the Custom 
 
 **No down-scoping.** If any one of the requested scopes isn't grantable to this user under this agent's policy, Okta doesn't silently drop that scope and grant the rest — the *entire* exchange fails with `access_denied`. `multi_agent_auth.py` treats `no_matching_policy`, `access_denied`, and Okta's generic "Policy evaluation failed" 401 as the same outcome and returns a clean `access_denied` result rather than a partial grant or a raw error.
 
-### The 4 domain agents and their Custom Authorization Servers
+### The four resource domains and their Custom Authorization Servers
 
-Each domain has its own agent configuration, its own Custom Authorization Server, and its own scope set, all defined in `backend/auth/agent_config.py`:
+Each internal domain configuration selects its own Custom Authorization Server and scope set, all defined in `backend/auth/agent_config.py`. In the production deployment, these configurations use the same ProGear Sales Agent workload identity:
 
 | Domain | Scopes | Authorization server environment variable |
 |---|---|---|
@@ -76,7 +76,7 @@ Each domain has its own agent configuration, its own Custom Authorization Server
 | Customer | `customer:read`, `customer:lookup`, `customer:history` | `OKTA_CUSTOMER_AUTH_SERVER_ID` |
 | Pricing | `pricing:read`, `pricing:margin`, `pricing:discount` | `OKTA_PRICING_AUTH_SERVER_ID` |
 
-Each also has its own agent ID / private key env vars (`OKTA_AI_AGENT_[TYPE]_ID`, `OKTA_AI_AGENT_[TYPE]_PRIVATE_KEY`), with a shared fallback (`OKTA_AI_AGENT_ID`, `OKTA_AI_AGENT_PRIVATE_KEY`) if a per-domain agent isn't separately provisioned.
+The code supports optional per-domain agent ID / private key overrides (`OKTA_AI_AGENT_[TYPE]_ID`, `OKTA_AI_AGENT_[TYPE]_PRIVATE_KEY`) for other deployment patterns. When those variables are absent, every domain uses the shared `OKTA_AI_AGENT_ID` and `OKTA_AI_AGENT_PRIVATE_KEY`, which is the one-agent production model used here.
 
 If the Okta AI SDK or the agent credentials aren't configured, `multi_agent_auth.py` falls back to a demo mode that fabricates a plausible-looking token result — useful for running the UI without a live Okta org, but worth knowing it exists so you don't mistake demo-mode output for a real exchange.
 
@@ -90,14 +90,14 @@ If the Okta AI SDK or the agent credentials aren't configured, `multi_agent_auth
 router → exchange_tokens → fga_check → approval_gate → process_agents → generate_response
 ```
 
-- **router** — an LLM call (Claude, via the raw Anthropic SDK) decides which of the 4 domain agents are relevant to the user's message and, critically, which *specific scope* is needed (e.g., a "what's our basketball stock?" question needs `inventory:read`; "add 500 basketballs" needs `inventory:write`). If the LLM call or its JSON parsing fails, a keyword-matching fallback (`AGENT_KEYWORDS` / `SCOPE_DEFINITIONS`) picks agents and scopes instead.
-- **exchange_tokens** — runs the two-step ID-JAG exchange described above for every agent the router selected, using the *specific* scopes it determined (not a blanket "all scopes for this agent" request).
-- **fga_check** — the Auth0 FGA layer, described in detail below. Runs *after* token exchange specifically because the Inventory Custom Authorization Server's access token carries the `Manager`/`Vacation`/`Clearance` claims that FGA needs, and the Org AS (used in Step 1) doesn't support custom claims.
+- **router**: an LLM call (Claude, via the raw Anthropic SDK) decides which internal domain components are relevant to the user's message and, critically, which *specific scope* is needed. For example, "what's our basketball stock?" needs `inventory:read`, while "add 500 basketballs" needs `inventory:write`. If the LLM call or its JSON parsing fails, a keyword-matching fallback (`AGENT_KEYWORDS` / `SCOPE_DEFINITIONS`) selects the domain and scope instead.
+- **exchange_tokens**: runs the two-step ID-JAG exchange described above for every resource domain the router selected, using the *specific* scopes it determined rather than requesting every available scope.
+- **fga_check**: the Auth0 FGA layer, described in detail below. It runs *after* token exchange because the Inventory Custom Authorization Server's access token carries the `Manager`/`Vacation`/`Clearance` claims that FGA needs, and the Org AS used in Step 1 doesn't support these custom claims.
 - **approval_gate** — the OIG human-in-the-loop check, described below.
-- **process_agents** — actually invokes the domain agent(s) that survived both authorization layers.
-- **generate_response** — synthesizes a final answer, explicitly distinguishing "access denied" (policy said no) from "system error" (Okta/infra failure) from "no response" (nothing was needed/available) so the UI and the user never conflate a security decision with a bug.
+- **process_agents**: invokes the internal domain components that survived both authorization layers.
+- **generate_response**: synthesizes a final answer, explicitly distinguishing "access denied" (policy said no) from "system error" (Okta/infra failure) from "no response" (nothing was needed/available), so the UI and the user never conflate a security decision with a bug.
 
-Each domain agent (`backend/agents/sales_agent.py`, `inventory_agent.py`, `customer_agent.py`, `pricing_agent.py`) subclasses `BaseAgent` (`backend/agents/base_agent.py`), which calls the **raw Anthropic SDK directly** (`anthropic.Anthropic(...).messages.create(...)`) — not LangChain's LLM wrapper. The code comment in `base_agent.py` is explicit about this: "Uses raw Anthropic SDK (not LangChain wrappers) per project preference." `langchain` is present in `requirements.txt` only because `langgraph` needs it as a transitive dependency, not because agents use it to talk to the model.
+The internal domain classes (`backend/agents/sales_agent.py`, `inventory_agent.py`, `customer_agent.py`, `pricing_agent.py`) subclass `BaseAgent` (`backend/agents/base_agent.py`). These are orchestration components behind the one governed ProGear Sales Agent, not four separate user-facing or Okta-registered agent identities. Each component calls the **raw Anthropic SDK directly** (`anthropic.Anthropic(...).messages.create(...)`), not LangChain's LLM wrapper. `langchain` is present in `requirements.txt` only because `langgraph` needs it as a transitive dependency.
 
 The model name comes from `LLM_MODEL_NAME` (default `claude-sonnet-4-6`); the key from `ANTHROPIC_API_KEY`.
 
@@ -202,7 +202,7 @@ Execution is idempotent: a JSON ledger file (`backend/data/approvals_ledger.json
 
 ## 7. Known, honest limitation: the MCP server isn't in the live path yet
 
-`packages/progear-sales-mcp-server` is a real, separately-deployed Express server that validates JWTs against Okta's JWKS endpoint. It exists and works as a standalone component. **However, the domain agents in this backend do not call it.** `_invoke_agent()` in the orchestrator instantiates the agent classes directly and they read/write `demo_store` in-process. There is no network round-trip to the MCP server today. Describing every agent action as "a real MCP tool call" would be inaccurate — it's an in-process function call gated by the same Okta/FGA/OIG checks described above, with a real, working, JWT-validating MCP server sitting nearby as a component that isn't yet wired into this request path.
+`packages/progear-sales-mcp-server` is a real, separately deployed Express server that validates JWTs against Okta's JWKS endpoint. It exists and works as a standalone component. **However, the internal domain components in this backend do not call it.** `_invoke_agent()` in the orchestrator instantiates the domain classes directly, and they read/write `demo_store` in-process. There is no network round-trip to the MCP server today. Describing every domain action as "a real MCP tool call" would be inaccurate. It is an in-process function call gated by the same Okta/FGA/OIG checks described above, with a real, working, JWT-validating MCP server that is not yet wired into this request path.
 
 ---
 

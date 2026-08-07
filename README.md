@@ -32,7 +32,7 @@ Pages in the running app:
 An AI sales agent needs to read and write real business data (inventory, pricing, customer records) on a user's behalf. This demo answers the questions that matter for enterprise AI agent security:
 
 - **WHO** requested this access, and **WHAT** agent acted on their behalf?
-- **WHICH** scopes were actually granted, per agent, per user?
+- **WHICH** scopes were actually granted, per resource domain, per user?
 - **CAN** a second, contextual check (relationship, clearance, vacation status) still block an otherwise-authorized action?
 - **WHEN** does a human need to approve before an action executes?
 - **CAN** access be revoked instantly?
@@ -43,16 +43,16 @@ An AI sales agent needs to read and write real business data (inventory, pricing
 | Token exchange | ID-JAG (Identity Assertion JWT Authorization Grant) | Two-step exchange: ID token → ID-JAG assertion (Org Authorization Server) → scoped access token (per-domain Custom Authorization Server). RSA keypair auth, no shared secret. No down-scoping — an ungrantable scope fails the whole exchange. |
 | Fine-grained authorization | Auth0 FGA | Second layer for inventory actions — relationship checks (active manager), clearance-level checks, and a live vacation-flag check, on top of Okta's coarse-grained RBAC |
 | Human-in-the-loop | Okta Identity Governance (OIG) | Large inventory writes (≥500 units by default) route to an approval workflow instead of executing immediately |
-| Orchestration | LangGraph | Routes each user query to the right domain agent(s) and coordinates multi-agent responses |
-| LLM calls | Anthropic Claude, via the raw Anthropic SDK | Each domain agent calls Claude directly (not through LangChain's LLM wrapper) for routing/response generation |
+| Orchestration | LangGraph | Routes each user query to the right internal domain component and coordinates the response |
+| LLM calls | Anthropic Claude, via the raw Anthropic SDK | Internal domain components call Claude directly (not through LangChain's LLM wrapper) for routing and response generation |
 
-For the full technical walkthrough — sequence diagrams, token shapes, FGA model, approval flow — see **[docs/architecture.md](docs/architecture.md)**.
+For the full technical walkthrough, including sequence diagrams, token shapes, the FGA model, and the approval flow, see **[docs/architecture.md](docs/architecture.md)**.
 
-## The 4 Domain Agents
+## One governed agent, four resource domains
 
-Each agent has its own Okta Custom Authorization Server and its own scopes — a user's group membership determines which agents (and which scopes within each agent) they can actually invoke.
+Okta governs one **ProGear Sales Agent** workload identity. The application contains four internal domain components, and each resource domain has its own Custom Authorization Server and scope boundary. A user's group membership determines which scopes the single agent can obtain for that user in each domain.
 
-| Agent | Scopes |
+| Resource domain | Scopes |
 |---|---|
 | Sales | `sales:read`, `sales:quote`, `sales:order` |
 | Inventory | `inventory:read`, `inventory:write` |
@@ -70,13 +70,13 @@ Each agent has its own Okta Custom Authorization Server and its own scopes — a
 | Frontend | Next.js 14 (App Router), TypeScript, Tailwind CSS, NextAuth.js (Okta OIDC), D3.js (architecture visualizations) |
 | Backend | Python, FastAPI (`backend/api/main.py`) |
 | Orchestration | LangGraph (`langgraph>=0.2.0` — a real dependency, not just a label) — `backend/orchestrator/orchestrator.py` |
-| LLM integration | Anthropic Python SDK, called directly per agent (no LangChain LLM wrapper) |
+| LLM integration | Anthropic Python SDK, called directly by internal domain components (no LangChain LLM wrapper) |
 | AuthN/AuthZ | Okta AI Agent Governance (ID-JAG), Auth0 FGA (`openfga-sdk`), Okta Identity Governance |
 | Deployment | Vercel (frontend), Render (backend) |
 
 ### A known, honest limitation
 
-There's a real, working MCP server in this repo (`packages/progear-sales-mcp-server` — a JWT-validating Express server that verifies tokens against Okta's JWKS endpoint), deployed separately. **It is not currently in the live request path.** The backend's domain agents call `demo_store` in-process rather than calling out to that MCP server over HTTP. The MCP server exists and works, but wiring it into the chat flow is future work, not something already happening in production today.
+There's a real, working MCP server in this repo (`packages/progear-sales-mcp-server`), a JWT-validating Express server that verifies tokens against Okta's JWKS endpoint and is deployed separately. **It is not currently in the live request path.** The backend's internal domain components call `demo_store` in-process rather than calling that MCP server over HTTP. The MCP server exists and works, but wiring it into the chat flow is future work, not something already happening in production today.
 
 ## Quickstart
 
@@ -119,9 +119,9 @@ For a full walkthrough — Okta org setup (AI Agent, Custom Authorization Server
 ProGearSalesAI/
 ├── backend/
 │   ├── api/main.py                 # FastAPI app and endpoints
-│   ├── agents/                     # Sales, Inventory, Customer, Pricing agents
+│   ├── agents/                     # Internal Sales, Inventory, Customer, Pricing components
 │   ├── auth/
-│   │   ├── agent_config.py         # Per-agent Okta config (IDs, keys, scopes)
+│   │   ├── agent_config.py         # Per-domain auth server, scope, and optional identity overrides
 │   │   ├── multi_agent_auth.py     # ID-JAG token exchange
 │   │   └── fga_client.py           # Auth0 FGA checks (relationship, clearance, vacation)
 │   ├── orchestrator/
