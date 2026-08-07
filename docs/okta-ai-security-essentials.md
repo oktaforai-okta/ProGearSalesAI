@@ -144,7 +144,7 @@ When your compliance team, security officer, or board asks about AI security, yo
 
 **Example from the demo:**
 - Sarah Sales asks: "What's our revenue this quarter?"
-- The log shows: `User: sarah.sales@progear-demo.com requested sales:read access`
+- The log shows: `User: sarah.sales@atko.email requested sales:read access`
 - You know exactly who made the request
 
 ### Question 2: WHAT AI system performed the action?
@@ -580,7 +580,7 @@ Every interaction is logged with full context. Here's what a real log entry look
 What happened:     AI agent requested access and was approved
 When:              December 15, 2024 at 2:23:47 PM
 AI Agent:          ProGear Sales Agent (wlpuoor63yK6LYFEh1d7)
-Acting for:        Sarah Sales (sarah.sales@progear-demo.com)
+Acting for:        Sarah Sales (sarah.sales@atko.email)
 Accessed:          Inventory API
 Permission:        inventory:read
 Result:            GRANTED
@@ -591,7 +591,7 @@ Result:            GRANTED
 What happened:     AI agent requested access and was denied
 When:              December 15, 2024 at 2:30:12 PM
 AI Agent:          ProGear Sales Agent (wlpuoor63yK6LYFEh1d7)
-Acting for:        Mike Manager (mike.manager@progear-demo.com)
+Acting for:        Mike Manager (mike.manager@atko.email)
 Attempted:         Pricing API
 Permission:        pricing:read
 Result:            DENIED

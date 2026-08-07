@@ -206,7 +206,7 @@ The two-step design keeps those concerns cleanly separated: **identity proof** (
 
 ```json
 {
-  "sub": "sarah.sales@progear-demo.com",
+  "sub": "sarah.sales@atko.email",
   "act": {
     "sub": "wlpuoor63yK6LYFEh1d7"
   },
@@ -232,7 +232,7 @@ The two-step design keeps those concerns cleanly separated: **identity proof** (
       "id": "00u8x5nsjp8aDUpB70g7",
       "type": "User",
       "displayName": "Sarah Sales",
-      "alternateId": "sarah.sales@progear-demo.com"
+      "alternateId": "sarah.sales@atko.email"
     },
     {
       "type": "AuthorizationServer",
@@ -579,7 +579,7 @@ When Sarah Sales asks the AI agent to check inventory:
       "id": "00u8x5nsjp8aDUpB70g7",
       "type": "User",
       "displayName": "Sarah Sales",
-      "alternateId": "sarah.sales@progear-demo.com"
+      "alternateId": "sarah.sales@atko.email"
     },
     {
       "id": "ausuoodihgxiDhdJH1d7",
@@ -629,7 +629,7 @@ When Mike Manager (warehouse team) tries to access customer data:
       "id": "00u8x5abc123def456",
       "type": "User",
       "displayName": "Mike Manager",
-      "alternateId": "mike.manager@progear-demo.com"
+      "alternateId": "mike.manager@atko.email"
     },
     {
       "id": "ausuop8bitEQYw3mc1d7",
