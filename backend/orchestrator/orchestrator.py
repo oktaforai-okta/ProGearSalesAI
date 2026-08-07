@@ -1009,7 +1009,7 @@ Return ONLY the JSON object, no other text."""
         """
         Generate a unified response combining all agent outputs.
 
-        Clearly indicates which agents contributed and which were denied.
+        Returns user-facing permission guidance without exposing internal agent names.
         """
         # Short-circuit when the approval gate queued an OIG request.
         if state.get("pending_approval") is not None:
@@ -1039,23 +1039,37 @@ Return ONLY the JSON object, no other text."""
 
         agent_results = state["agent_results"]
 
-        # Collect successful responses, denied agents, and agents that hit a real
-        # system error (token exchange failed for reasons other than a policy
-        # denial). These three cases must stay distinguishable in the final
+        # Collect successful responses, authorization denials, and system errors.
+        # These cases must stay distinguishable in the final
         # response - collapsing "system error" into the generic fallback is what
         # made real backend/Okta failures look like the AI misunderstanding the
         # prompt.
         responses = []
-        denied_agents = []
+        denied_requests = []
         system_error_agents = []
 
         for agent_type, result in agent_results.items():
             if result["success"] and "response" in result:
                 responses.append(result["response"])
             elif result.get("access_denied"):
-                denied_agents.append(result["agent_info"]["name"])
+                denied_requests.append({
+                    "agent_type": agent_type,
+                    "requested_scopes": result.get("requested_scopes", []),
+                })
             elif not result["success"]:
                 system_error_agents.append((result["agent_info"]["name"], result.get("error", "Unknown error")))
+
+        inventory_write_denied = any(
+            denial["agent_type"] == AGENT_INVENTORY
+            and "inventory:write" in denial["requested_scopes"]
+            for denial in denied_requests
+        )
+        permission_message = (
+            "I can’t increase inventory with your current permissions. "
+            "Please contact your manager for assistance or approval."
+            if inventory_write_denied
+            else "I can’t complete that request with your current permissions. Please contact your manager for assistance."
+        )
 
         # Generate combined response
         if responses:
@@ -1067,10 +1081,10 @@ to the user's question: "{state['user_message']}"
 Agent responses:
 {combined_data}
 
-{"Note: The user was denied access to these agents: " + ", ".join(denied_agents) if denied_agents else ""}
+{"Note: A requested action was blocked by the user's current permissions." if denied_requests else ""}
 
-Provide a concise, helpful response that combines the relevant information.
-If some agents were denied, acknowledge what information is missing but focus on what IS available."""
+Provide a concise, helpful response that combines the available information. Do not mention
+internal agents, MCP servers, policy names, or permission errors; permission guidance is added separately."""
 
             try:
                 # Use raw Anthropic SDK for response synthesis
@@ -1084,6 +1098,9 @@ If some agents were denied, acknowledge what information is missing but focus on
             except Exception as e:
                 logger.error(f"Response synthesis failed: {e}")
                 final_response = combined_data
+
+            if denied_requests:
+                final_response += f"\n\n{permission_message}"
 
         elif system_error_agents:
             # Real infrastructure/Okta failure - the router understood the request
@@ -1099,14 +1116,10 @@ If some agents were denied, acknowledge what information is missing but focus on
                 f"not a misunderstanding of your request. Please try again in a moment.\n\n"
                 f"Details: {details}"
             )
-            if denied_agents:
-                final_response += f"\n\nAlso denied (as expected by policy): {', '.join(denied_agents)}"
-        elif denied_agents:
-            final_response = (
-                f"I apologize, but you don't have access to the agents needed for this request.\n\n"
-                f"Access denied for: {', '.join(denied_agents)}\n\n"
-                f"Please contact your administrator if you need access to this information."
-            )
+            if denied_requests:
+                final_response += f"\n\n{permission_message}"
+        elif denied_requests:
+            final_response = permission_message
         else:
             final_response = (
                 "I'm not sure how to help with that request. "
@@ -1114,10 +1127,6 @@ If some agents were denied, acknowledge what information is missing but focus on
             )
 
         state["final_response"] = final_response
-
-        # Add denied agents info if any
-        if denied_agents:
-            state["final_response"] += f"\n\n[Note: Limited access - denied agents: {', '.join(denied_agents)}]"
 
         state["agent_flow"].append({
             "step": "generate_response",
