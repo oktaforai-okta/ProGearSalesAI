@@ -25,12 +25,12 @@ class InventoryAgent(BaseAgent):
     - Check stock levels (inventory:read)
     - List products (inventory:read)
     - Add/update inventory (inventory:write) - FGA protected
-    - Manage inventory alerts (inventory:alert)
+    - View inventory alerts (inventory:read)
 
     Security:
     - Registered as Okta AI Agent
     - Uses ID-JAG token exchange for MCP access
-    - Scopes: inventory:read, inventory:write, inventory:alert
+    - Scopes: inventory:read, inventory:write
     - FGA check for write operations (vacation check via contextual tuples)
     """
 
@@ -38,7 +38,7 @@ class InventoryAgent(BaseAgent):
         super().__init__(
             agent_name="Inventory Agent",
             agent_type="inventory",
-            scopes=["inventory:read", "inventory:write", "inventory:alert"],
+            scopes=["inventory:read", "inventory:write"],
             user_token=user_token,
             color="#10b981",  # Green
         )
@@ -58,7 +58,7 @@ You work for ProGear, a sporting goods company. Provide accurate inventory infor
 IMPORTANT SECURITY CONTEXT:
 You are operating with Okta AI Agent governance:
 - Your identity is registered in Okta's AI Agent Directory
-- Your access is controlled by scopes: inventory:read, inventory:write, inventory:alert
+- Your access is controlled by scopes: inventory:read, inventory:write
 - WRITE operations are additionally protected by Auth0 FGA (Fine-Grained Authorization)
 - FGA checks if the user is on vacation - managers on vacation cannot modify inventory
 - All your actions are audited through Okta

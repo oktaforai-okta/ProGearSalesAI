@@ -6,8 +6,7 @@ export async function GET() {
     // Raw environment variable checks
     hasClientId: !!process.env.NEXT_PUBLIC_OKTA_CLIENT_ID,
     clientIdLength: process.env.NEXT_PUBLIC_OKTA_CLIENT_ID?.length || 0,
-    hasClientSecret: !!process.env.OKTA_CLIENT_SECRET,
-    clientSecretLength: process.env.OKTA_CLIENT_SECRET?.length || 0,
+    hasOidcPrivateKey: !!process.env.OKTA_OIDC_PRIVATE_KEY,
     hasIssuer: !!process.env.NEXT_PUBLIC_OKTA_ISSUER,
     hasNextAuthSecret: !!process.env.NEXTAUTH_SECRET,
     hasApiUrl: !!process.env.NEXT_PUBLIC_API_URL,

@@ -45,7 +45,7 @@ The backend never talks to a database — it reads/writes a JSON file (`backend/
 
 ## 1. Identity: the AI agent has its own Okta identity
 
-The AI is not "the user with extra code around it." It is registered in Okta as a **Workload Principal** — a distinct machine identity (Okta entity IDs for these start with `wlp...`). The Workload Principal authenticates with an **RSA keypair (JWT Bearer)**, never a shared client secret. In this repo that keypair is supplied per agent as a JWK via environment variables (`OKTA_AI_AGENT_[TYPE]_PRIVATE_KEY`, falling back to a shared `OKTA_AI_AGENT_PRIVATE_KEY`) and consumed in `backend/auth/multi_agent_auth.py` and `backend/auth/agent_config.py`.
+The AI is not "the user with extra code around it." It is registered in Okta as a **Workload Principal** — a distinct machine identity (Okta entity IDs for these start with `wlp...`). The same `wlp...` identifier is now the client ID of the OIDC app Okta permanently binds when **direct User access** is enabled. The Vercel web runtime authenticates its authorization-code and refresh-token requests with a dedicated `private_key_jwt` key (`OKTA_OIDC_PRIVATE_KEY`), while the backend uses its workload key for ID-JAG exchanges. Neither path uses a shared client secret. The backend workload key is supplied per agent as a JWK via environment variables (`OKTA_AI_AGENT_[TYPE]_PRIVATE_KEY`, falling back to a shared `OKTA_AI_AGENT_PRIVATE_KEY`) and consumed in `backend/auth/multi_agent_auth.py` and `backend/auth/agent_config.py`.
 
 Because the agent's identity is separate from the human user's identity, every access decision downstream can be phrased as "is Agent X, acting on behalf of User Y, allowed to do Z" — which is exactly the shape Okta's AI Agent Governance and the audit trail (Okta System Log) are built around.
 
@@ -69,10 +69,10 @@ The ID-JAG assertion is then exchanged for an actual access token at the Custom 
 
 Each domain has its own agent configuration, its own Custom Authorization Server, and its own scope set, all defined in `backend/auth/agent_config.py`:
 
-| Domain | Scopes | Auth server env var (falls back to `OKTA_MCP_AUTH_SERVER_ID`) |
+| Domain | Scopes | Authorization server environment variable |
 |---|---|---|
 | Sales | `sales:read`, `sales:quote`, `sales:order` | `OKTA_SALES_AUTH_SERVER_ID` |
-| Inventory | `inventory:read`, `inventory:write`, `inventory:alert` | `OKTA_INVENTORY_AUTH_SERVER_ID` |
+| Inventory | `inventory:read`, `inventory:write` | `OKTA_INVENTORY_AUTH_SERVER_ID` |
 | Customer | `customer:read`, `customer:lookup`, `customer:history` | `OKTA_CUSTOMER_AUTH_SERVER_ID` |
 | Pricing | `pricing:read`, `pricing:margin`, `pricing:discount` | `OKTA_PRICING_AUTH_SERVER_ID` |
 
@@ -150,7 +150,6 @@ Two things worth calling out about this model:
 |---|---|---|
 | `inventory:read` | `can_view` on the relevant `inventory_item` | active manager OR active viewer (i.e., not on vacation) |
 | `inventory:write` | `can_update` on the relevant `inventory_item` | active manager AND sufficient clearance for that item |
-| `inventory:alert` | *(none)* | passes straight through — alert operations aren't FGA-gated |
 
 Sales, Customer, and Pricing agents have no FGA model today and always pass through — FGA currently only gates Inventory.
 

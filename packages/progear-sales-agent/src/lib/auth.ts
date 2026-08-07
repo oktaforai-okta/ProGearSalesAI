@@ -1,6 +1,11 @@
 import type { NextAuthOptions } from 'next-auth';
 import type { JWT } from 'next-auth/jwt';
 import OktaProvider from 'next-auth/providers/okta';
+import {
+  getOktaTokenEndpoint,
+  getPrivateJwks,
+  getPrivateKeyJwtParameters,
+} from '@/lib/okta-client-auth';
 
 // The Okta AI SDK's Step 1 (ID token -> ID-JAG at the Org AS) needs a live,
 // unexpired ID token. Okta ID tokens are typically short-lived (~1hr), and
@@ -16,15 +21,15 @@ import OktaProvider from 'next-auth/providers/okta';
 // `authorization.params.scope` below and the deployment note in the repo.
 async function refreshOktaToken(token: JWT): Promise<JWT> {
   try {
-    const issuer = process.env.NEXT_PUBLIC_OKTA_ISSUER!;
-    const response = await fetch(`${issuer}/oauth2/v1/token`, {
+    const tokenEndpoint = getOktaTokenEndpoint();
+    const clientAuthentication = await getPrivateKeyJwtParameters(tokenEndpoint);
+    const response = await fetch(tokenEndpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
         grant_type: 'refresh_token',
-        client_id: process.env.NEXT_PUBLIC_OKTA_CLIENT_ID!,
-        client_secret: process.env.OKTA_CLIENT_SECRET || '',
         refresh_token: token.refreshToken || '',
+        ...clientAuthentication,
       }),
     });
 
@@ -53,8 +58,30 @@ export const authOptions: NextAuthOptions = {
   providers: [
     OktaProvider({
       clientId: process.env.NEXT_PUBLIC_OKTA_CLIENT_ID!,
-      clientSecret: process.env.OKTA_CLIENT_SECRET || 'placeholder-for-pkce',
+      // NextAuth v4 requires this property in its provider type, but
+      // private_key_jwt authentication never sends or uses this value.
+      clientSecret: 'unused-private-key-jwt',
       issuer: process.env.NEXT_PUBLIC_OKTA_ISSUER!,
+      client: {
+        token_endpoint_auth_method: 'private_key_jwt',
+        token_endpoint_auth_signing_alg: 'RS256',
+      },
+      jwks: getPrivateJwks(),
+      token: {
+        async request({ client, params, checks, provider }) {
+          const tokens = await client.callback(
+            provider.callbackUrl,
+            params,
+            checks,
+            {
+              clientAssertionPayload: {
+                aud: getOktaTokenEndpoint(),
+              },
+            }
+          );
+          return { tokens };
+        },
+      },
       authorization: { params: { scope: 'openid profile email offline_access' } },
     }),
   ],

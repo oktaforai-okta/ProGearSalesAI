@@ -61,7 +61,7 @@ Before diving in, understand the order of operations. There's a circular depende
 │                                                                         │
 │  PHASE 1: Initial Okta Setup                                            │
 │  ┌───────────────────────────────────────────────────────────────────┐  │
-│  │ • Create OIDC App (use placeholder redirect URIs for now)        │  │
+│  │ • Register AI Agent and enable direct User access                  │  │
 │  │ • Create Demo Users and Groups                                    │  │
 │  │ • Register AI Agent and download private key                      │  │
 │  │ • Create 4 Authorization Servers with policies                    │  │
@@ -381,55 +381,24 @@ Your Okta org must have:
 
 This is the most critical section. Follow each step carefully using your own Okta organization.
 
-### Step 1: Create the OIDC Application
+### Step 1: Register the AI Agent and Enable Direct User Access
 
-This application handles user login and is linked to your AI Agent.
+1. In the Admin Console, go to **Directory → AI Agents** and register **ProGear Sales Agent**.
+2. Configure **Client registration** with a public/private key method and securely retain the private key for the backend workload identity.
+3. On **User access**, click **Allow user access** and select **Create a new OIDC app**. Existing OIDC app selection isn't supported for this workflow. Okta creates and permanently binds the sign-on app to the agent.
+4. Assign the ProGear access groups to the newly created app.
+5. Configure the app with your callback URL, for example:
 
-1. Log into **Okta Admin Console** at `https://your-org-admin.okta.com`
-2. Navigate to **Applications** → **Applications**
-3. Click **Create App Integration**
-4. Select:
-   - Sign-in method: **OIDC - OpenID Connect**
-   - Application type: **Web Application**
-5. Click **Next**
-6. Configure the application:
-
-   **General Settings:**
-   ```
-   App integration name: ProGear Sales Agent App
+   ```text
+   https://your-app.vercel.app/api/auth/callback/okta
    ```
 
-   **Grant Types:**
+6. Enable `authorization_code`, `refresh_token`, token exchange, and JWT bearer grants. Keep client authentication set to **Public key / Private key** (`private_key_jwt`).
+7. Generate a dedicated RSA key pair for the web runtime, add only its public JWK under the app's client credentials, and store the private JWK in the server-only `OKTA_OIDC_PRIVATE_KEY` environment variable. Never use a `NEXT_PUBLIC_` prefix for private key material.
 
-   You'll see checkboxes for grant types. Check these:
-   - [x] **Authorization Code** (usually checked by default)
-   - [x] **Refresh Token** (usually checked by default)
+The direct User access client ID is the AI Agent workload principal ID and starts with `wlp...`. A separate client secret isn't used.
 
-   **Sign-in redirect URIs:**
-   ```
-   https://placeholder.vercel.app/api/auth/callback/okta
-   ```
-   > **Note:** Use any placeholder URL for now. We'll update this with your real Vercel URL in Phase 4.
-
-   **Sign-out redirect URIs:**
-   ```
-   https://placeholder.vercel.app/auth/signin
-   ```
-
-   **Controlled access:**
-   - Select: **Allow everyone in your organization to access**
-   - (This makes testing easier - you can restrict later)
-
-7. Click **Save**
-
-8. **Copy and save these values** (you'll need them for environment variables):
-
-   | Value | Where to Find It | Example Format |
-   |-------|------------------|----------------|
-   | **Client ID** | General tab, top of page | `0oaxxxxxxxxx` |
-   | **Client Secret** | General tab, click "Copy to clipboard" | Long random string |
-
-   Store these securely - you'll need them for both Vercel and Render configuration.
+> **Current Okta behavior:** Existing agents that still use a legacy User sign-on delegation must delete that User access link and recreate User access. The Admin Console can create a new OIDC app for the existing agent. Selecting an existing OIDC app is not supported during this migration unless the AI Agent itself is deleted and registered again.
 
 ### Step 2: Create Demo Users
 
@@ -532,9 +501,9 @@ Create three groups to demonstrate RBAC:
    >
    > **Store this single-line version** - you'll paste it into Render's environment variables.
 
-5. **Link to OIDC Application:**
-   - In the AI Agent settings, find **Linked Applications**
-   - Click **Add** and select the OIDC app created in Step 1
+5. **Configure direct User access:**
+   - On the AI Agent's **User access** tab, click **Allow user access**.
+   - Select **Create a new OIDC app**. Okta permanently binds this app to the AI agent.
 
 6. **Activate** the agent
 7. **Copy the Agent ID** (starts with `wlp...`)
@@ -546,10 +515,10 @@ Create three groups to demonstrate RBAC:
 > | Concept | What it is | Where configured | Who to add |
 > |---------|------------|------------------|------------|
 > | **Owners** | Admins responsible for the agent | AI Agent → Owners tab | Admin users (yourself, your team) |
-> | **User Assignments** | Users the agent acts on behalf of | Linked App → Assignments tab | End users (Sarah, Mike, Frank) |
+> | **User Assignments** | Users the agent acts on behalf of | Direct User access app → Assignments tab | End users (Sarah, Mike, Frank) |
 >
-> The AI Agent entity has NO Assignments tab. Users are assigned to the **linked OIDC app**, and the agent can then act on behalf of any user who:
-> 1. Is assigned to the linked app
+> Users are assigned to the agent-linked **direct User access OIDC app**, and the agent can then act on behalf of any user who:
+> 1. Is assigned to the direct User access app
 > 2. Passes the access policy rules (group membership)
 
 ### Step 5: Create Authorization Servers (4 MCP APIs)
@@ -582,12 +551,12 @@ Create one authorization server per MCP API. Each represents a different domain 
 
    After saving, you'll see an **Issuer URI** that looks like this:
    ```
-   https://your-org.okta.com/oauth2/aus8xdftgwlTMxp3u0g7
+   https://your-org.okta.com/oauth2/ausXXXXXXXXXXXXXX
    ```
 
    The **Authorization Server ID** is the last segment after `/oauth2/`:
    ```
-   aus8xdftgwlTMxp3u0g7  ← This is your Auth Server ID
+   ausXXXXXXXXXXXXXX  ← This is your Auth Server ID
    ```
 
    Copy this ID - you'll need it for:
@@ -609,7 +578,7 @@ Create one authorization server per MCP API. Each represents a different domain 
    ```
    Name: Sales Agent Policy
    Description: Controls access to Sales MCP
-   Assign to: ProGear Sales Agent and ProGear Sales Agent App
+   Assign to: ProGear Sales Agent
    ```
 
 8. **Add Policy Rule:**
@@ -635,13 +604,12 @@ Description: Authorization for Sales Inventory API
 **Scopes:**
 - `inventory:read` - View inventory levels
 - `inventory:write` - Modify inventory
-- `inventory:alert` - Manage inventory alerts
 
 **Access Policy:**
    ```
    Name: Inventory Agent Policy
    Description: Controls access to Inventory MCP
-   Assign to: ProGear Sales Agent and ProGear Sales Agent App
+   Assign to: ProGear Sales Agent
    ```
 
 **Policy Rules (add TWO rules):**
@@ -650,7 +618,7 @@ Description: Authorization for Sales Inventory API
 ```
 IF Grant type is: Authorization Code, Token Exchange, JWT Bearer
 AND User is member of: ProGear-Warehouse
-AND Scopes: inventory:read, inventory:write, inventory:alert
+AND Scopes: inventory:read, inventory:write
 ```
 
 **Rule 2: Sales Read Access** (Priority 2)
@@ -677,7 +645,7 @@ Description: Authorization for Sales Customer API
    ```
    Name: Customer Agent Policy
    Description: Controls access to Customer MCP
-   Assign to: ProGear Sales Agent and ProGear Sales Agent App
+   Assign to: ProGear Sales Agent
    ```
 
 **Policy Rule:**
@@ -705,7 +673,7 @@ Description: Authorization for Sales Pricing API
    ```
    Name: Pricing Agent Policy
    Description: Controls access to Pricing MCP
-   Assign to: ProGear Sales Agent and ProGear Sales Agent App
+   Assign to: ProGear Sales Agent
    ```
 
 **Policy Rules (add TWO rules):**
@@ -732,7 +700,7 @@ For each Authorization Server, you must add the AI Agent to the policy's "Assign
 
 1. Go to **Security** → **API** → **[Your Auth Server]** → **Access Policies** → **[Your Policy]**
 2. Click **Edit** on the policy
-3. In **Assigned clients**, add the following **Clients** (`ProGear Sales Agent` and `ProGear Sales Agent App`)
+3. In **Assigned clients**, add the following **Clients** (`ProGear Sales Agent`)
 
 Repeat for all 4 authorization servers.
 
@@ -746,7 +714,7 @@ Once you have create authorization servers per MCP API, Use managed connections 
      |------|----------|-----------------|
      | `ProGear Customer MCP` | Only allow | customer:history customer:lookup customer:read |
      | `ProGear Pricing MCP` | Only allow | pricing:discount pricing:margin pricing:read |
-     | `ProGear Inventory MCP` | Only allow | inventory:write inventory:alert inventory:read |
+     | `ProGear Inventory MCP` | Only allow | inventory:write inventory:read |
      | `ProGear Sales MCP` | Only allow | sales:order sales:read sales:quote |
 
 ### Step 8: Record All Your IDs
@@ -767,14 +735,14 @@ Use this checklist to track what you've collected:
 │    Your value: ___________________________________________            │
 │                                                                       │
 │  □ OKTA_CLIENT_ID                                                     │
-│    OIDC Application Client ID                                         │
-│    Example: 0oaXXXXXXXXXXXXXX                                         │
-│    Where: Applications → ProGear Sales Agent App → General tab        │
+│    AI Agent direct User access Client ID                              │
+│    Example: wlpXXXXXXXXXXXXXX                                         │
+│    Where: Directory → AI Agents → ProGear Sales Agent → User access   │
 │    Your value: ___________________________________________            │
 │                                                                       │
-│  □ OKTA_CLIENT_SECRET                                                 │
-│    OIDC Application Client Secret                                     │
-│    Where: Applications → ProGear Sales Agent App → General tab        │
+│  □ OKTA_OIDC_PRIVATE_KEY                                              │
+│    Server-only private JWK for private_key_jwt                        │
+│    Where: Generate locally; upload only the public JWK to Okta        │
 │    Your value: ___________________________________________            │
 │                                                                       │
 │  □ OKTA_AI_AGENT_ID                                                   │
@@ -866,11 +834,11 @@ Use this checklist to track what you've collected:
    | `NEXTAUTH_URL` | `https://your-project-name.vercel.app` | Use your actual Vercel URL from dashboard |
    | `NEXTAUTH_SECRET` | (the value you generated above) | Required for session encryption |
    | `NEXT_PUBLIC_API_URL` | Leave empty for now | We'll add this after Render deployment |
-   | `NEXT_PUBLIC_OKTA_CLIENT_ID` | Your OIDC client ID | Starts with `0oa...` |
+   | `NEXT_PUBLIC_OKTA_CLIENT_ID` | Your AI Agent client ID | Starts with `wlp...` |
    | `NEXT_PUBLIC_OKTA_DOMAIN` | `https://your-org.okta.com` | Your Okta org URL |
    | `NEXT_PUBLIC_OKTA_ISSUER` | `https://your-org.okta.com` | Your Okta org URL (NO auth server ID - use Org AS) |
-   | `OKTA_CLIENT_ID` | Your OIDC client ID | Same as NEXT_PUBLIC version |
-   | `OKTA_CLIENT_SECRET` | Your OIDC client secret | From Okta app settings |
+   | `OKTA_CLIENT_ID` | Your AI Agent client ID | Same as NEXT_PUBLIC version |
+   | `OKTA_OIDC_PRIVATE_KEY` | Your server-only private JWK | Generate locally; register only its public JWK in Okta |
 
 5. Click **Save** for each variable, then go to **Deployments** and click **Redeploy** on the latest deployment
 
@@ -878,7 +846,7 @@ Use this checklist to track what you've collected:
 
 Now that you have your real Vercel URL, go back to Okta and replace the placeholder URLs:
 
-1. Go to Okta Admin Console → **Applications** → **ProGear Sales Agent App**
+1. Go to Okta Admin Console → **Applications** → **ProGear Sales Agent direct User access app**
 2. Click the **General** tab → **Edit**
 3. **Replace the placeholder redirect URIs with your actual Vercel URL:**
 
@@ -938,7 +906,7 @@ In Render, go to **Environment** and add these variables:
 |----------|-------|
 | `ANTHROPIC_API_KEY` | Your Anthropic API key |
 | `OKTA_DOMAIN` | `https://your-org.okta.com` |
-| `OKTA_CLIENT_ID` | Your OIDC client ID |
+| `OKTA_CLIENT_ID` | Your AI Agent client ID |
 | `OKTA_AI_AGENT_ID` | Your AI Agent ID (`wlp...`) |
 | `OKTA_AI_AGENT_PRIVATE_KEY` | Your JWK private key (entire JSON on one line) |
 | `OKTA_MAIN_AUTH_SERVER_ID` | (Optional) Used for Step 1. Defaults to `"default"` (Okta's alias for the Org Authorization Server) if unset -- leave it out unless you specifically need Step 1 to hit a non-default server |
@@ -1016,8 +984,8 @@ Expected response:
 |----------|----------|----------|-------------|
 | `ANTHROPIC_API_KEY` | Render | Yes | Anthropic Claude API key |
 | `OKTA_DOMAIN` | Both | Yes | Your Okta org URL |
-| `OKTA_CLIENT_ID` | Both | Yes | OIDC application client ID |
-| `OKTA_CLIENT_SECRET` | Vercel | Yes | OIDC application client secret |
+| `OKTA_CLIENT_ID` | Both | Yes | AI Agent direct User access client ID |
+| `OKTA_OIDC_PRIVATE_KEY` | Vercel | Yes | Server-only private JWK for private_key_jwt |
 | `OKTA_AI_AGENT_ID` | Render | Yes | AI Agent entity ID (`wlp...`) |
 | `OKTA_AI_AGENT_PRIVATE_KEY` | Render | Yes | JWK private key (JSON string) |
 | `OKTA_MAIN_AUTH_SERVER_ID` | Render | No | Defaults to `"default"` (Org AS) for Step 1 -- only set if you need a non-default server |
@@ -1032,7 +1000,7 @@ Expected response:
 | `NEXTAUTH_URL` | Vercel | Yes | Your Vercel URL |
 | `NEXTAUTH_SECRET` | Vercel | Yes | Generate: `openssl rand -base64 32` |
 | `NEXT_PUBLIC_API_URL` | Vercel | Yes | Your Render URL |
-| `NEXT_PUBLIC_OKTA_CLIENT_ID` | Vercel | Yes | OIDC client ID (for frontend) |
+| `NEXT_PUBLIC_OKTA_CLIENT_ID` | Vercel | Yes | AI Agent client ID (for frontend) |
 | `NEXT_PUBLIC_OKTA_DOMAIN` | Vercel | Yes | Your Okta org URL |
 | `NEXT_PUBLIC_OKTA_ISSUER` | Vercel | Yes | `https://your-org.okta.com` (NO auth server ID - use Org AS) |
 | `CORS_ORIGINS` | Render | Yes | Your Vercel URL |
@@ -1131,7 +1099,7 @@ Use these talking points when presenting:
 1. Verify the user is in the correct group
 2. Check the authorization server policy rules include the requested scopes
 3. Ensure Token Exchange grant type is enabled on the OIDC app
-4. Verify the AI Agent is linked to the OIDC app
+4. Verify direct User access is enabled on the AI Agent
 
 ### "Invalid client assertion" error
 
@@ -1171,16 +1139,16 @@ Use these talking points when presenting:
 
 ### `invalid_subject_token` error
 
-**Cause**: ID token from an app not in AI Agent's linked applications
+**Cause**: The user ID token wasn't issued to the AI Agent's direct User access client.
 
 **Solution**:
-1. Go to AI Agent → Linked Applications
-2. Add your OIDC app (the one users log into)
-3. The AI Agent can only exchange tokens from linked apps
+1. Go to the AI Agent's **User access** tab and verify direct User access is configured.
+2. Verify the application uses the agent's `wlp...` client ID and the bound OIDC app's callback URL.
+3. Sign out and sign in again to obtain a new ID token for the direct User access client.
 
 ### `user_not_assigned` error
 
-**Cause**: User not assigned to the OIDC application
+**Cause**: User not assigned to the direct User access app
 
 **Solution**:
 1. Go to your OIDC App → Assignments tab
@@ -1223,14 +1191,14 @@ Use these talking points when presenting:
 Use this checklist to verify your deployment is complete:
 
 ### Okta Configuration
-- [ ] OIDC Application created with Token Exchange grant enabled
+- [ ] Direct User access app created from the AI Agent and Token Exchange enabled
 - [ ] 3 demo users created and can log in
 - [ ] 3 groups created with correct user assignments
 - [ ] AI Agent registered with JWK credentials
-- [ ] AI Agent linked to OIDC application
+- [ ] AI Agent configured for direct User access
 - [ ] 4 authorization servers with scopes configured
-- [ ] **Access policies include AI Agent entity (not just OIDC app)**
-- [ ] All demo users assigned to OIDC app
+- [ ] **Access policies include the ProGear Sales Agent client**
+- [ ] All demo users assigned to the direct User access app
 - [ ] **`NEXT_PUBLIC_OKTA_ISSUER` set to Org AS URL (no auth server ID)**
 
 ### Vercel Deployment
@@ -1266,7 +1234,7 @@ Use this checklist to verify your deployment is complete:
 If you're cloning this repository to deploy your own instance, here's everything you need:
 
 ### 1. Okta Configuration (Create New in Your Org)
-- [ ] OIDC Application → get Client ID & Secret
+- [ ] AI Agent User access → get Client ID and configure a private JWK
 - [ ] AI Agent → get Agent ID & download Private Key
 - [ ] 4 Authorization Servers → get Auth Server IDs
 - [ ] 3 User Groups → configure access policies
@@ -1284,7 +1252,7 @@ If you're cloning this repository to deploy your own instance, here's everything
 - [ ] `CORS_ORIGINS` - Your Vercel URL
 
 ### 4. Okta Redirect URIs
-- [ ] Add your Vercel URL to OIDC app
+- [ ] Add your Vercel callback and logout URLs to the direct User access app
 
 ### That's It!
 The code is designed to work with any Okta org - just update the configuration values.

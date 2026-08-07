@@ -153,12 +153,12 @@ When your compliance team, security officer, or board asks about AI security, yo
 
 | Without Governance | With Okta |
 |-------------------|-----------|
-| "One of our AI systems" | "ProGear Sales Agent (ID: wlp8x5q7mv)" |
+| "One of our AI systems" | "ProGear Sales Agent (ID: wlpuoor63yK6)" |
 | "We have several, not sure which" | "This specific agent, owned by John Admin" |
 | "They all use the same credentials" | "Each agent has its own trackable identity" |
 
 **Example from the demo:**
-- The AI agent has a unique ID: `wlp8x5q7mvH86KvFJ0g7`
+- The AI agent has a unique ID: `wlpuoor63yK6LYFEh1d7`
 - It has a name: "ProGear Sales Agent"
 - It has an owner: The person responsible for it
 - Every action is tied to this specific identity
@@ -516,7 +516,7 @@ In Okta, AI agents aren't just applications with passwords. They're first-class 
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │  Status:        ● Active                                        │
-│  ID:            wlp8x5q7mvH86KvFJ0g7                             │
+│  ID:            wlpuoor63yK6LYFEh1d7                             │
 │  Owner:         john.admin@company.com                          │
 │  Created:       December 1, 2024                                │
 │  Last Active:   2 minutes ago                                   │
@@ -539,7 +539,7 @@ In Okta, AI agents aren't just applications with passwords. They're first-class 
 
 **Key elements:**
 
-1. **Unique ID**: Every AI agent has an identifier that never changes. The ID starts with "wlp" which stands for **Workload Principal** - Okta's term for a non-human identity like an AI agent. Just as employees have user IDs, AI agents have workload principal IDs. If you see `wlp8x5q7mvH86KvFJ0g7` in a log, you know exactly which agent it was.
+1. **Unique ID**: Every AI agent has an identifier that never changes. The ID starts with "wlp" which stands for **Workload Principal** - Okta's term for a non-human identity like an AI agent. Just as employees have user IDs, AI agents have workload principal IDs. If you see `wlpuoor63yK6LYFEh1d7` in a log, you know exactly which agent it was.
 
 2. **Mandatory Owner**: Someone must be responsible. When John leaves the company, the ownership transfer is part of offboarding.
 
@@ -579,7 +579,7 @@ Every interaction is logged with full context. Here's what a real log entry look
 ```
 What happened:     AI agent requested access and was approved
 When:              December 15, 2024 at 2:23:47 PM
-AI Agent:          ProGear Sales Agent (wlp8x5q7mvH86KvFJ0g7)
+AI Agent:          ProGear Sales Agent (wlpuoor63yK6LYFEh1d7)
 Acting for:        Sarah Sales (sarah.sales@progear-demo.com)
 Accessed:          Inventory API
 Permission:        inventory:read
@@ -590,7 +590,7 @@ Result:            GRANTED
 ```
 What happened:     AI agent requested access and was denied
 When:              December 15, 2024 at 2:30:12 PM
-AI Agent:          ProGear Sales Agent (wlp8x5q7mvH86KvFJ0g7)
+AI Agent:          ProGear Sales Agent (wlpuoor63yK6LYFEh1d7)
 Acting for:        Mike Manager (mike.manager@progear-demo.com)
 Attempted:         Pricing API
 Permission:        pricing:read
