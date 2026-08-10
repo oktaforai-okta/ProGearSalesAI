@@ -10,8 +10,8 @@ Scoped deliberately tight:
 - Only the caller's own Okta user (resolved from their validated ID token,
   never from the request body) can be mutated.
 - Only a fixed allow-list of demo attributes can be touched.
-- The pre-toggle value is captured once per user/attribute so a demo can
-  always be reset back to the real starting state.
+- Persona-specific values are captured once per user/attribute. Reset restores
+  those values and always returns vacation status to the demo default (False).
 """
 
 import os
@@ -23,6 +23,11 @@ import httpx
 logger = logging.getLogger(__name__)
 
 ALLOWED_ATTRIBUTES = {"is_on_vacation", "is_a_manager", "clearance_level"}
+
+# A demo reset always returns vacation status to the normal working state.
+# Manager and clearance remain persona-specific and are restored to the values
+# captured before they were first changed.
+DEMO_DEFAULT_VALUES: Dict[str, Any] = {"is_on_vacation": False}
 
 # In-memory only - fine for a single-process demo backend. Keyed by Okta
 # login/email, then attribute name, holding the value seen before the first
@@ -75,8 +80,11 @@ async def toggle_demo_attribute(user_id: str, attribute: str, value: Any) -> Dic
     if user_id not in _original_values:
         _original_values[user_id] = {}
     if attribute not in _original_values[user_id]:
-        current_profile = await _get_profile(user_id, domain, api_token)
-        _original_values[user_id][attribute] = current_profile.get(attribute)
+        if attribute in DEMO_DEFAULT_VALUES:
+            _original_values[user_id][attribute] = DEMO_DEFAULT_VALUES[attribute]
+        else:
+            current_profile = await _get_profile(user_id, domain, api_token)
+            _original_values[user_id][attribute] = current_profile.get(attribute)
 
     async with httpx.AsyncClient() as client:
         resp = await client.post(
@@ -97,22 +105,21 @@ async def toggle_demo_attribute(user_id: str, attribute: str, value: Any) -> Dic
 
 
 async def reset_demo_attributes(user_id: str) -> Dict[str, Any]:
-    """Restore every attribute this user has toggled back to its pre-toggle value."""
-    originals = _original_values.get(user_id)
-    if not originals:
-        return {"reset": []}
+    """Restore persona attributes and enforce the safe demo defaults."""
+    originals = _original_values.get(user_id, {})
+    reset_values = {**originals, **DEMO_DEFAULT_VALUES}
 
     domain, api_token = _require_config()
 
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             f"{domain}/api/v1/users/{user_id}",
-            json={"profile": dict(originals)},
+            json={"profile": reset_values},
             headers={"Authorization": f"SSWS {api_token}", "Content-Type": "application/json"},
             timeout=10.0,
         )
         resp.raise_for_status()
 
-    del _original_values[user_id]
-    logger.info(f"Demo reset: {user_id} -> {originals}")
-    return {"reset": list(originals.keys()), "values": originals}
+    _original_values.pop(user_id, None)
+    logger.info(f"Demo reset: {user_id} -> {reset_values}")
+    return {"reset": list(reset_values.keys()), "values": reset_values}

@@ -670,7 +670,7 @@ async def demo_toggle(
 
 @app.post("/api/admin/demo-reset")
 async def demo_reset(authorization: Optional[str] = Header(None, alias="Authorization")):
-    """Restore the signed-in user's demo attributes to their pre-toggle values."""
+    """Restore persona values and set the signed-in user's vacation status to False."""
     user_id = await _resolve_caller_user_id(authorization)
 
     try:
