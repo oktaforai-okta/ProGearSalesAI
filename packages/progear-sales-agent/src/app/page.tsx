@@ -353,14 +353,27 @@ export default function Home() {
         body: JSON.stringify({ message: userMessage }),
       });
 
-      const data = await response.json();
+      const contentType = response.headers.get('content-type') || '';
+      const data = contentType.includes('application/json')
+        ? await response.json()
+        : { content: await response.text() };
 
-      // Update agent flow, token exchanges, and FGA checks
+      // Preserve any evidence the backend returned, including denied and
+      // system-error exchange records.
       setCurrentAgentFlow(data.agent_flow || []);
       setCurrentTokenExchanges(data.token_exchanges || []);
       setCurrentFGAChecks(data.fga_checks || []);
       if (data.pending_approval) {
         setPendingApproval(data.pending_approval);
+      }
+
+      if (!response.ok) {
+        const detail = data.detail || data.content;
+        throw new Error(
+          typeof detail === 'string' && detail.trim()
+            ? detail
+            : `Backend request failed with HTTP ${response.status}`
+        );
       }
 
       const assistantMessage: Message = {
@@ -376,12 +389,15 @@ export default function Home() {
 
     } catch (error) {
       console.error('Chat error:', error);
+      const errorMessage = error instanceof Error ? error.message : '';
       setChatMessages((prev) => [
         ...prev,
         {
           id: `msg-${Date.now()}`,
           role: 'assistant',
-          content: 'Sorry, I encountered an error. Please try again.',
+          content: errorMessage
+            ? `The request could not reach the ProGear service. ${errorMessage}`
+            : 'The request could not reach the ProGear service. Please try again.',
           timestamp: Date.now(),
         },
       ]);
