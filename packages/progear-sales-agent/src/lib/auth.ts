@@ -95,6 +95,9 @@ export const authOptions: NextAuthOptions = {
       // private_key_jwt authentication never sends or uses this value.
       clientSecret: 'unused-private-key-jwt',
       issuer: process.env.NEXT_PUBLIC_OKTA_ISSUER!,
+      // Okta's client-qualified discovery document advertises the
+      // app-specific JWKS URI used to sign Org AS ID tokens.
+      wellKnown: `${getOktaIssuer()}/.well-known/openid-configuration?client_id=${encodeURIComponent(process.env.NEXT_PUBLIC_OKTA_CLIENT_ID!)}`,
       client: {
         token_endpoint_auth_method: 'private_key_jwt',
         token_endpoint_auth_signing_alg: 'RS256',
