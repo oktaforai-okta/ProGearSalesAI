@@ -1,17 +1,18 @@
 """
-Multi-Agent Token Exchange Manager
+Token Exchange Manager for the Governed ProGear Sales Agent
 
-Handles ID-JAG token exchange for all 4 AI agents with proper access control.
-Each agent gets tokens from its own authorization server.
+Handles ID-JAG token exchange, on behalf of the single governed ProGear
+Sales Agent, across its four resource domains (sales, inventory, customer,
+pricing) with proper access control. Each resource domain exchanges tokens
+against its own Custom Authorization Server.
 
 Key feature: Graceful access denial
-When a user doesn't have access to an agent (based on group membership),
-the exchange returns access_denied instead of failing.
+When a user doesn't have access to a resource domain (based on group
+membership), the exchange returns access_denied instead of failing.
 """
 
 import logging
 import os
-import json
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 from jose import jwt
@@ -36,21 +37,25 @@ except ImportError as e:
 
 class MultiAgentTokenExchange:
     """
-    Manages token exchange for multiple AI agents.
+    Manages token exchange for the governed ProGear Sales Agent across its
+    four resource domains.
 
-    Each agent has its own credentials and auth server.
+    Each resource domain has its own Custom Authorization Server and scope
+    set (see `agent_config.py`); by default they all authenticate as the
+    same shared Okta AI Agent identity, with optional per-domain identity
+    overrides for other deployment patterns.
     Returns access_denied for unauthorized requests instead of errors.
     """
 
     def __init__(self):
-        """Initialize token exchange managers for all configured agents."""
+        """Initialize token exchange managers for all configured resource domains."""
         self.okta_domain = os.getenv("OKTA_DOMAIN", "").strip()
         if self.okta_domain and not self.okta_domain.startswith("http"):
             self.okta_domain = f"https://{self.okta_domain}"
 
         self.main_auth_server_id = os.getenv("OKTA_MAIN_AUTH_SERVER_ID", "default").strip()
 
-        # SDK instances per agent
+        # SDK instances per resource domain
         self._sdks: Dict[str, OktaAISDK] = {}
         self._configs: Dict[str, OktaAIConfig] = {}
 
@@ -58,11 +63,11 @@ class MultiAgentTokenExchange:
             self._initialize_sdks()
 
     def _initialize_sdks(self):
-        """Initialize SDK instances for each configured agent."""
+        """Initialize SDK instances for each configured resource domain."""
         for agent_type in [AGENT_SALES, AGENT_INVENTORY, AGENT_CUSTOMER, AGENT_PRICING]:
             config = get_agent_config(agent_type)
             if not config or not config.agent_id or not config.private_key:
-                logger.info(f"Agent {agent_type} not fully configured, skipping SDK init")
+                logger.info(f"Resource domain {agent_type} not fully configured, skipping SDK init")
                 continue
 
             try:
@@ -76,12 +81,12 @@ class MultiAgentTokenExchange:
                 )
                 self._configs[agent_type] = okta_config
                 self._sdks[agent_type] = OktaAISDK(okta_config)
-                logger.info(f"Initialized SDK for {agent_type} agent")
+                logger.info(f"Initialized SDK for {agent_type} resource domain")
             except Exception as e:
                 logger.error(f"Failed to initialize SDK for {agent_type}: {e}")
 
     def is_agent_available(self, agent_type: str) -> bool:
-        """Check if an agent's SDK is properly initialized."""
+        """Check if the governed agent's SDK is properly initialized for this resource domain."""
         return agent_type in self._sdks
 
     async def exchange_token_for_agent(
@@ -91,10 +96,11 @@ class MultiAgentTokenExchange:
         requested_scopes: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """
-        Exchange user's ID token for agent-specific access token.
+        Exchange the user's ID token for a resource-domain-scoped access
+        token, on behalf of the governed ProGear Sales Agent.
 
         Args:
-            agent_type: sales, inventory, customer, or pricing
+            agent_type: resource domain - sales, inventory, customer, or pricing
             user_id_token: User's Okta ID token
             requested_scopes: Optional specific scopes to request
 
@@ -140,7 +146,8 @@ class MultiAgentTokenExchange:
 
             logger.info(f"[{agent_type}] Step 1 SUCCESS: expires_in={id_jag_result.expires_in}s")
 
-            # Decode and log ID-JAG token for debugging and UI display
+            # Decode ID-JAG claims for UI display; log sanitized metadata only
+            # (never the raw JWT or the full decoded claim body).
             id_jag_claims = {}
             id_jag_token = id_jag_result.access_token
             try:
@@ -151,13 +158,7 @@ class MultiAgentTokenExchange:
                 logger.info(f"Issuer (iss): {id_jag_claims.get('iss')}")
                 logger.info(f"Scopes: {id_jag_claims.get('scp', id_jag_claims.get('scope', []))}")
                 logger.info(f"Vacation claim: {id_jag_claims.get('Vacation', id_jag_claims.get('is_on_vacation', 'NOT PRESENT'))}")
-                logger.info(f"All claim keys: {list(id_jag_claims.keys())}")
-                # Raw JWT for debugging
-                logger.info(f"=== RAW ID-JAG TOKEN [{agent_type.upper()}] (JWT) ===")
-                logger.info(f"{id_jag_token}")
-                # Full decoded claims for debugging
-                logger.info(f"=== DECODED ID-JAG TOKEN CLAIMS [{agent_type.upper()}] ===")
-                logger.info(json.dumps(id_jag_claims, indent=2, default=str))
+                logger.info(f"Claim keys present: {list(id_jag_claims.keys())}")
             except Exception as decode_err:
                 logger.warning(f"[{agent_type}] Could not decode ID-JAG token: {decode_err}")
 
@@ -177,7 +178,8 @@ class MultiAgentTokenExchange:
 
             logger.info(f"[{agent_type}] Step 2 SUCCESS: expires_in={token_result.expires_in}s")
 
-            # Decode Auth Server token claims for debugging and UI display
+            # Decode access token claims for UI display; log sanitized
+            # metadata only (never the raw JWT or the full decoded claim body).
             auth_token_claims = {}
             try:
                 auth_token_claims = jwt.get_unverified_claims(token_result.access_token)
@@ -186,13 +188,7 @@ class MultiAgentTokenExchange:
                 logger.info(f"Audience (aud): {auth_token_claims.get('aud')}")
                 logger.info(f"Scopes: {auth_token_claims.get('scp', auth_token_claims.get('scope', []))}")
                 logger.info(f"Vacation claim: {auth_token_claims.get('Vacation', 'not present')}")
-                logger.info(f"All claim keys: {list(auth_token_claims.keys())}")
-                # Raw JWT for debugging
-                logger.info(f"=== RAW ACCESS TOKEN [{agent_type.upper()}] (JWT) ===")
-                logger.info(f"{token_result.access_token}")
-                # Full decoded claims for debugging
-                logger.info(f"=== DECODED ACCESS TOKEN CLAIMS [{agent_type.upper()}] ===")
-                logger.info(json.dumps(auth_token_claims, indent=2, default=str))
+                logger.info(f"Claim keys present: {list(auth_token_claims.keys())}")
             except Exception as decode_err:
                 logger.warning(f"[{agent_type}] Could not decode Auth Server token: {decode_err}")
 
@@ -354,15 +350,16 @@ class MultiAgentTokenExchange:
         agent_scopes: Optional[Dict[str, List[str]]] = None
     ) -> Dict[str, Dict[str, Any]]:
         """
-        Exchange tokens for multiple agents at once.
+        Run the token exchange across multiple resource domains at once, on
+        behalf of the governed ProGear Sales Agent.
 
         Args:
             user_id_token: User's ID token
-            agent_types: List of agent types, or None for all
+            agent_types: List of resource domains, or None for all four
             agent_scopes: Optional dict mapping agent_type to specific scopes to request
 
         Returns:
-            Dict mapping agent_type to exchange result
+            Dict mapping agent_type (resource domain) to exchange result
         """
         if agent_types is None:
             agent_types = [AGENT_SALES, AGENT_INVENTORY, AGENT_CUSTOMER, AGENT_PRICING]
@@ -383,7 +380,7 @@ _multi_agent_exchange: Optional[MultiAgentTokenExchange] = None
 
 
 def get_multi_agent_exchange() -> MultiAgentTokenExchange:
-    """Get or create the MultiAgentTokenExchange singleton."""
+    """Get or create the governed agent's token exchange manager singleton."""
     global _multi_agent_exchange
     if _multi_agent_exchange is None:
         _multi_agent_exchange = MultiAgentTokenExchange()

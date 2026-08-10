@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import {
-  Key, ChevronDown, ChevronUp, ChevronRight, Copy, Check, ExternalLink, KeySquare, ShieldOff,
+  Key, ChevronDown, ChevronUp, ChevronRight, ExternalLink, KeySquare, ShieldOff, TriangleAlert,
 } from 'lucide-react';
 
 interface TokenExchange {
@@ -25,42 +25,6 @@ interface Props {
   exchanges: TokenExchange[];
   idTokenClaims?: Record<string, any>;
   idTokenRaw?: string;  // Raw ID token JWT
-}
-
-// Copy button component
-function CopyButton({ text, label }: { text: string; label: string }) {
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      console.error('Failed to copy:', err);
-    }
-  };
-
-  return (
-    <button
-      onClick={handleCopy}
-      className="flex items-center gap-1 px-2 py-1 text-[10px] bg-gray-100 hover:bg-gray-200 rounded transition"
-      title={`Copy ${label}`}
-    >
-      {copied ? (
-        <>
-          <Check className="w-3 h-3 text-green-600" />
-          <span className="text-green-600">Copied!</span>
-        </>
-      ) : (
-        <>
-          <Copy className="w-3 h-3 text-gray-500" />
-          <span className="text-gray-500">Copy</span>
-        </>
-      )}
-    </button>
-  );
 }
 
 // Shows the raw, signed JWT only - no in-house "decoded" view. The point is
@@ -137,14 +101,13 @@ function TokenSection({
 
       {isOpen && (
         <div className="bg-white">
-          <div className="flex items-center justify-end gap-2 px-3 py-2 border-b border-gray-100 bg-gray-50/50">
-            <CopyButton text={rawToken} label="JWT" />
+          <div className="flex items-center justify-end px-3 py-2 border-b border-gray-100 bg-gray-50/50">
             <a
-              href="https://jwt.io"
+              href={`https://jwt.io/#token=${encodeURIComponent(rawToken)}`}
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-1 px-2 py-1 text-[10px] bg-gray-100 hover:bg-gray-200 rounded transition text-gray-600"
-              title="Copy the token above, then verify it independently on jwt.io"
+              title="Open this signed token directly in jwt.io for independent verification"
             >
               <ExternalLink className="w-3 h-3" />
               Verify on jwt.io
@@ -164,14 +127,18 @@ function TokenSection({
 export default function RawTokensCard({ exchanges, idTokenRaw }: Props) {
   const [isExpanded, setIsExpanded] = useState(false);
 
-  // Keep the latest record per agent - either it has token data, or it was
-  // explicitly denied (access_denied), both are worth showing as a step.
-  // An agent that was simply never invoked this turn has neither and is
-  // correctly left out.
+  // Keep the latest record per domain. Successful tokens, policy denials, and
+  // system errors are all relevant evidence. A domain that was never invoked
+  // has no exchange record and is correctly left out.
   const latestExchanges = exchanges.reduce((acc, exchange) => {
-    const isRelevant = exchange.access_token || exchange.id_jag_token || exchange.access_denied;
+    const isRelevant =
+      exchange.access_token ||
+      exchange.id_jag_token ||
+      exchange.access_denied ||
+      exchange.status === 'error' ||
+      exchange.error;
     if (isRelevant) {
-      acc[exchange.agent] = exchange; // Keep only latest per agent
+      acc[exchange.agent] = exchange;
     }
     return acc;
   }, {} as Record<string, TokenExchange>);
@@ -241,8 +208,23 @@ export default function RawTokensCard({ exchanges, idTokenRaw }: Props) {
             const blocked = exchange.access_denied
               ? exchange.error || `Access denied for ${exchange.agent_name}`
               : undefined;
+            const systemError = !blocked && exchange.status === 'error'
+              ? exchange.error || `Token exchange failed for ${exchange.agent_name}`
+              : undefined;
             return (
               <div key={idx} className="space-y-2">
+                {systemError && (
+                  <div className="border border-amber-200 rounded-lg overflow-hidden">
+                    <div className="flex items-center gap-2 px-3 py-2 bg-amber-50 text-amber-800 text-sm">
+                      <TriangleAlert className="w-4 h-4 flex-shrink-0" />
+                      <span className="font-medium">{exchange.agent_name} token exchange failed</span>
+                    </div>
+                    <div className="px-3 py-2 bg-white text-xs text-amber-800 border-t border-amber-100">
+                      {systemError}
+                    </div>
+                  </div>
+                )}
+
                 {/* ID-JAG Token (intermediate) */}
                 {(exchange.id_jag_token || blocked) && (
                   <TokenSection

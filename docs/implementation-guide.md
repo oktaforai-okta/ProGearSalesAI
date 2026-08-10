@@ -12,14 +12,15 @@
 6. [How Vercel and Render Work Together](#how-vercel-and-render-work-together)
 7. [Prerequisites](#prerequisites)
 8. [Okta Configuration](#okta-configuration)
-9. [Clone and Deploy to Vercel (Frontend)](#clone-and-deploy-to-vercel-frontend)
-10. [Deploy to Render (Backend)](#deploy-to-render-backend)
-11. [Connect Frontend to Backend](#connect-frontend-to-backend)
-12. [Environment Variables Reference](#environment-variables-reference)
-13. [Demo Scenarios](#demo-scenarios)
-14. [Demo Script](#demo-script)
-15. [Troubleshooting](#troubleshooting)
-16. [Verification Checklist](#verification-checklist)
+9. [Recovering from an Accidentally Deleted AI Agent](#recovering-from-an-accidentally-deleted-ai-agent)
+10. [Clone and Deploy to Vercel (Frontend)](#clone-and-deploy-to-vercel-frontend)
+11. [Deploy to Render (Backend)](#deploy-to-render-backend)
+12. [Connect Frontend to Backend](#connect-frontend-to-backend)
+13. [Environment Variables Reference](#environment-variables-reference)
+14. [Demo Scenarios](#demo-scenarios)
+15. [Demo Script](#demo-script)
+16. [Troubleshooting](#troubleshooting)
+17. [Verification Checklist](#verification-checklist)
 
 ---
 
@@ -30,11 +31,11 @@ This guide is designed for two types of users:
 ### Who This Guide is For
 
 **1. Learners Building Their Own Chatbot**
-If you want to understand how to build a multi-agent AI chatbot with enterprise-grade security using Okta AI Agent Governance, this guide walks through every configuration step. You'll learn:
-- How AI agents authenticate and act on behalf of users
+If you want to understand how to build an AI chatbot with enterprise-grade security using Okta AI Agent Governance, this guide walks through every configuration step. The application may use multiple internal workflow components, but Okta governs one ProGear Sales Agent identity. You'll learn:
+- How the AI agent authenticates and acts on behalf of users
 - How to implement Role-Based Access Control (RBAC) with Okta groups
-- How per-domain Okta Custom Authorization Servers scope what each agent can do
-- How token exchange flows preserve user identity through the AI pipeline
+- How per-domain Okta Custom Authorization Servers scope what the agent can do in each resource domain
+- How token exchange preserves user identity through the AI pipeline
 
 **2. Quick Deployers**
 If you want to clone this repository, deploy it to Vercel and Render, and configure your own Okta instance to see the demo in action, follow the step-by-step deployment sections.
@@ -42,7 +43,7 @@ If you want to clone this repository, deploy it to Vercel and Render, and config
 ### What You'll Deploy
 
 A basketball equipment sales AI assistant with:
-- **4 AI Agents**: Sales, Inventory, Customer, and Pricing
+- **1 governed AI Agent**: ProGear Sales Agent, with four internal domain components for Sales, Inventory, Customer, and Pricing
 - **3 Demo Users**: Each with different access levels
 - **Role-Based Access Control**: Users only see data they're authorized to access
 - **Visual Token Exchange**: See exactly which scopes are granted/denied in real-time
@@ -130,10 +131,10 @@ Before diving into deployment, understand how the pieces fit together:
 │   ┌───────────────────────────────────────────────────────────┐   │
 │   │                   FastAPI Application                     │   │
 │   │                                                           │   │
-│   │  • LangGraph orchestrator (routes to agents)              │   │
+│   │  • LangGraph orchestrator (routes by resource domain)      │   │
 │   │  • Okta token exchange (ID -> ID-JAG -> scoped token)      │   │
-│   │  • 4 in-process domain agents (Sales, Inventory,          │   │
-│   │    Customer, Pricing) -- each with its own Custom AS       │   │
+│   │  • 4 in-process domain components (Sales, Inventory,      │   │
+│   │    Customer, Pricing) with separate Custom AS boundaries   │   │
 │   │  • Auth0 FGA + Okta Identity Governance checks            │   │
 │   │  • Claude via the raw Anthropic SDK                       │   │
 │   └───────────────────────────────────────────────────────────┘   │
@@ -164,9 +165,9 @@ When a user sends a message:
 1. User authenticates via Okta → Frontend receives ID token
 2. Frontend sends message + ID token to Backend
 3. Backend exchanges ID token → ID-JAG assertion at the Org AS (AI Agent acting for user)
-4. Backend exchanges the ID-JAG → a scoped access token per agent, at that agent's own Custom Authorization Server
-5. If user's group doesn't match policy → token denied (access control!)
-6. Backend invokes each authorized domain agent in-process with its granted scopes (see docs/architecture.md for the current, honest MCP-server status)
+4. Backend exchanges the ID-JAG → a scoped access token for each required resource domain, at that domain's Custom Authorization Server
+5. If the user's group doesn't match policy → token denied (access control!)
+6. Backend invokes each authorized internal domain component in-process with its granted scope (see docs/architecture.md for the current, honest MCP-server status)
 7. Response flows back to user with visualization of what was granted/denied
 ```
 
@@ -249,7 +250,7 @@ packages/progear-sales-agent/src/
 backend/
 ├── api/
 │   └── main.py              # FastAPI app, CORS, routes, approval poller
-├── agents/                  # Sales, Inventory, Customer, Pricing agents
+├── agents/                  # Internal Sales, Inventory, Customer, Pricing components
 │                             # (each calls demo_store in-process + the
 │                             #  raw Anthropic SDK -- not separate MCP
 │                             #  servers; see docs/architecture.md §7)
@@ -265,7 +266,7 @@ backend/
 └── requirements.txt         # Python dependencies
 ```
 
-There's also a real, separately-deployed MCP server (`packages/progear-sales-mcp-server`) that validates JWTs against Okta's JWKS endpoint — but the backend agents above don't call it over the network today; see [architecture.md](./architecture.md#7-known-honest-limitation-the-mcp-server-isnt-in-the-live-path-yet) for the full explanation.
+There's also a real, separately-deployed MCP server (`packages/progear-sales-mcp-server`) that validates JWTs against Okta's JWKS endpoint, but the backend agents above don't call it over the network today; see [architecture.md](./architecture.md#7-known-honest-limitation-the-mcp-server-isnt-in-the-live-path-yet) for the full explanation.
 
 ### Render Pricing
 
@@ -381,26 +382,7 @@ Your Okta org must have:
 
 This is the most critical section. Follow each step carefully using your own Okta organization.
 
-### Step 1: Register the AI Agent and Enable Direct User Access
-
-1. In the Admin Console, go to **Directory → AI Agents** and register **ProGear Sales Agent**.
-2. Configure **Client registration** with a public/private key method and securely retain the private key for the backend workload identity.
-3. On **User access**, click **Allow user access** and select **Create a new OIDC app**. Existing OIDC app selection isn't supported for this workflow. Okta creates and permanently binds the sign-on app to the agent.
-4. Assign the ProGear access groups to the newly created app.
-5. Configure the app with your callback URL, for example:
-
-   ```text
-   https://your-app.vercel.app/api/auth/callback/okta
-   ```
-
-6. Enable `authorization_code`, `refresh_token`, token exchange, and JWT bearer grants. Keep client authentication set to **Public key / Private key** (`private_key_jwt`).
-7. Generate a dedicated RSA key pair for the web runtime, add only its public JWK under the app's client credentials, and store the private JWK in the server-only `OKTA_OIDC_PRIVATE_KEY` environment variable. Never use a `NEXT_PUBLIC_` prefix for private key material.
-
-The direct User access client ID is the AI Agent workload principal ID and starts with `wlp...`. A separate client secret isn't used.
-
-> **Current Okta behavior:** Existing agents that still use a legacy User sign-on delegation must delete that User access link and recreate User access. The Admin Console can create a new OIDC app for the existing agent. Selecting an existing OIDC app is not supported during this migration unless the AI Agent itself is deleted and registered again.
-
-### Step 2: Create Demo Users
+### Step 1: Create Demo Users
 
 Create three demo users to showcase different access levels:
 
@@ -417,7 +399,7 @@ Create three demo users to showcase different access levels:
 
 > **Note**: Use any email domain you control, or use your Okta organization's default domain. The passwords should be secure - these are demo users but treat them like any other credential.
 
-### Step 3: Create User Groups
+### Step 2: Create User Groups
 
 Create three groups to demonstrate RBAC:
 
@@ -436,29 +418,30 @@ Create three groups to demonstrate RBAC:
 
    | User | Group | Access Level |
    |------|-------|--------------|
-   | Sarah Sales | `ProGear-Sales` | Full access to all 4 agents |
-   | Mike Manager | `ProGear-Warehouse` | Inventory agent only |
-   | Frank Finance | `ProGear-Finance` | Pricing agent only |
+   | Sarah Sales | `ProGear-Sales` | Agent access across all four resource domains |
+   | Mike Manager | `ProGear-Warehouse` | Agent access to the Inventory domain only |
+   | Frank Finance | `ProGear-Finance` | Agent access to the Pricing domain only |
 
    > **Verification:** Click on each user in **Directory** → **People** and check the **Groups** tab to confirm they're in the correct group.
 
-### Step 4: Register the AI Agent
+### Step 3: Register the AI Agent and Configure Access
+
+This is the only place the AI Agent identity and its user-facing sign-in app get created. Do the sub-steps in this order; the direct User access app depends on the agent already existing, and the web-runtime key depends on that app already existing.
 
 1. Navigate to **Directory** → **AI Agents**
    - If you don't see this menu item, contact Okta support to enable AI Agent Governance for your org
-2. Click **Register AI Agent**
-3. Provide following details and register the Agent:
+2. Click **Register AI Agent** and provide the following details:
 
    ```
    Name: ProGear Sales Agent
    Description: Multi-agent sales assistant for ProGear sporting goods
    ```
-  When prompted to assign Owners, select the currently logged in Okta admin or any other user you have as the owner and save.
-  
-4. **Add Credentials:**
-   - Select the ***Registered Agent** and navigate to ***Credentials** tab
-   - Click **Add Public Key**
-   - Select **Generate new key pair**
+
+   When prompted to assign Owners, select the currently logged in Okta admin or any other user you have as the owner, and save. Owners are admins responsible for the agent; they are not the end users the agent acts on behalf of (see the callout below).
+
+3. **Add Credentials (Key #1: the agent's own workload key).** This key signs the JWTs the backend uses for its ID-JAG and JWT-bearer exchanges with your Custom Authorization Servers.
+   - Select the registered agent and navigate to the **Credentials** tab
+   - Click **Add Public Key** → **Generate new key pair**
    - Okta generates an RS256 public/private key pair
    - **Download and save the private key (JWK format)** - click the download button
 
@@ -499,14 +482,26 @@ Create three groups to demonstrate RBAC:
    > 2. Remove all line breaks and extra spaces
    > 3. Result should look like: `{"kty":"RSA","kid":"xxx","alg":"RS256","n":"xxx",...}`
    >
-   > **Store this single-line version** - you'll paste it into Render's environment variables.
+   > **Store this single-line version** - you'll paste it into Render's environment variables as `OKTA_AI_AGENT_PRIVATE_KEY`.
 
-5. **Configure direct User access:**
-   - On the AI Agent's **User access** tab, click **Allow user access**.
-   - Select **Create a new OIDC app**. Okta permanently binds this app to the AI agent.
+4. **Configure direct User access.**
+   - On the AI Agent's **User access** tab, click **Allow user access**, then select **Create a new OIDC app**. Existing OIDC app selection isn't supported here: Okta creates a brand-new app and permanently binds it to this agent.
+   - Assign the ProGear access groups you created in Step 2 to the newly created app.
+   - Configure the app with your callback URL, for example:
 
-6. **Activate** the agent
-7. **Copy the Agent ID** (starts with `wlp...`)
+     ```text
+     https://your-app.vercel.app/api/auth/callback/okta
+     ```
+
+   - Enable `authorization_code`, `refresh_token`, token exchange, and JWT bearer grants. Keep client authentication set to **Public key / Private key** (`private_key_jwt`).
+
+5. **Add Credentials (Key #2: the dedicated web-runtime key).** This is a second, separate RSA key pair, distinct from the agent workload key in step 3. It authenticates the Vercel frontend's `authorization_code` and `refresh_token` requests to the direct User access app.
+   - Generate the key pair, add only its public JWK under the app's client credentials, and store the private JWK in the server-only `OKTA_OIDC_PRIVATE_KEY` environment variable. Never use a `NEXT_PUBLIC_` prefix for private key material.
+
+6. **Activate** the agent.
+7. **Copy the Agent ID** (starts with `wlp...`).
+
+The direct User access client ID is the AI Agent workload principal ID and starts with `wlp...`. Neither the agent workload key nor the web-runtime key is a client secret, and a client secret is never used for either path.
 
 > **CRITICAL: AI Agent Owners vs User Assignments**
 >
@@ -521,7 +516,11 @@ Create three groups to demonstrate RBAC:
 > 1. Is assigned to the direct User access app
 > 2. Passes the access policy rules (group membership)
 
-### Step 5: Create Authorization Servers (4 MCP APIs)
+> **Two distinct runtime keys, not one.** Steps 3 and 5 above create two unrelated key pairs with two unrelated jobs: the agent workload key (Step 3) signs backend ID-JAG and JWT-bearer requests, and the web-runtime key (Step 5) signs the frontend's `private_key_jwt` sign-in and refresh requests. Rotating or replacing one never requires touching the other.
+
+> **Binding behavior is release-dependent.** Okta temporarily rolled back a newer client-to-agent binding model to give customers migration time. The production recovery described in this repository uses a fresh OIDC web app plus a delegation link because that was the compatible behavior enabled in the tenant at recovery time. Do not treat a preview schema or an earlier tenant behavior as a permanent platform contract. Before provisioning or migrating this boundary, verify the behavior currently enabled in the target org and read [Okta AI Agent Client Binding Compatibility](agent-client-binding-compatibility.md).
+
+### Step 4: Create Authorization Servers (4 MCP APIs)
 
 Create one authorization server per MCP API. Each represents a different domain of your business data.
 
@@ -692,7 +691,7 @@ AND User is member of: ProGear-Sales
 AND Scopes: pricing:read
 ```
 
-### Step 6: Verify Policy Assigned Clients (CRITICAL!)
+### Step 5: Verify Policy Assigned Clients (CRITICAL!)
 
 > **This step is the #1 cause of "no_matching_policy" errors.** Don't skip it!
 
@@ -704,7 +703,7 @@ For each Authorization Server, you must add the AI Agent to the policy's "Assign
 
 Repeat for all 4 authorization servers.
 
-### Step 7: Update Agent managed connections
+### Step 6: Update Agent managed connections
 Once you have create authorization servers per MCP API, Use managed connections to add connections to all auth servers with scopes listed for data access while maintaining centralized control through Okta.
 **Manage Connection:**
    - Select the ***Registered Agent** and navigate to ***Managed Connections** tab
@@ -717,7 +716,7 @@ Once you have create authorization servers per MCP API, Use managed connections 
      | `ProGear Inventory MCP` | Only allow | inventory:write inventory:read |
      | `ProGear Sales MCP` | Only allow | sales:order sales:read sales:quote |
 
-### Step 8: Record All Your IDs
+### Step 7: Record All Your IDs
 
 **Before proceeding, verify you have collected all these values.** You'll need them for Vercel and Render configuration.
 
@@ -753,7 +752,7 @@ Use this checklist to track what you've collected:
 │                                                                       │
 │  □ OKTA_AI_AGENT_PRIVATE_KEY                                          │
 │    JWK Private Key (SINGLE LINE - no line breaks!)                    │
-│    Where: Downloaded when you created credentials in Step 4           │
+│    Where: Downloaded when you created credentials in Step 3           │
 │    Status: □ Downloaded  □ Converted to single line                   │
 │                                                                       │
 │  □ OKTA_SALES_AUTH_SERVER_ID                                          │
@@ -777,6 +776,85 @@ Use this checklist to track what you've collected:
 ```
 
 > **Tip:** Copy this checklist to a text file and fill it in as you go. You'll reference these values multiple times during deployment.
+
+---
+
+## Recovering from an Accidentally Deleted AI Agent
+
+Sometimes an AI Agent registration gets deleted by accident, for example during a cleanup pass in the Admin Console. This section covers what breaks, what survives, and how to recover without deleting useful evidence or rebuilding independent authorization systems.
+
+### What breaks
+
+- The AI Agent identity itself, the `wlp...` workload principal, is gone.
+- Its credentials, owners, lifecycle state, and resource connections no longer provide a usable agent configuration.
+- Any authorization-server policy or deployment value that references the deleted agent must be updated to the replacement.
+
+A previously associated OIDC app may still exist as a separate application. Treat its presence, status, assignments, redirect URIs, and client-authentication settings as facts to verify. Do not assume that the app is reusable, and do not assume that it must be deleted.
+
+### What does not break
+
+The replacement does not require rebuilding these independent resources:
+
+- The four Custom Authorization Servers (Sales, Inventory, Customer, Pricing), their scopes, and their access policy rules.
+- Your demo users and groups.
+- Your Auth0 FGA store, model, and relationship tuples for the Inventory domain.
+- Your Okta Identity Governance approval workflow for large inventory writes.
+- Your Vercel and Render projects. Their Okta identity values need to change, but the deployments themselves remain.
+
+FGA and OIG key off users, groups, claims, relationships, and workflow configuration rather than the deleted agent's internal Okta entity ID.
+
+### Choose a sign-on app strategy
+
+The available client-to-agent binding contract depends on the Okta release enabled in the target org. A newer API schema can advertise `NEW_OIDC_APP` and `EXISTING_APP` while a tenant in the temporary compatibility period rejects the native `signOnProvider` field. That happened during this recovery.
+
+For a clean recovery, prefer a fresh OIDC application. A fresh app avoids inheriting stale status, assignments, redirect URIs, or a client-authentication method that the application no longer uses. Reuse a surviving app only after a read-only review confirms that the currently enabled API explicitly supports it and that the app matches the intended web sign-on design.
+
+The production-compatible fallback used by this repository is:
+
+1. Register the AI Agent without `signOnProvider`.
+2. Create a fresh OIDC web app through the Apps API.
+3. Create an ID-token delegation link from that app to the agent.
+
+When Okta restores the newer native binding model, migrate this boundary from the then-current `main` branch rather than restoring an older repository snapshot. See [Okta AI Agent Client Binding Compatibility](agent-client-binding-compatibility.md) for the decision record and verification checklist.
+
+### Recovery steps
+
+1. Inventory the surviving AI Agent, OIDC app, authorization servers, policies, user or group assignments, resource connections, and deployment configuration. Do not delete or deactivate anything during discovery.
+2. Register one replacement **ProGear Sales Agent** in `STAGED`. Use the native fresh-app binding supported by the target org when available. During the temporary compatibility period, register without `signOnProvider`, create a fresh OIDC web app separately, and connect it with an ID-token delegation link.
+3. Assign owners to the new agent. Okta supports up to five individual owner principals, or an eligible owner group according to your governance policy.
+4. Generate the agent workload key pair with your approved internal key-management process. Add only its public JWK to the agent and keep the private JWK in server-side secret storage.
+5. Configure the sign-on app's callback URL, logout URL, user or group assignments, grant types, and `private_key_jwt` client authentication. If the app uses `private_key_jwt`, use a separate web-runtime key pair and register only that public JWK on the app.
+6. On each existing Custom Authorization Server access policy, replace or supplement references to the deleted agent with the replacement client. Preserve scopes and rule logic unless verification finds an unrelated defect.
+7. Add one `IDENTITY_ASSERTION_CUSTOM_AS` resource connection for each existing authorization server. Use `INCLUDE_ONLY` and the exact scopes for that domain, then activate each connection.
+8. Activate the replacement agent only after owners and agent credentials are present.
+9. Rewire the backend first, validate health and token exchange, then rewire the frontend and validate sign-in.
+
+### API versus Admin Console boundaries during recovery
+
+The current APIs can perform most of the replacement lifecycle:
+
+- Register the agent with `POST /workload-principals/api/v1/ai-agents` and poll the asynchronous operation returned by the `202` response.
+- Configure owners with `POST /governance/api/v1/resource-owners` using user or group principal ORNs and the AI Agent resource ORN.
+- Add the agent's public JWK with `POST /workload-principals/api/v1/ai-agents/{agentId}/credentials/jwks`.
+- Create, inspect, update, activate, and deactivate resource connections under `/workload-principals/api/v1/ai-agents/{agentId}/connections`.
+- Activate the agent with `POST /workload-principals/api/v1/ai-agents/{agentId}/lifecycle/activate`.
+- Use the standard Apps and Authorization Server APIs for app settings, assignments, policies, and rules where your administrative token or service app has the required scopes.
+
+The API accepts a public key that you generated, but production key generation should remain in your approved internal key-management process. Use the Admin Console when your organization requires interactive review, when your API principal lacks a required scope, or when a product-specific setting is not exposed in the API version enabled for your org.
+
+### Secret-free validation before cutover
+
+Before updating live Vercel or Render secrets:
+
+- Confirm the new agent has the intended owners, an active public JWK, four active resource connections, and the expected sign-on app.
+- Confirm each authorization-server policy references the replacement client and still enables the JWT Bearer grant for the intended users, groups, and scopes.
+- Confirm the sign-on app's assignments, callback URLs, logout URLs, and `private_key_jwt` public key.
+- Test sign-in and both token exchanges against a preview or staging deployment first.
+- Prove allowed and denied paths, including FGA vacation and clearance denials, before changing production traffic.
+
+### Cleanup is a separate change
+
+After the replacement works end to end, prepare a separate cleanup list for stale applications, deleted-client policy references, old keys, and retired deployment artifacts. Do not delete those resources as part of the recovery itself. Review each target immediately before deletion and obtain explicit approval for that cleanup pass.
 
 ---
 
@@ -1005,60 +1083,62 @@ Expected response:
 | `NEXT_PUBLIC_OKTA_ISSUER` | Vercel | Yes | `https://your-org.okta.com` (NO auth server ID - use Org AS) |
 | `CORS_ORIGINS` | Render | Yes | Your Vercel URL |
 
+> **Two distinct runtime keys.** `OKTA_OIDC_PRIVATE_KEY` and `OKTA_AI_AGENT_PRIVATE_KEY` are two separate, unrelated key pairs, not two copies of the same key. `OKTA_OIDC_PRIVATE_KEY` authenticates the Vercel frontend's sign-in and refresh requests to the direct User access app. `OKTA_AI_AGENT_PRIVATE_KEY` authenticates the Render backend's ID-JAG and JWT-bearer exchanges for the agent workload identity. Rotating one never requires touching the other.
+
 ---
 
 ## Demo Scenarios
 
 Three key scenarios to demonstrate RBAC and governance:
 
-### Scenario 1: Full Access (Sarah Sales)
+### Scenario 1: Access across all resource domains (Sarah Sales)
 
 **Login as**: Your sarah.sales user
 
 **Question**: "Can we fulfill an order of 1500 basketballs for State University at a bulk discount?"
 
 **What Happens**:
-1. Orchestrator routes to all 4 agents
-2. **Customer Agent** → Looks up State University (Platinum tier)
-3. **Inventory Agent** → Checks basketball stock (available)
-4. **Pricing Agent** → Calculates bulk discount
-5. **Sales Agent** → Generates quote
+1. The single ProGear Sales Agent routes across its Customer, Inventory, Pricing, and Sales domain components
+2. **Customer component** → Looks up State University (Platinum tier)
+3. **Inventory component** → Checks basketball stock (available)
+4. **Pricing component** → Calculates bulk discount
+5. **Sales component** → Generates quote
 
 **Expected Result**:
-- 4 successful token exchanges
+- Successful scoped token exchanges for the required resource domains
 - Full combined answer with customer, inventory, pricing, and quote
-- All scopes granted in the security panel
+- All required scopes granted in the security panel
 
-### Scenario 2: Limited Access (Mike Manager)
+### Scenario 2: Limited resource access (Mike Manager)
 
 **Login as**: Your mike.manager user
 
 **Question**: Same as above
 
 **What Happens**:
-1. Orchestrator tries to route to all agents
-2. **Customer Agent** → ACCESS DENIED (Mike not in ProGear-Sales)
-3. **Inventory Agent** → SUCCESS: "Stock available"
-4. **Pricing Agent** → ACCESS DENIED (Mike not in ProGear-Finance)
-5. **Sales Agent** → ACCESS DENIED
+1. The ProGear Sales Agent identifies the Customer, Inventory, Pricing, and Sales resource needs
+2. **Customer domain** → ACCESS DENIED (Mike is not in `ProGear-Sales`)
+3. **Inventory domain** → SUCCESS: "Stock available"
+4. **Pricing domain** → ACCESS DENIED (Mike is not in `ProGear-Finance`)
+5. **Sales domain** → ACCESS DENIED
 
 **Expected Result**:
-- 1 granted, 3 denied token exchanges
-- Partial answer: "I can see we have basketballs in stock, but I don't have access to customer or pricing information."
-- Demonstrates governance working
+- One resource decision granted and three denied
+- Partial answer with the information the agent is allowed to retrieve
+- Demonstrates governance working without introducing additional user-facing agents
 
-### Scenario 3: Finance Only (Frank Finance)
+### Scenario 3: One resource domain (Frank Finance)
 
 **Login as**: Your frank.finance user
 
 **Question**: "What's our profit margin on professional basketballs?"
 
 **What Happens**:
-1. Orchestrator routes to Pricing Agent only
-2. **Pricing Agent** → SUCCESS: Shows cost, wholesale, retail, margin %
+1. The agent routes to its Pricing domain component only
+2. **Pricing component** → SUCCESS: Shows cost, wholesale, retail, and margin percentage
 
 **Expected Result**:
-- Single token exchange (Pricing only)
+- Single token exchange for the Pricing resource domain
 - Complete pricing/margin information
 - No unnecessary access to other systems
 
@@ -1069,23 +1149,23 @@ Three key scenarios to demonstrate RBAC and governance:
 Use these talking points when presenting:
 
 ### Opening
-> "Let me show you how Okta AI Agent Governance secures AI access to enterprise data. We have a basketball equipment company with 4 AI agents - Sales, Inventory, Customer, and Pricing - each with different access to company resources."
+> "Let me show you how Okta AI Agent Governance secures AI access to enterprise data. ProGear has one governed Sales Agent that works across four protected resource domains: Sales, Inventory, Customer, and Pricing."
 
-### Demo 1: Full Access (Sarah)
-> "Sarah is a sales rep. Watch what happens when she asks about fulfilling an order..."
-> [Show 4 agents working, 4 token exchanges, full answer]
-> "Notice each agent got only the scopes it needed. The audit trail shows exactly who accessed what."
+### Demo 1: Access across all domains (Sarah)
+> "Sarah is a sales rep. Watch what happens when she asks the ProGear Sales Agent about fulfilling an order..."
+> [Show the four internal domain steps, scoped resource token exchanges, and the combined answer]
+> "Notice that the same agent obtained only the scopes needed for Sarah's request in each resource domain. The audit trail shows who accessed what."
 
-### Demo 2: Limited Access (Mike)
-> "Now let's see what happens when Mike, a warehouse manager, asks the same question..."
-> [Show 3 access denied, 1 success]
-> "Same app, same question, different access. Mike can only see inventory - not customers, not pricing."
+### Demo 2: Limited resource access (Mike)
+> "Now let's see what happens when Mike, a warehouse manager, asks the same agent the same question..."
+> [Show three resource decisions denied and Inventory allowed]
+> "Same agent, same question, different user permissions. Mike can see inventory, but not customer or pricing data."
 
 ### Demo 3: Governance in Action
-> "Notice in the Okta System Log - every token exchange is recorded. We see the AI Agent actor, the user it's acting for, the scopes requested, and whether access was granted or denied."
+> "Notice in the Okta System Log that every token exchange is recorded. We see the ProGear Sales Agent actor, the user it's acting for, the scopes requested, and whether access was granted or denied."
 
 ### Closing
-> "With Okta AI Agent Governance, you know exactly which AI agents are accessing your data, for which users, with what permissions. Full visibility, full control."
+> "With Okta AI Agent Governance, you know which governed agent is accessing each resource, for which user, and with which permissions. Full visibility, full control."
 
 ---
 
@@ -1184,6 +1264,12 @@ Use these talking points when presenting:
 3. The ID token's issuer must match where the SDK performs the exchange (Org AS)
 4. Step 2 (ID-JAG → Access Token) correctly goes to each Custom AS - that's configured separately
 
+### AI Agent registration disappeared / was deleted
+
+**Cause**: The AI Agent registration was deleted from the Admin Console, intentionally or by accident. A previously associated OIDC app may still exist, but the workload principal, credentials, owners, and resource connections must be replaced.
+
+**Solution**: See [Recovering from an Accidentally Deleted AI Agent](#recovering-from-an-accidentally-deleted-ai-agent). Your four Custom Authorization Servers, groups, FGA store, and OIG workflow are unaffected. Prefer a fresh `NEW_OIDC_APP` for a clean rebuild, or use `EXISTING_APP` only after confirming the surviving app is eligible and correctly configured.
+
 ---
 
 ## Verification Checklist
@@ -1221,11 +1307,12 @@ Use this checklist to verify your deployment is complete:
 - [ ] Token exchanges visible in security panel
 
 ### Demo Verification
-- [ ] Sarah can access all 4 agents
-- [ ] Mike can only access Inventory agent
-- [ ] Frank can only access Pricing agent
-- [ ] Access denied scenarios show clearly in UI
-- [ ] Okta System Log shows token exchange events
+- [ ] The same ProGear Sales Agent is shown for Sarah, Mike, and Frank
+- [ ] Sarah's request can obtain the required scopes across all four resource domains
+- [ ] Mike's request can obtain Inventory scopes only
+- [ ] Frank's request can obtain Pricing scopes only
+- [ ] Access denied scenarios show clear user-facing guidance
+- [ ] Okta System Log shows the single agent identity, user, resource, scope, and outcome for token exchange events
 
 ---
 

@@ -155,7 +155,7 @@ When your compliance team, security officer, or board asks about AI security, yo
 |-------------------|-----------|
 | "One of our AI systems" | "ProGear Sales Agent (ID: wlpuoor63yK6)" |
 | "We have several, not sure which" | "This specific agent, owned by John Admin" |
-| "They all use the same credentials" | "Each agent has its own trackable identity" |
+| "Different AI systems share credentials" | "Each registered AI system has its own trackable identity" |
 
 **Example from the demo:**
 - The AI agent has a unique ID: `wlpuoor63yK6LYFEh1d7`

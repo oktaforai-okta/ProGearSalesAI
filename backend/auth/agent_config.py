@@ -1,18 +1,27 @@
 """
-Multi-Agent Configuration
+Per-Resource-Domain Agent Configuration
 
-Defines all 4 AI agents and their Okta credentials for the ProGear demo.
-Each agent has its own:
-- Agent ID (wlp...)
-- Private JWK key
-- Authorization server
+Okta governs a single AI Agent workload identity for this demo: the
+ProGear Sales Agent. This module defines the per-resource-domain settings
+that agent uses when performing ID-JAG token exchanges for each of the
+four resource domains (sales, inventory, customer, pricing):
+- Custom Authorization Server ID
+- API audience
 - Scopes
+- Display metadata (name, color) for the UI
 
 Environment variables:
-- OKTA_AI_AGENT_[TYPE]_ID - The agent entity ID
-- OKTA_AI_AGENT_[TYPE]_PRIVATE_KEY - JWK private key JSON
-- OKTA_[TYPE]_AUTH_SERVER_ID - Authorization server ID
-- OKTA_[TYPE]_AUDIENCE - API audience
+- OKTA_AI_AGENT_ID - The governed agent's entity ID (wlp...), shared by
+  every resource domain unless a per-domain override below is set.
+- OKTA_AI_AGENT_PRIVATE_KEY - The governed agent's JWK private key JSON,
+  shared by every resource domain unless a per-domain override is set.
+- OKTA_AI_AGENT_[TYPE]_ID / OKTA_AI_AGENT_[TYPE]_PRIVATE_KEY - Optional
+  per-domain overrides. Only needed if a deployment provisions a separate
+  Okta AI Agent identity per resource domain instead of the one-agent
+  model above; unset by default.
+- OKTA_[TYPE]_AUTH_SERVER_ID - Custom Authorization Server ID for this
+  resource domain's scopes.
+- OKTA_[TYPE]_AUDIENCE - API audience for this resource domain.
 """
 
 import os
@@ -26,20 +35,25 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class AgentConfig:
-    """Configuration for a single AI agent."""
+    """Per-resource-domain configuration used by the governed ProGear Sales Agent.
+
+    `agent_id` / `private_key` normally resolve to the one shared Okta AI
+    Agent identity (see module docstring); they are per-domain fields here
+    only to support the optional per-domain override env vars.
+    """
     name: str  # MCP name for Token Exchange card (e.g., "Inventory MCP")
-    display_name: str  # Agent name for Agent Flow card (e.g., "Inventory Agent")
-    agent_type: str  # sales, inventory, customer, pricing
-    agent_id: str  # wlp...
-    private_key: Optional[Dict[str, Any]]  # JWK private key
-    auth_server_id: str  # aus...
+    display_name: str  # Display label for Agent Flow card (e.g., "Inventory Agent")
+    agent_type: str  # resource domain: sales, inventory, customer, pricing
+    agent_id: str  # Governed agent entity ID (wlp...), shared unless overridden
+    private_key: Optional[Dict[str, Any]]  # JWK private key, shared unless overridden
+    auth_server_id: str  # aus... (Custom Authorization Server for this domain)
     audience: str  # api://progear-...
-    scopes: List[str]  # All possible scopes for this MCP
+    scopes: List[str]  # All possible scopes for this resource domain
     description: str
     color: str  # For UI display
 
 
-# Agent type constants
+# Resource domain constants
 AGENT_SALES = "sales"
 AGENT_INVENTORY = "inventory"
 AGENT_CUSTOMER = "customer"
@@ -59,10 +73,10 @@ def _parse_private_key(key_str: str) -> Optional[Dict[str, Any]]:
 
 def get_agent_config(agent_type: str) -> Optional[AgentConfig]:
     """
-    Get configuration for a specific agent type.
+    Get the governed ProGear Sales Agent's configuration for one resource domain.
 
     Args:
-        agent_type: One of sales, inventory, customer, pricing
+        agent_type: One resource domain - sales, inventory, customer, pricing
 
     Returns:
         AgentConfig or None if not configured
@@ -134,7 +148,7 @@ def get_agent_config(agent_type: str) -> Optional[AgentConfig]:
 
 
 def get_all_agent_configs() -> Dict[str, AgentConfig]:
-    """Get all agent configurations."""
+    """Get the governed agent's per-resource-domain configuration for all four domains."""
     return {
         agent_type: get_agent_config(agent_type)
         for agent_type in [AGENT_SALES, AGENT_INVENTORY, AGENT_CUSTOMER, AGENT_PRICING]
@@ -143,7 +157,7 @@ def get_all_agent_configs() -> Dict[str, AgentConfig]:
 
 
 def is_agent_configured(agent_type: str) -> bool:
-    """Check if an agent has the minimum required configuration."""
+    """Check if the governed agent has the minimum required configuration for this resource domain."""
     config = get_agent_config(agent_type)
     if not config:
         return False
@@ -152,7 +166,7 @@ def is_agent_configured(agent_type: str) -> bool:
 
 
 def get_configured_agents() -> List[str]:
-    """Get list of agent types that are properly configured."""
+    """Get the list of resource domains the governed agent is properly configured for."""
     return [
         agent_type for agent_type in [AGENT_SALES, AGENT_INVENTORY, AGENT_CUSTOMER, AGENT_PRICING]
         if is_agent_configured(agent_type)
@@ -160,7 +174,8 @@ def get_configured_agents() -> List[str]:
 
 
 # Demo mode configuration
-# When real agents aren't configured, use these demo values
+# When the governed agent's real credentials aren't configured, use these
+# demo values (one entry per resource domain).
 DEMO_AGENTS = {
     AGENT_SALES: {
         "name": "Sales MCP",
