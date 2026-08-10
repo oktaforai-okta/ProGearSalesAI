@@ -84,7 +84,7 @@ export default function FGAControlsPanel({ onApplied }: Props) {
       if (!res.ok) throw new Error(data.detail || 'Reset failed');
       setLastResult(
         data.reset?.length
-          ? `Reset ${data.reset.join(', ')} to their original values.`
+          ? `Reset ${data.reset.join(', ')} to the demo starting values.`
           : 'Nothing to reset - no attributes have been toggled yet.'
       );
       await loadStatus();
@@ -133,14 +133,14 @@ export default function FGAControlsPanel({ onApplied }: Props) {
               className={toggleButtonClass(status?.is_on_vacation === true, 'orange')}
             >
               {busy === 'is_on_vacation' && <Loader2 className="w-3 h-3 animate-spin" />}
-              Set true
+              True
             </button>
             <button
               onClick={() => callToggle('is_on_vacation', false)}
               disabled={busy !== null}
               className={toggleButtonClass(status?.is_on_vacation === false, 'orange')}
             >
-              Set false
+              False
             </button>
           </div>
         </div>
@@ -157,14 +157,14 @@ export default function FGAControlsPanel({ onApplied }: Props) {
               className={toggleButtonClass(status?.is_a_manager === true, 'green')}
             >
               {busy === 'is_a_manager' && <Loader2 className="w-3 h-3 animate-spin" />}
-              Set true
+              True
             </button>
             <button
               onClick={() => callToggle('is_a_manager', false)}
               disabled={busy !== null}
               className={toggleButtonClass(status?.is_a_manager === false, 'green')}
             >
-              Set false
+              False
             </button>
           </div>
         </div>
@@ -203,7 +203,7 @@ export default function FGAControlsPanel({ onApplied }: Props) {
           className="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm rounded-lg border border-gray-300 bg-gray-50 hover:bg-gray-100 text-gray-700 disabled:opacity-50"
         >
           <RotateCcw className="w-4 h-4" />
-          Reset my demo attributes
+          Reset to demo defaults
         </button>
 
         {lastResult && (
@@ -217,6 +217,61 @@ export default function FGAControlsPanel({ onApplied }: Props) {
             {lastResult}
           </div>
         )}
+
+        <div className="border-t border-purple-100 pt-4">
+          <div className="mb-3">
+            <h4 className="text-sm font-semibold text-gray-800">How FGA uses these settings</h4>
+            <p className="mt-1 text-xs text-gray-500">
+              For an inventory update, FGA checks all three conditions on every request.
+            </p>
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-3">
+            <div className="rounded-lg border border-green-200 bg-green-50 p-3">
+              <div className="flex items-center gap-2 text-xs font-semibold text-green-800">
+                <ShieldAlert className="h-4 w-4" />
+                Manager = True
+              </div>
+              <p className="mt-1 text-[11px] leading-relaxed text-green-700">
+                The user must be an inventory manager to make changes.
+              </p>
+            </div>
+
+            <div className="rounded-lg border border-orange-200 bg-orange-50 p-3">
+              <div className="flex items-center gap-2 text-xs font-semibold text-orange-800">
+                <Palmtree className="h-4 w-4" />
+                On vacation = False
+              </div>
+              <p className="mt-1 text-[11px] leading-relaxed text-orange-700">
+                False is the demo default. True temporarily blocks inventory access.
+              </p>
+            </div>
+
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
+              <div className="flex items-center gap-2 text-xs font-semibold text-blue-800">
+                <KeyIcon className="h-4 w-4" />
+                Enough clearance
+              </div>
+              <p className="mt-1 text-[11px] leading-relaxed text-blue-700">
+                The user&apos;s level must be at least the level required by the item.
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-3 rounded-lg border border-purple-200 bg-purple-50 px-3 py-2.5 text-center">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-purple-600">
+              Inventory update allowed
+            </p>
+            <p className="mt-1 text-xs font-medium text-purple-900">
+              Manager is True&nbsp; + &nbsp;Vacation is False&nbsp; + &nbsp;Clearance is high enough
+            </p>
+          </div>
+
+          <p className="mt-2 text-center text-[10px] leading-relaxed text-gray-400">
+            Okta provides the user values. FGA combines them with the inventory relationship and
+            item requirement to allow or block the request.
+          </p>
+        </div>
       </div>
     </div>
   );
