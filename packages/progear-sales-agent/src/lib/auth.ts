@@ -1,5 +1,6 @@
 import type { NextAuthOptions } from 'next-auth';
 import type { JWT } from 'next-auth/jwt';
+import { createRemoteJWKSet, jwtVerify } from 'jose';
 import OktaProvider from 'next-auth/providers/okta';
 import {
   getOktaTokenEndpoint,
@@ -19,6 +20,33 @@ import {
 // Requires the Okta OIDC app to have the refresh_token grant type enabled and
 // the authorization request to include the offline_access scope - see the
 // `authorization.params.scope` below and the deployment note in the repo.
+function getOktaIssuer(): string {
+  return process.env.NEXT_PUBLIC_OKTA_ISSUER!.replace(/\/$/, '');
+}
+
+function getOktaIdTokenJwksUri(): URL {
+  const issuer = getOktaIssuer();
+  const clientId = process.env.NEXT_PUBLIC_OKTA_CLIENT_ID!;
+
+  // Okta Org AS ID tokens use app-specific signing keys. The standard
+  // discovery document advertises the org-wide JWKS URL, so include the
+  // client_id query parameter to retrieve the key set that signed this app's
+  // ID token. Access-token validation still uses the normal issuer JWKS.
+  return new URL(`${issuer}/oauth2/v1/keys?client_id=${encodeURIComponent(clientId)}`);
+}
+
+async function verifyOktaIdToken(idToken: string): Promise<void> {
+  const issuer = getOktaIssuer();
+  const clientId = process.env.NEXT_PUBLIC_OKTA_CLIENT_ID!;
+  const keySet = createRemoteJWKSet(getOktaIdTokenJwksUri());
+
+  await jwtVerify(idToken, keySet, {
+    issuer,
+    audience: clientId,
+    algorithms: ['RS256'],
+  });
+}
+
 async function refreshOktaToken(token: JWT): Promise<JWT> {
   try {
     const tokenEndpoint = getOktaTokenEndpoint();
@@ -35,6 +63,10 @@ async function refreshOktaToken(token: JWT): Promise<JWT> {
 
     const refreshed = await response.json();
     if (!response.ok) throw refreshed;
+    if (!refreshed.id_token) {
+      throw new Error('Okta refresh response did not contain an ID token');
+    }
+    await verifyOktaIdToken(refreshed.id_token);
 
     return {
       ...token,
@@ -56,7 +88,8 @@ async function refreshOktaToken(token: JWT): Promise<JWT> {
 
 export const authOptions: NextAuthOptions = {
   providers: [
-    OktaProvider({
+    {
+      ...OktaProvider({
       clientId: process.env.NEXT_PUBLIC_OKTA_CLIENT_ID!,
       // NextAuth v4 requires this property in its provider type, but
       // private_key_jwt authentication never sends or uses this value.
@@ -83,7 +116,13 @@ export const authOptions: NextAuthOptions = {
         },
       },
       authorization: { params: { scope: 'openid profile email offline_access' } },
-    }),
+      }),
+      // NextAuth's built-in Okta provider reads the discovery document's
+      // org-wide JWKS URL. Okta Org AS ID tokens are signed with an
+      // app-specific key, available only from the client_id-qualified JWKS
+      // endpoint, so verify that signature explicitly in the jwt callback.
+      idToken: false,
+    },
   ],
   pages: {
     signIn: '/auth/signin',
@@ -91,6 +130,11 @@ export const authOptions: NextAuthOptions = {
   callbacks: {
     async jwt({ token, account }) {
       if (account) {
+        if (!account.id_token) {
+          throw new Error('Okta did not return an ID token');
+        }
+        await verifyOktaIdToken(account.id_token);
+
         token.accessToken = account.access_token;
         token.idToken = account.id_token;
         token.refreshToken = account.refresh_token;
