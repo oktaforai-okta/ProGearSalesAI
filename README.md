@@ -1,4 +1,4 @@
-# ProGear Sales AI — Okta AI Agent Governance + Auth0 FGA Demo
+# ProGear Sales AI: Okta AI Agent Governance + Auth0 FGA Demo
 
 > A sales-demo app for **CourtEdge ProGear**, a basketball-equipment retailer. An AI shopping/sales assistant is secured end-to-end with **Okta AI Agent Governance** (Workload Principal identity, ID-JAG token exchange), **Auth0 Fine-Grained Authorization (FGA)** for relationship- and context-aware inventory checks, and **Okta Identity Governance (OIG)** for human-in-the-loop approval on large orders.
 
@@ -23,9 +23,9 @@ Pages in the running app:
 
 | Route | What it shows |
 |---|---|
-| `/` | The chat UI ("CourtEdge ProGear") — talk to the sales assistant |
+| `/` | The chat UI ("CourtEdge ProGear"), talk to the sales assistant |
 | `/tokens` | Raw token exchanges, FGA checks, and pending approvals as they happen |
-| `/architecture` | Interactive D3.js diagrams — a relationship graph (with the four business domains — Inventory, Customer, Pricing, Sales — as separate boxes) and a UML-style sequence walkthrough of 4 scenarios (happy path, access denied, blocked on vacation, needs approval) |
+| `/architecture` | Interactive D3.js diagrams: a relationship graph (with the four business domains, Inventory, Customer, Pricing, Sales, as separate boxes) and a UML-style sequence walkthrough of 4 scenarios (happy path, access denied, blocked on vacation, needs approval) |
 
 ## What This Demo Shows
 
@@ -40,8 +40,8 @@ An AI sales agent needs to read and write real business data (inventory, pricing
 | Layer | Technology | What it does |
 |---|---|---|
 | Identity for the agent | Okta AI Agent Governance | The AI has its own Workload Principal (`wlp`) identity, distinct from any human user |
-| Token exchange | ID-JAG (Identity Assertion JWT Authorization Grant) | Two-step exchange: ID token → ID-JAG assertion (Org Authorization Server) → scoped access token (per-domain Custom Authorization Server). RSA keypair auth, no shared secret. No down-scoping — an ungrantable scope fails the whole exchange. |
-| Fine-grained authorization | Auth0 FGA | Second layer for inventory actions — relationship checks (active manager), clearance-level checks, and a live vacation-flag check, on top of Okta's coarse-grained RBAC |
+| Token exchange | ID-JAG (Identity Assertion JWT Authorization Grant) | Two-step exchange: ID token → ID-JAG assertion (Org Authorization Server) → scoped access token (per-domain Custom Authorization Server). RSA keypair auth, no shared secret. No down-scoping: an ungrantable scope fails the whole exchange. |
+| Fine-grained authorization | Auth0 FGA | Second layer for inventory actions: relationship checks (active manager), clearance-level checks, and a live vacation-flag check, on top of Okta's coarse-grained RBAC |
 | Human-in-the-loop | Okta Identity Governance (OIG) | Large inventory writes (≥500 units by default) route to an approval workflow instead of executing immediately |
 | Orchestration | LangGraph | Routes each user query to the right internal domain component and coordinates the response |
 | LLM calls | Anthropic Claude, via the raw Anthropic SDK | Internal domain components call Claude directly (not through LangChain's LLM wrapper) for routing and response generation |
@@ -61,7 +61,7 @@ Okta governs one **ProGear Sales Agent** workload identity. The application cont
 
 ## Demo Data
 
-90 inventory SKUs across 8 categories (Basketballs, Hoops & Backboards, Nets & Accessories, Uniforms & Apparel, Training Equipment, Footwear, Court & Game Equipment, Bags & Storage) and 34 customers, defined in `backend/data/initial_data.json` and served through `backend/data/demo_store.py`. On boot, the backend regenerates a runtime snapshot at `backend/data/live_data.json` (gitignored — it's derived state, never commit it and never hand-edit it).
+90 inventory SKUs across 8 categories (Basketballs, Hoops & Backboards, Nets & Accessories, Uniforms & Apparel, Training Equipment, Footwear, Court & Game Equipment, Bags & Storage) and 34 customers, defined in `backend/data/initial_data.json` and served through `backend/data/demo_store.py`. On boot, the backend regenerates a runtime snapshot at `backend/data/live_data.json` (gitignored: it's derived state, never commit it and never hand-edit it).
 
 ## Tech Stack
 
@@ -69,7 +69,7 @@ Okta governs one **ProGear Sales Agent** workload identity. The application cont
 |---|---|
 | Frontend | Next.js 14 (App Router), TypeScript, Tailwind CSS, NextAuth.js (Okta OIDC), D3.js (architecture visualizations) |
 | Backend | Python, FastAPI (`backend/api/main.py`) |
-| Orchestration | LangGraph (`langgraph>=0.2.0` — a real dependency, not just a label) — `backend/orchestrator/orchestrator.py` |
+| Orchestration | LangGraph (`langgraph>=0.2.0`, a real dependency, not just a label), `backend/orchestrator/orchestrator.py` |
 | LLM integration | Anthropic Python SDK, called directly by internal domain components (no LangChain LLM wrapper) |
 | AuthN/AuthZ | Okta AI Agent Governance (ID-JAG), Auth0 FGA (`openfga-sdk`), Okta Identity Governance |
 | Deployment | Vercel (frontend), Render (backend) |
@@ -93,9 +93,9 @@ pip install -r requirements.txt
 uvicorn api.main:app --reload
 ```
 
-Copy `.env.example` to `.env` and fill in real values before running anything — see it for every variable name used across the frontend, backend, and MCP server (Okta org/app/agent config, Anthropic key, Auth0 FGA store, etc.).
+Copy `.env.example` to `.env` and fill in real values before running anything. See it for every variable name used across the frontend, backend, and MCP server (Okta org/app/agent config, Anthropic key, Auth0 FGA store, etc.).
 
-For a full walkthrough — Okta org setup (AI Agent, Custom Authorization Servers, groups), Auth0 FGA store setup, and deploying to Vercel + Render — see **[docs/implementation-guide.md](docs/implementation-guide.md)**.
+For a full walkthrough of Okta org setup (AI Agent, Custom Authorization Servers, groups), Auth0 FGA store setup, and deploying to Vercel + Render, see **[docs/implementation-guide.md](docs/implementation-guide.md)** (it also covers recovering from an accidentally deleted AI Agent).
 
 ## Customer Learning Notebook
 
@@ -108,9 +108,9 @@ For a full walkthrough — Okta org setup (AI Agent, Custom Authorization Server
 | Document | Audience | Description |
 |---|---|---|
 | **[docs/architecture.md](docs/architecture.md)** | Anyone who wants to understand how it works | Full system walkthrough: token exchange sequence, FGA model, approval flow, MCP notes |
-| **[docs/implementation-guide.md](docs/implementation-guide.md)** | Developers, DevOps | Complete deployment walkthrough — Okta configuration, Vercel + Render setup |
+| **[docs/implementation-guide.md](docs/implementation-guide.md)** | Developers, DevOps | Complete deployment walkthrough: Okta configuration, Vercel + Render setup, and recovering from an accidentally deleted AI Agent |
 | **[docs/okta-security-value.md](docs/okta-security-value.md)** | Security teams, architects | The broader security framing and scenario catalog this demo draws on, including the *why* behind each design decision (why 4 auth servers, why FGA as a second layer, why human approval) |
-| **[docs/okta-ai-security-essentials.md](docs/okta-ai-security-essentials.md)** | Marketers, executives, non-technical readers | The same value story as above, in plain English — no JWT/scope/issuer jargon |
+| **[docs/okta-ai-security-essentials.md](docs/okta-ai-security-essentials.md)** | Marketers, executives, non-technical readers | The same value story as above, in plain English, no JWT/scope/issuer jargon |
 | **[/architecture](https://progear-sales-aiagent.vercel.app/architecture)** (live) | Everyone | Interactive D3.js diagrams of the token exchange and access-control flows |
 
 ## Project Structure

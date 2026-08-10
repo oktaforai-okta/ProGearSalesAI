@@ -297,7 +297,9 @@ async def chat(
                 "clearance_level": clearance_level,  # Fallback from ID token
             }
 
-            # Log ID token for debugging (deployed on Render)
+            # Log sanitized ID token metadata only - never the raw JWT or the
+            # full decoded claim body (deployed on Render; logs are not a
+            # place for token material).
             logger.info(f"=== ID Token (User) ===")
             logger.info(f"User: {user_info.get('email')}")
             logger.info(f"Subject (sub): {user_claims.get('sub')}")
@@ -308,14 +310,7 @@ async def chat(
             logger.info(f"Resolved is_on_vacation: {is_on_vacation}")
             logger.info(f"Clearance claim (raw): {user_claims.get('Clearance')} | clearance_level: {user_claims.get('clearance_level')}")
             logger.info(f"Resolved clearance_level: {clearance_level}")
-            logger.info(f"All claims keys: {list(user_claims.keys())}")
-            # Raw JWT for debugging
-            logger.info(f"=== RAW ID TOKEN (JWT) ===")
-            logger.info(f"{user_token}")
-            # Full decoded claims for debugging
-            import json
-            logger.info(f"=== DECODED ID TOKEN CLAIMS ===")
-            logger.info(json.dumps(user_claims, indent=2, default=str))
+            logger.info(f"Claim keys present: {list(user_claims.keys())}")
         except Exception as e:
             logger.warning(f"Token validation failed: {e}")
             user_info = {"email": "anonymous", "groups": [], "is_manager": False, "is_on_vacation": False, "clearance_level": 0}
@@ -414,38 +409,61 @@ async def okta_config():
 
 @app.get("/api/agents/config")
 async def agent_config():
-    """Get agent configuration for UI display."""
+    """
+    Resource-domain metadata for UI display.
+
+    Okta governs a single AI Agent workload identity for this demo, the
+    ProGear Sales Agent. The four entries below are internal resource
+    domains - each with its own Custom Authorization Server and scope
+    boundary - that the one governed agent performs token exchanges
+    against. They are not four separate registered Okta AI Agent
+    identities, so this response intentionally avoids labeling each domain
+    as its own "Agent".
+    """
+    domains = [
+        {
+            "type": "sales",
+            "domain": "Sales",
+            "description": "Orders, quotes, and sales pipeline",
+            "color": "#3b82f6",
+            "icon": "ShoppingCart",
+        },
+        {
+            "type": "inventory",
+            "domain": "Inventory",
+            "description": "Stock levels, products, and warehouse",
+            "color": "#10b981",
+            "icon": "Package",
+        },
+        {
+            "type": "customer",
+            "domain": "Customer",
+            "description": "Accounts, contacts, and purchase history",
+            "color": "#8b5cf6",
+            "icon": "Users",
+        },
+        {
+            "type": "pricing",
+            "domain": "Pricing",
+            "description": "Pricing, margins, and discounts",
+            "color": "#f59e0b",
+            "icon": "DollarSign",
+        },
+    ]
+    identity_note = (
+        "One Okta AI Agent identity (the ProGear Sales Agent) performs "
+        "token exchanges across these four resource domains. Each domain "
+        "has its own Custom Authorization Server and scope boundary, not "
+        "its own Okta agent identity."
+    )
+
     return {
-        "agents": [
-            {
-                "type": "sales",
-                "name": "ProGear Sales Agent",
-                "description": "Orders, quotes, and sales pipeline",
-                "color": "#3b82f6",
-                "icon": "ShoppingCart",
-            },
-            {
-                "type": "inventory",
-                "name": "ProGear Inventory Agent",
-                "description": "Stock levels, products, and warehouse",
-                "color": "#10b981",
-                "icon": "Package",
-            },
-            {
-                "type": "customer",
-                "name": "ProGear Customer Agent",
-                "description": "Accounts, contacts, and purchase history",
-                "color": "#8b5cf6",
-                "icon": "Users",
-            },
-            {
-                "type": "pricing",
-                "name": "ProGear Pricing Agent",
-                "description": "Pricing, margins, and discounts",
-                "color": "#f59e0b",
-                "icon": "DollarSign",
-            },
-        ]
+        "governed_agent": "ProGear Sales Agent",
+        "identity_note": identity_note,
+        "domains": domains,
+        # Keep the old collection name during the API transition. Entries use
+        # domain labels and do not imply separate registered agent identities.
+        "agents": domains,
     }
 
 

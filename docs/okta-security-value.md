@@ -470,7 +470,7 @@ MCP is how AI agents like Claude connect to external resources (databases, APIs,
 
 > "Enterprise admin has no visibility or control over individual OAuth connections. Cross-App Access shifts control to IT administrators who can enforce policies centrally."
 >
-> — Aaron Parecki, on MCP enterprise authentication
+> - Aaron Parecki, on MCP enterprise authentication
 
 ### What This Means for You
 
