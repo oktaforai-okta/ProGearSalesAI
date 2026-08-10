@@ -518,7 +518,7 @@ The direct User access client ID is the AI Agent workload principal ID and start
 
 > **Two distinct runtime keys, not one.** Steps 3 and 5 above create two unrelated key pairs with two unrelated jobs: the agent workload key (Step 3) signs backend ID-JAG and JWT-bearer requests, and the web-runtime key (Step 5) signs the frontend's `private_key_jwt` sign-in and refresh requests. Rotating or replacing one never requires touching the other.
 
-> **Current Okta behavior for existing agents.** If an agent still uses a legacy User sign-on delegation, or if the agent registration itself was deleted, you cannot point a new agent at an old OIDC app, and you cannot reuse an old agent's OIDC app after that agent is gone. Okta only supports **Create a new OIDC app** in this flow. See [Recovering from an Accidentally Deleted AI Agent](#recovering-from-an-accidentally-deleted-ai-agent) below for the full recovery procedure, including what you do and do not need to rebuild.
+> **Binding behavior is release-dependent.** Okta temporarily rolled back a newer client-to-agent binding model to give customers migration time. The production recovery described in this repository uses a fresh OIDC web app plus a delegation link because that was the compatible behavior enabled in the tenant at recovery time. Do not treat a preview schema or an earlier tenant behavior as a permanent platform contract. Before provisioning or migrating this boundary, verify the behavior currently enabled in the target org and read [Okta AI Agent Client Binding Compatibility](agent-client-binding-compatibility.md).
 
 ### Step 4: Create Authorization Servers (4 MCP APIs)
 
@@ -805,22 +805,22 @@ FGA and OIG key off users, groups, claims, relationships, and workflow configura
 
 ### Choose a sign-on app strategy
 
-Current AI Agent registration and update APIs support two sign-on-provider choices:
+The available client-to-agent binding contract depends on the Okta release enabled in the target org. A newer API schema can advertise `NEW_OIDC_APP` and `EXISTING_APP` while a tenant in the temporary compatibility period rejects the native `signOnProvider` field. That happened during this recovery.
 
-```json
-{"signOnProvider":{"type":"NEW_OIDC_APP"}}
-```
+For a clean recovery, prefer a fresh OIDC application. A fresh app avoids inheriting stale status, assignments, redirect URIs, or a client-authentication method that the application no longer uses. Reuse a surviving app only after a read-only review confirms that the currently enabled API explicitly supports it and that the app matches the intended web sign-on design.
 
-```json
-{"signOnProvider":{"type":"EXISTING_APP","appInstanceId":"0oa..."}}
-```
+The production-compatible fallback used by this repository is:
 
-For a clean recovery, prefer `NEW_OIDC_APP`. A fresh app avoids inheriting stale status, assignments, redirect URIs, or a client-authentication method that the application no longer uses. `EXISTING_APP` is a valid option only after a read-only review confirms that the surviving app is eligible and already matches the intended web sign-on design.
+1. Register the AI Agent without `signOnProvider`.
+2. Create a fresh OIDC web app through the Apps API.
+3. Create an ID-token delegation link from that app to the agent.
+
+When Okta restores the newer native binding model, migrate this boundary from the then-current `main` branch rather than restoring an older repository snapshot. See [Okta AI Agent Client Binding Compatibility](agent-client-binding-compatibility.md) for the decision record and verification checklist.
 
 ### Recovery steps
 
 1. Inventory the surviving AI Agent, OIDC app, authorization servers, policies, user or group assignments, resource connections, and deployment configuration. Do not delete or deactivate anything during discovery.
-2. Register one replacement **ProGear Sales Agent** in `STAGED`. Use `NEW_OIDC_APP` for the recommended clean rebuild, or deliberately use `EXISTING_APP` with a verified eligible `appInstanceId`.
+2. Register one replacement **ProGear Sales Agent** in `STAGED`. Use the native fresh-app binding supported by the target org when available. During the temporary compatibility period, register without `signOnProvider`, create a fresh OIDC web app separately, and connect it with an ID-token delegation link.
 3. Assign owners to the new agent. Okta supports up to five individual owner principals, or an eligible owner group according to your governance policy.
 4. Generate the agent workload key pair with your approved internal key-management process. Add only its public JWK to the agent and keep the private JWK in server-side secret storage.
 5. Configure the sign-on app's callback URL, logout URL, user or group assignments, grant types, and `private_key_jwt` client authentication. If the app uses `private_key_jwt`, use a separate web-runtime key pair and register only that public JWK on the app.
