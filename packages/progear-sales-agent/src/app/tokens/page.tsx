@@ -12,6 +12,7 @@ const AGENT_FLOW_STORAGE_KEY = 'progear-agent-flow';
 const TOKEN_EXCHANGE_STORAGE_KEY = 'progear-token-exchanges';
 const AUTHORIZATION_DECISIONS_STORAGE_KEY = 'progear-authorization-decisions';
 const PENDING_APPROVAL_STORAGE_KEY = 'progear-pending-approval';
+const TOKEN_FLOW_STOP_STORAGE_KEY = 'progear-token-flow-stop';
 
 // Reads the exact same sessionStorage the chat page (/) already writes on
 // every response - no backend or API changes needed to power this page.
@@ -21,6 +22,7 @@ export default function TokensPage() {
   const [tokenExchanges, setTokenExchanges] = useState<any[]>([]);
   const [authorizationDecisions, setAuthorizationDecisions] = useState<any[]>([]);
   const [pendingApproval, setPendingApproval] = useState<ApprovalStatus | null>(null);
+  const [tokenFlowStop, setTokenFlowStop] = useState<string | null>(null);
 
   const loadFromStorage = () => {
     try {
@@ -28,10 +30,12 @@ export default function TokensPage() {
       const exchanges = sessionStorage.getItem(TOKEN_EXCHANGE_STORAGE_KEY);
       const approval = sessionStorage.getItem(PENDING_APPROVAL_STORAGE_KEY);
       const decisions = sessionStorage.getItem(AUTHORIZATION_DECISIONS_STORAGE_KEY);
+      const stopReason = sessionStorage.getItem(TOKEN_FLOW_STOP_STORAGE_KEY);
       if (flow) setAgentFlow(JSON.parse(flow));
       if (exchanges) setTokenExchanges(JSON.parse(exchanges));
       if (approval) setPendingApproval(JSON.parse(approval));
       if (decisions) setAuthorizationDecisions(JSON.parse(decisions));
+      setTokenFlowStop(stopReason);
     } catch (e) {
       console.error('Error loading token data:', e);
     }
@@ -72,13 +76,14 @@ export default function TokensPage() {
           exchanges={tokenExchanges}
           decisions={authorizationDecisions}
           idTokenRaw={session?.idToken}
+          stopReason={tokenFlowStop}
         />
 
         {pendingApproval && (
           <ApprovalStatusCard key={pendingApproval.request_id} initial={pendingApproval} />
         )}
 
-        {agentFlow.length === 0 && tokenExchanges.length === 0 && (
+        {agentFlow.length === 0 && tokenExchanges.length === 0 && authorizationDecisions.length === 0 && !tokenFlowStop && (
           <div className="text-center py-12 text-gray-400">
             <p className="text-sm">
               No activity yet. Send a message on the{' '}

@@ -20,7 +20,7 @@ Production deploys from `main`; feature branches may produce temporary previews,
 
 The ProGear Sales Agent is not a generic chatbot identity or a separate identity for each internal tool. Its Workload Principal (`wlp`) under **Directory → AI Agents** is the durable control point for the complete agent: administrators can assign owners, manage credentials and resource connections, activate or deactivate it, and use Okta's System Log to trace its delegation activity. The application remains customer-owned; Okta supplies the governed identity and preserves accountability when that agent acts for a user.
 
-User sign-in uses Okta **direct User access** on the registered ProGear Sales Agent. The agent-bound OIDC app shares the agent's `wlp...` client ID and authenticates token requests with `private_key_jwt`; there is no separate sign-on client secret.
+User sign-in uses a dedicated Okta OIDC web app linked to the registered ProGear Sales Agent. In the compatibility model active in this tenant, the sign-in client has its own `0oa...` ID while the governed agent keeps its separate `wlp...` identity. Both use independent `private_key_jwt` credentials; there is no shared client secret. See [Okta AI Agent Client Binding Compatibility](docs/agent-client-binding-compatibility.md).
 
 [![CourtEdge ProGear custom agent sign-in page](docs/images/progear-sign-in.png)](https://progear-sales-aiagent.vercel.app/auth/signin)
 
@@ -43,7 +43,7 @@ With **Simulate FGA** enabled, the three default Okta role levels tell one compl
 
 | Persona | Okta role level | Inventory behavior |
 |---|---:|---|
-| Sarah Sales | 0 — Sales | Reads directly; every inventory write is denied, with guidance to contact her manager. No access request is created. |
+| Sarah Sales | 0 — Sales | Reads directly; every inventory write stops before ID-JAG exchange, with guidance to contact her manager. No access request is created. |
 | Mike Manager | 1 — Manager | Reads and writes 1–600 units directly; writes of 601+ units request VP approval when FGA is enabled. |
 | Joe VP | 2 — VP | Reads and writes any quantity directly. |
 

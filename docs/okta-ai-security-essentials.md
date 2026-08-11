@@ -779,7 +779,7 @@ So this demo adds a second, automatic check that uses the live Okta facts for ea
 
 **Why use both Okta and FGA?** Okta remains the source of truth for identity and role level and issues the narrow Inventory token. The Inventory boundary validates that signed token. FGA is purpose-built to combine the role with the requested quantity for one action, without keeping a second mutable role copy that could drift from Okta.
 
-**In plain terms:** Sarah (Level 0) can read, but every write is blocked and she contacts her manager. Mike (Level 1) can write through 600 units, but 601 needs a VP. A Level 2 VP can execute any quantity.
+**In plain terms:** Sarah (Level 0) can read, but every write stops before delegated token exchange and she contacts her manager. Mike (Level 1) can write through 600 units, but 601 needs a VP. A Level 2 VP can execute any quantity.
 
 ### Check #3: Should a human still look at this one?
 

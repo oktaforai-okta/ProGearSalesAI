@@ -47,6 +47,7 @@ const AGENT_FLOW_STORAGE_KEY = 'progear-agent-flow';
 const TOKEN_EXCHANGE_STORAGE_KEY = 'progear-token-exchanges';
 const FGA_CHECKS_STORAGE_KEY = 'progear-fga-checks';
 const AUTHORIZATION_DECISIONS_STORAGE_KEY = 'progear-authorization-decisions';
+const TOKEN_FLOW_STOP_STORAGE_KEY = 'progear-token-flow-stop';
 const PENDING_APPROVAL_STORAGE_KEY = 'progear-pending-approval';
 const APPROVAL_ANNOUNCED_STORAGE_KEY = 'progear-approval-announced';
 
@@ -225,6 +226,7 @@ export default function Home() {
     sessionStorage.removeItem(TOKEN_EXCHANGE_STORAGE_KEY);
     sessionStorage.removeItem(FGA_CHECKS_STORAGE_KEY);
     sessionStorage.removeItem(AUTHORIZATION_DECISIONS_STORAGE_KEY);
+    sessionStorage.removeItem(TOKEN_FLOW_STOP_STORAGE_KEY);
     sessionStorage.removeItem(PENDING_APPROVAL_STORAGE_KEY);
     sessionStorage.removeItem(APPROVAL_ANNOUNCED_STORAGE_KEY);
   };
@@ -321,6 +323,7 @@ export default function Home() {
     sessionStorage.removeItem(TOKEN_EXCHANGE_STORAGE_KEY);
     sessionStorage.removeItem(FGA_CHECKS_STORAGE_KEY);
     sessionStorage.removeItem(AUTHORIZATION_DECISIONS_STORAGE_KEY);
+    sessionStorage.removeItem(TOKEN_FLOW_STOP_STORAGE_KEY);
     sessionStorage.removeItem(PENDING_APPROVAL_STORAGE_KEY);
 
     // End Okta session using OIDC logout endpoint
@@ -356,6 +359,13 @@ export default function Home() {
     setCurrentTokenExchanges([]);
     setCurrentFGAChecks([]);
     setCurrentAuthorizationDecisions([]);
+    setPendingApproval(null);
+    sessionStorage.removeItem(AGENT_FLOW_STORAGE_KEY);
+    sessionStorage.removeItem(TOKEN_EXCHANGE_STORAGE_KEY);
+    sessionStorage.removeItem(FGA_CHECKS_STORAGE_KEY);
+    sessionStorage.removeItem(AUTHORIZATION_DECISIONS_STORAGE_KEY);
+    sessionStorage.removeItem(PENDING_APPROVAL_STORAGE_KEY);
+    sessionStorage.removeItem(TOKEN_FLOW_STOP_STORAGE_KEY);
 
     try {
       const idToken = session?.idToken;
@@ -401,6 +411,8 @@ export default function Home() {
         );
       }
 
+      sessionStorage.removeItem(TOKEN_FLOW_STOP_STORAGE_KEY);
+
       const assistantMessage: Message = {
         id: `msg-${Date.now()}`,
         role: 'assistant',
@@ -416,6 +428,10 @@ export default function Home() {
     } catch (error) {
       console.error('Chat error:', error);
       const errorMessage = error instanceof Error ? error.message : '';
+      const tokenFlowStop = errorMessage
+        ? `Authentication stopped before token exchange. ${errorMessage}`
+        : 'Authentication stopped before token exchange. Please sign in again.';
+      sessionStorage.setItem(TOKEN_FLOW_STOP_STORAGE_KEY, tokenFlowStop);
       setChatMessages((prev) => [
         ...prev,
         {

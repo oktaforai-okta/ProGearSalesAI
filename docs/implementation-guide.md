@@ -444,7 +444,7 @@ Do not use a separate Manager Boolean for application authorization. A compatibi
 
 ### Step 3: Register the AI Agent and Configure Access
 
-This is the only place the AI Agent identity and its user-facing sign-in app get created. Do the sub-steps in this order; the direct User access app depends on the agent already existing, and the web-runtime key depends on that app already existing.
+This is where the AI Agent identity and user-facing sign-in app are connected. Do the sub-steps in order; the workload identity and web-client credentials remain separate even when Okta binds them natively.
 
 1. Navigate to **Directory** → **AI Agents**
    - If you don't see this menu item, contact Okta support to enable AI Agent Governance for your org
@@ -502,8 +502,8 @@ This is the only place the AI Agent identity and its user-facing sign-in app get
    >
    > **Store this single-line version** - you'll paste it into Render's environment variables as `OKTA_AI_AGENT_PRIVATE_KEY`.
 
-4. **Configure direct User access.**
-   - On the AI Agent's **User access** tab, click **Allow user access**, then select **Create a new OIDC app**. Existing OIDC app selection isn't supported here: Okta creates a brand-new app and permanently binds it to this agent.
+4. **Configure employee User access.**
+   - Prefer the AI Agent's supported **User access** flow when it is enabled in your tenant. During the compatibility period used by this production demo, create a fresh OIDC web app and add the supported ID-token delegation link to the Workload Principal. Do not assume the OIDC client ID and Workload Principal ID are identical.
    - Assign the ProGear access groups you created in Step 2 to the newly created app.
    - Configure the app with your callback URL, for example:
 
@@ -517,9 +517,9 @@ This is the only place the AI Agent identity and its user-facing sign-in app get
    - Generate the key pair, add only its public JWK under the app's client credentials, and store the private JWK in the server-only `OKTA_OIDC_PRIVATE_KEY` environment variable. Never use a `NEXT_PUBLIC_` prefix for private key material.
 
 6. **Activate** the agent.
-7. **Copy the Agent ID** (starts with `wlp...`).
+7. Copy both identifiers: the OIDC web-client ID used for sign-in (an `0oa...` ID in this deployment) and the Agent ID (starts with `wlp...`).
 
-The direct User access client ID is the AI Agent workload principal ID and starts with `wlp...`. Neither the agent workload key nor the web-runtime key is a client secret, and a client secret is never used for either path.
+In this repository's current compatibility deployment, `OKTA_CLIENT_ID` is the OIDC web-client ID (`0oa...`) and `OKTA_AI_AGENT_ID` is the distinct Workload Principal ID (`wlp...`). Neither private key is a client secret, and the two keys are never interchangeable.
 
 > **CRITICAL: AI Agent Owners vs User Assignments**
 >
@@ -809,9 +809,9 @@ Use this checklist to track what you've collected:
 │    Your value: ___________________________________________            │
 │                                                                       │
 │  □ OKTA_CLIENT_ID                                                     │
-│    AI Agent direct User access Client ID                              │
-│    Example: wlpXXXXXXXXXXXXXX                                         │
-│    Where: Directory → AI Agents → ProGear Sales Agent → User access   │
+│    Employee sign-in OIDC client ID                                    │
+│    Example: 0oaXXXXXXXXXXXXXX                                         │
+│    Where: Applications → Applications → ProGear User Access           │
 │    Your value: ___________________________________________            │
 │                                                                       │
 │  □ OKTA_OIDC_PRIVATE_KEY                                              │
@@ -987,10 +987,10 @@ After the replacement works end to end, prepare a separate cleanup list for stal
    | `NEXTAUTH_URL` | `https://your-project-name.vercel.app` | Use your actual Vercel URL from dashboard |
    | `NEXTAUTH_SECRET` | (the value you generated above) | Required for session encryption |
    | `NEXT_PUBLIC_API_URL` | Leave empty for now | We'll add this after Render deployment |
-   | `NEXT_PUBLIC_OKTA_CLIENT_ID` | Your AI Agent client ID | Starts with `wlp...` |
+   | `NEXT_PUBLIC_OKTA_CLIENT_ID` | Employee sign-in OIDC client ID | `0oa...` in the compatibility deployment |
    | `NEXT_PUBLIC_OKTA_DOMAIN` | `https://your-org.okta.com` | Your Okta org URL |
    | `NEXT_PUBLIC_OKTA_ISSUER` | `https://your-org.okta.com` | Your Okta org URL (NO auth server ID - use Org AS) |
-   | `OKTA_CLIENT_ID` | Your AI Agent client ID | Same as NEXT_PUBLIC version |
+   | `OKTA_CLIENT_ID` | Employee sign-in OIDC client ID | Same as NEXT_PUBLIC version; distinct from `OKTA_AI_AGENT_ID` |
    | `OKTA_OIDC_PRIVATE_KEY` | Your server-only private JWK | Generate locally; register only its public JWK in Okta |
 
 5. Click **Save** for each variable, then go to **Deployments** and click **Redeploy** on the latest deployment
@@ -1059,7 +1059,7 @@ In Render, go to **Environment** and add these variables:
 |----------|-------|
 | `ANTHROPIC_API_KEY` | Your Anthropic API key |
 | `OKTA_DOMAIN` | `https://your-org.okta.com` |
-| `OKTA_CLIENT_ID` | Your AI Agent client ID |
+| `OKTA_CLIENT_ID` | Employee sign-in OIDC client ID (`0oa...` in this deployment) |
 | `OKTA_AI_AGENT_ID` | Your AI Agent ID (`wlp...`) |
 | `OKTA_AI_AGENT_PRIVATE_KEY` | Your JWK private key (entire JSON on one line) |
 | `OKTA_APPROVAL_EXECUTOR_CLIENT_ID` | Dedicated approval executor service-app client ID (`0oa...`) |
@@ -1073,7 +1073,7 @@ In Render, go to **Environment** and add these variables:
 | `OKTA_CUSTOMER_AUDIENCE` | `api://progear-customer` |
 | `OKTA_PRICING_AUTH_SERVER_ID` | Your Pricing auth server ID |
 | `OKTA_PRICING_AUDIENCE` | `api://progear-pricing` |
-| `OKTA_API_TOKEN` | Admin API token used for scoped profile controls and approver-role verification |
+| `OKTA_API_TOKEN` | Admin API token used for scoped profile controls, live clearance lookup, and approver-role verification |
 | `FGA_API_URL` | Your FGA API URL |
 | `FGA_STORE_ID` | Your FGA store ID |
 | `FGA_MODEL_ID` | The published role-model ID |
@@ -1151,7 +1151,7 @@ Expected response:
 |----------|----------|----------|-------------|
 | `ANTHROPIC_API_KEY` | Render | Yes | Anthropic Claude API key |
 | `OKTA_DOMAIN` | Both | Yes | Your Okta org URL |
-| `OKTA_CLIENT_ID` | Both | Yes | AI Agent direct User access client ID |
+| `OKTA_CLIENT_ID` | Both | Yes | Employee sign-in OIDC client ID; distinct from the Workload Principal in this deployment |
 | `OKTA_OIDC_PRIVATE_KEY` | Vercel | Yes | Server-only private JWK for private_key_jwt |
 | `OKTA_AI_AGENT_ID` | Render | Yes | AI Agent entity ID (`wlp...`) |
 | `OKTA_AI_AGENT_PRIVATE_KEY` | Render | Yes | JWK private key (JSON string) |
@@ -1166,7 +1166,7 @@ Expected response:
 | `OKTA_CUSTOMER_AUDIENCE` | Render | Yes | `api://progear-customer` |
 | `OKTA_PRICING_AUTH_SERVER_ID` | Render | Yes | Pricing domain's Custom Authorization Server ID |
 | `OKTA_PRICING_AUDIENCE` | Render | Yes | `api://progear-pricing` |
-| `OKTA_API_TOKEN` | Render | Yes | Scoped demo profile updates and OIG approver-role verification |
+| `OKTA_API_TOKEN` | Render | Yes | Scoped demo profile updates, live clearance lookup, and OIG approver-role verification |
 | `FGA_API_URL` | Render | Yes | FGA API base URL |
 | `FGA_STORE_ID` | Render | Yes | FGA store ID |
 | `FGA_MODEL_ID` | Render | Yes | Published three-tier role model ID |
@@ -1181,7 +1181,7 @@ Expected response:
 | `NEXTAUTH_URL` | Vercel | Yes | Your Vercel URL |
 | `NEXTAUTH_SECRET` | Vercel | Yes | Generate: `openssl rand -base64 32` |
 | `NEXT_PUBLIC_API_URL` | Vercel | Yes | Your Render URL |
-| `NEXT_PUBLIC_OKTA_CLIENT_ID` | Vercel | Yes | AI Agent client ID (for frontend) |
+| `NEXT_PUBLIC_OKTA_CLIENT_ID` | Vercel | Yes | Employee sign-in OIDC client ID (for frontend) |
 | `NEXT_PUBLIC_OKTA_DOMAIN` | Vercel | Yes | Your Okta org URL |
 | `NEXT_PUBLIC_OKTA_ISSUER` | Vercel | Yes | `https://your-org.okta.com` (NO auth server ID - use Org AS) |
 | `CORS_ORIGINS` | Render | Yes | Your Vercel URL |
@@ -1336,11 +1336,11 @@ Use these talking points when presenting:
 
 ### `invalid_subject_token` error
 
-**Cause**: The user ID token wasn't issued to the AI Agent's direct User access client.
+**Cause**: The user ID token wasn't issued to the configured employee sign-in OIDC client, or the backend is validating it against the Workload Principal ID instead of the OIDC client ID.
 
 **Solution**:
-1. Go to the AI Agent's **User access** tab and verify direct User access is configured.
-2. Verify the application uses the agent's `wlp...` client ID and the bound OIDC app's callback URL.
+1. Verify the OIDC web app is linked to the AI Agent using the binding mechanism supported by your tenant.
+2. Verify `NEXT_PUBLIC_OKTA_CLIENT_ID` and backend `OKTA_CLIENT_ID` use the OIDC web-client ID, while `OKTA_AI_AGENT_ID` uses the separate `wlp...` Workload Principal ID.
 3. Sign out and sign in again to obtain a new ID token for the direct User access client.
 
 ### `user_not_assigned` error

@@ -45,7 +45,7 @@ The backend never talks to a database: it reads/writes a JSON file (`backend/dat
 
 ## 1. Identity: the AI agent has its own Okta identity
 
-The AI is not "the user with extra code around it." It is registered in Okta as a **Workload Principal**, a distinct machine identity whose entity ID starts with `wlp...`. The same `wlp...` identifier is the client ID of the OIDC app Okta permanently binds when **direct User access** is enabled. The Vercel web runtime authenticates its authorization-code and refresh-token requests with a dedicated `private_key_jwt` key (`OKTA_OIDC_PRIVATE_KEY`), while the backend uses its workload key for ID-JAG exchanges. Neither path uses a shared client secret. The production deployment uses one shared `OKTA_AI_AGENT_ID` / `OKTA_AI_AGENT_PRIVATE_KEY` identity across its internal domain configurations; the per-domain environment variables are optional code-level overrides, not four required Okta AI Agent registrations.
+The AI is not "the user with extra code around it." It is registered in Okta as a **Workload Principal**, a distinct machine identity whose entity ID starts with `wlp...`. The compatibility model active in this tenant uses a separate `0oa...` OIDC web app for employee sign-in and links its ID tokens to the governed agent for delegation. The Vercel web runtime authenticates authorization-code and refresh-token requests with a dedicated `private_key_jwt` key (`OKTA_OIDC_PRIVATE_KEY`), while the backend uses the agent's workload key for ID-JAG exchanges. Neither path uses a shared client secret. The production deployment uses one shared `OKTA_AI_AGENT_ID` / `OKTA_AI_AGENT_PRIVATE_KEY` identity across its internal domain configurations; the per-domain environment variables are optional code-level overrides, not four required Okta AI Agent registrations. See [Okta AI Agent Client Binding Compatibility](./agent-client-binding-compatibility.md).
 
 Because the agent's identity is separate from the human user's identity, every access decision downstream can be phrased as "is the ProGear Sales Agent, acting on behalf of User Y, allowed to do Z?" This is the shape Okta's AI Agent Governance and the audit trail in the Okta System Log are built around.
 
@@ -58,6 +58,8 @@ Deleting the Workload Principal invalidates the agent identity even if a previou
 ## 2. Token exchange: two-step ID-JAG
 
 The core mechanism is the **Identity Assertion JWT Authorization Grant (ID-JAG)**, implemented in `backend/auth/multi_agent_auth.py`. It is a two-step exchange, and both steps run for each resource domain required by the request:
+
+Before Step 1, the backend verifies the employee's OIDC ID token and reads the employee's current `clearance_level` from the Okta profile. A known-ineligible inventory write stops here: Sarah is told to contact her manager, and no delegated token is requested. In simple mode, Mike's 601+ write likewise stops with VP guidance. Reads and eligible writes continue.
 
 **Step 1: ID token → ID-JAG (at the Org Authorization Server)**
 The user's Okta ID token (from their NextAuth login) is exchanged for an ID-JAG assertion. This assertion names *both* the user and the agent: "Agent X is acting on behalf of User Y." This happens at Okta's Org AS (configured via `OKTA_MAIN_AUTH_SERVER_ID`), using the agent's RSA keypair, not the user's credentials.
@@ -89,10 +91,11 @@ If the Okta AI SDK or agent credentials aren't configured, `multi_agent_auth.py`
 `backend/orchestrator/orchestrator.py` uses the real `langgraph` package (`from langgraph.graph import StateGraph, END`; `langgraph>=0.2.0` is a genuine dependency in `backend/requirements.txt`, not just a label) to define the request pipeline as an explicit graph:
 
 ```
-router → exchange_tokens → fga_check → approval_gate → process_agents → generate_response
+router → pre_exchange_guard → exchange_tokens → fga_check → approval_gate → process_agents → generate_response
 ```
 
 - **router**: an LLM call (Claude, via the raw Anthropic SDK) decides which internal domain components are relevant to the user's message and, critically, which *specific scope* is needed. For example, "what's our basketball stock?" needs `inventory:read`, while "add 500 basketballs" needs `inventory:write`. If the LLM call or its JSON parsing fails, a keyword-matching fallback (`AGENT_KEYWORDS` / `SCOPE_DEFINITIONS`) selects the domain and scope instead.
+- **pre_exchange_guard**: applies the employee's live Okta clearance to known inventory-write boundaries before asking for delegated credentials. Sales writes stop with manager guidance in both modes; a Manager 601+ write stops in simple mode but continues to the FGA/OIG path when FGA is enabled.
 - **exchange_tokens**: runs the two-step ID-JAG exchange for every selected resource domain, then independently verifies the resource token's signature, issuer, audience, expiry, governed-agent identity, delegated user, and requested scopes in `backend/auth/resource_token.py`.
 - **fga_check**: the FGA layer described below. It runs after validation because the Inventory Custom Authorization Server's access token carries the authoritative `Clearance` claim.
 - **approval_gate**: the OIG human-in-the-loop check, described below.
@@ -109,7 +112,7 @@ The model name comes from `LLM_MODEL_NAME` (default `claude-sonnet-4-6`); the ke
 
 Okta authenticates the human and agent, grants a coarse inventory scope, and signs the user's live `Clearance` value into the inventory access token. FGA, implemented in `backend/auth/fga_client.py`, answers the next question: "given this role and quantity, may this request execute directly?" It is a separate authorization call against the hosted FGA store.
 
-The presentation UI makes this advanced path opt-in. With **Simulate FGA** off, `POST /api/chat` applies the same role matrix locally and denies any request that needs a higher role instead of creating an OIG request. With it on, the request includes `simulate_fga: true`, enabling the hosted decision and the one approval route. Because simple mode is deny-only for upward routing, this browser preference cannot weaken authorization.
+The presentation UI makes this advanced path opt-in. With **Simulate FGA** off, `POST /api/chat` applies the same live Okta role matrix and denies any request that needs a higher role instead of creating an OIG request. With it on, the request includes `simulate_fga: true`, enabling the hosted decision and the one approval route. Because simple mode is deny-only for upward routing, this browser preference cannot weaken authorization.
 
 ### The model
 
@@ -191,7 +194,7 @@ A placeholder token is never accepted.
 
 ## 8. Audit trail
 
-Every ID-JAG exchange, granted or denied, is a token-grant event in **Okta's System Log**, a queryable, tamper-evident stream that exists independently of this app's own logging. `GET /api/okta/logs` in `backend/api/main.py` queries the real Okta System Log API (`/api/v1/logs`, authenticated with `OKTA_API_TOKEN`) for `token.grant`/token-exchange events and reshapes them into a consistent shape: which agent (actor) acted, on behalf of which user (target), against which Custom Authorization Server, and which scopes were requested versus actually granted. This is Okta's own audit record, not a log table this app maintains.
+Every ID-JAG exchange that is actually attempted, whether granted or denied, produces evidence in **Okta's System Log**, a queryable, tamper-evident stream that exists independently of this app's own logging. A pre-exchange clearance denial correctly has no ID-JAG event; the app records that stopped decision after the employee's verified sign-in step. `GET /api/okta/logs` in `backend/api/main.py` queries the real Okta System Log API (`/api/v1/logs`, authenticated with `OKTA_API_TOKEN`) for `token.grant`/token-exchange events and reshapes them into a consistent shape: which agent (actor) acted, on behalf of which user (target), against which Custom Authorization Server, and which scopes were requested versus actually granted. This is Okta's own audit record, not a log table this app maintains.
 
 **Honest limitation:** the endpoint above is real and callable, but the frontend page that rendered it (`OktaSystemLog`, on the now-removed `/how-it-works` page) is gone. There's currently no UI surfacing this data, only the API.
 

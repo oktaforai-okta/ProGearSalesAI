@@ -34,6 +34,7 @@ from orchestrator.orchestrator import Orchestrator
 from dataclasses import asdict
 from data.demo_store import demo_store
 from services.factory import build_approval_service
+from services.okta_role_resolver import OktaRoleResolver
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -294,10 +295,9 @@ async def chat(
         try:
             user_claims = await okta_auth.validate_token(user_token)
 
-            # Extract the fallback role claim from the Okta ID token.
-            # The Inventory Custom Authorization Server token is authoritative
-            # during the FGA check; clearance_level is the sole role source.
-            # ID token is used for initial authentication only
+            # The ID token authenticates the employee. Authorization uses the
+            # employee's live Okta profile so a role change takes effect on the
+            # next request and a browser value can never grant write access.
             clearance_level = -1
             clearance_claim = user_claims.get("Clearance", user_claims.get("clearance_level"))
             if clearance_claim is not None:
@@ -306,12 +306,24 @@ async def chat(
                 except (ValueError, TypeError):
                     logger.warning(f"Invalid Clearance claim in ID token: {clearance_claim}")
 
+            role_identifier = user_claims.get("sub") or user_claims.get("email")
+            try:
+                clearance_level = await OktaRoleResolver(
+                    base_url=os.environ["OKTA_DOMAIN"],
+                    api_token=os.environ["OKTA_API_TOKEN"],
+                ).resolve(role_identifier or "")
+            except (KeyError, httpx.HTTPError, ValueError) as exc:
+                # Fail closed for writes. Reads may still proceed; the
+                # orchestrator treats -1 as an unassigned role for any write.
+                logger.warning("Could not resolve live Okta clearance: %s", exc)
+                clearance_level = -1
+
             user_info = {
                 "sub": user_claims.get("sub"),
                 "email": user_claims.get("email"),
                 "name": user_claims.get("name"),
                 "groups": user_claims.get("groups", []),
-                "clearance_level": clearance_level,  # Fallback from ID token
+                "clearance_level": clearance_level,
             }
 
             # Log sanitized ID token metadata only - never the raw JWT or the
@@ -326,7 +338,10 @@ async def chat(
             logger.info(f"Claim keys present: {list(user_claims.keys())}")
         except Exception as e:
             logger.warning(f"Token validation failed: {e}")
-            raise HTTPException(status_code=401, detail="Invalid or expired Okta token") from e
+            raise HTTPException(
+                status_code=401,
+                detail="Your sign-in token could not be verified. Please sign out and sign back in.",
+            ) from e
     else:
         raise HTTPException(status_code=401, detail="Missing Okta bearer token")
 

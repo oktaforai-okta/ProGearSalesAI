@@ -24,6 +24,7 @@ def make_workflow_state(role_level: int, message: str, scope: str) -> tuple[Orch
             }
         },
         "agent_flow": [],
+        "token_exchanges": [],
         "authorization_decisions": [],
         "fga_checks": [{"should": "be cleared"}],
         "simulate_fga": False,
@@ -62,6 +63,91 @@ class SimpleAuthorizationTests(unittest.TestCase):
 
 
 class SimpleAuthorizationWorkflowTests(unittest.IsolatedAsyncioTestCase):
+    async def test_sales_write_stops_before_exchange_in_simple_mode(self):
+        orchestrator, state = make_workflow_state(
+            0,
+            "Can you add 50 basketballs to the inventory?",
+            "inventory:write",
+        )
+        state["agent_results"] = {}
+        state = await orchestrator._pre_exchange_guard_node(state)
+
+        self.assertEqual(state["agents_to_invoke"], [])
+        self.assertEqual(state["token_exchanges"], [])
+        self.assertFalse(state["authorization_decisions"][0]["token_issued"])
+        self.assertIn("contact your manager", state["authorization_decisions"][0]["reason"])
+
+    async def test_sales_write_stops_before_exchange_with_fga_enabled(self):
+        orchestrator, state = make_workflow_state(
+            0,
+            "Can you add 50 basketballs to the inventory?",
+            "inventory:write",
+        )
+        state["agent_results"] = {}
+        state["simulate_fga"] = True
+        state = await orchestrator._pre_exchange_guard_node(state)
+
+        self.assertEqual(state["agents_to_invoke"], [])
+        self.assertEqual(state["token_exchanges"], [])
+        self.assertIn(
+            "contact your manager",
+            state["agent_results"][AGENT_INVENTORY]["authorization_reason"],
+        )
+
+    async def test_sales_write_response_explains_clearance_and_manager(self):
+        orchestrator, state = make_workflow_state(
+            0,
+            "Can you add 50 basketballs to the inventory?",
+            "inventory:write",
+        )
+        state["agent_results"] = {}
+        state["pending_approval"] = None
+        state = await orchestrator._pre_exchange_guard_node(state)
+        state = await orchestrator._generate_response_node(state)
+
+        self.assertEqual(
+            state["final_response"],
+            "I didn’t change the inventory. Sales can read inventory but cannot change it. "
+            "Please contact your manager to make the change.",
+        )
+
+    async def test_manager_large_write_stops_before_exchange_in_simple_mode(self):
+        orchestrator, state = make_workflow_state(
+            1,
+            "Add 605 basketballs to inventory",
+            "inventory:write",
+        )
+        state["agent_results"] = {}
+        state = await orchestrator._pre_exchange_guard_node(state)
+
+        self.assertEqual(state["agents_to_invoke"], [])
+        self.assertEqual(state["token_exchanges"], [])
+        self.assertIn("requires VP permission", state["authorization_decisions"][0]["reason"])
+
+    async def test_manager_large_write_continues_to_fga_approval_path(self):
+        orchestrator, state = make_workflow_state(
+            1,
+            "Add 605 basketballs to inventory",
+            "inventory:write",
+        )
+        state["agent_results"] = {}
+        state["simulate_fga"] = True
+        state = await orchestrator._pre_exchange_guard_node(state)
+
+        self.assertEqual(state["agents_to_invoke"], [AGENT_INVENTORY])
+        self.assertEqual(state["authorization_decisions"], [])
+
+    async def test_sales_read_continues_to_exchange(self):
+        orchestrator, state = make_workflow_state(
+            0,
+            "How many basketballs are in stock?",
+            "inventory:read",
+        )
+        state["agent_results"] = {}
+        state = await orchestrator._pre_exchange_guard_node(state)
+
+        self.assertEqual(state["agents_to_invoke"], [AGENT_INVENTORY])
+
     async def test_sales_write_is_blocked_without_fga_or_approval(self):
         orchestrator, state = make_workflow_state(
             0,

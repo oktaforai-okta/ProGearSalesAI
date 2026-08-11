@@ -12,15 +12,16 @@ Sarah never creates an access request. She asks her manager to make the change. 
 
 ## End-to-end decision
 
-1. Okta authenticates the employee and identifies the ProGear agent Workload Principal.
-2. ID-JAG carries the employee + agent delegation to the Inventory Authorization Server.
-3. The server issues a coarse, scoped Inventory token and signs `Clearance = user.clearance_level` into it.
-4. Inventory independently validates the token signature, issuer, audience, expiry, agent identity, delegated employee, and required scope.
-5. Simple mode applies the same role matrix locally. FGA mode maps the validated `Clearance` value to one contextual relationship—`role_sales`, `role_manager`, or `role_vp`—and combines it with the requested quantity.
-6. The resource mutates inventory only when the final decision is `allow`. Before creating a VP request, the backend proves that it can mint and validate the real execution token; a broken execution path cannot create a theatrical approval card.
-7. A Manager request above 600 is left unchanged while the VP OIG request is pending. After approval, the backend verifies that the approver currently has Level 2 in Okta, mints and validates a fresh scoped Okta service token for the governed agent, and performs the write once using the request ID as an idempotency key.
+1. Okta authenticates the employee; the backend reads that employee's current `clearance_level` from the live Okta profile.
+2. A known-ineligible inventory write stops immediately. Sarah is told to contact her manager; in simple mode Mike is told to contact a VP for 601+ units. No ID-JAG is requested for that stopped domain.
+3. For a request allowed to continue, ID-JAG carries the employee + agent delegation to the Inventory Authorization Server.
+4. The server issues a coarse, scoped Inventory token and signs `Clearance = user.clearance_level` into it.
+5. Inventory independently validates the token signature, issuer, audience, expiry, agent identity, delegated employee, and required scope.
+6. Simple mode executes only a direct allow. FGA mode maps the validated `Clearance` value to one contextual relationship—`role_sales`, `role_manager`, or `role_vp`—and combines it with the requested quantity.
+7. The resource mutates inventory only when the final decision is `allow`. Before creating a VP request, the backend proves that it can mint and validate the real execution token; a broken execution path cannot create a theatrical approval card.
+8. A Manager request above 600 is left unchanged while the VP OIG request is pending. After approval, the backend verifies that the approver currently has Level 2 in Okta, mints and validates a fresh scoped Okta service token for the approval executor, and performs the write once using the request ID as an idempotency key.
 
-Token issuance is necessary, not sufficient. Sarah may receive a coarse `inventory:write` token because the authorization server permits the request to reach the application policy. Her Level 0 business decision still blocks the write, and the token page shows those as separate stages.
+Token issuance is necessary, not sufficient—but a token is not requested when the answer is already known. Sarah's live Level 0 profile stops an inventory write before ID-JAG exchange and the token page explains that she must contact her manager. Eligible requests continue to delegated token exchange; the resource and FGA layers can still deny or route the action after a scoped token is issued.
 
 ## Live Okta configuration
 

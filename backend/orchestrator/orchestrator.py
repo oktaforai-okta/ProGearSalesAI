@@ -203,18 +203,30 @@ class Orchestrator:
 
         # Add nodes
         workflow.add_node("router", self._router_node)
+        workflow.add_node("pre_exchange_guard", self._pre_exchange_guard_node)
         workflow.add_node("exchange_tokens", self._exchange_tokens_node)
         workflow.add_node("fga_check", self._fga_check_node)
         workflow.add_node("approval_gate", self._approval_gate_node)
         workflow.add_node("process_agents", self._process_agents_node)
         workflow.add_node("generate_response", self._generate_response_node)
 
-        # Linear flow: router -> exchange -> fga_check -> approval_gate -> process/response
-        # Token exchange runs first because the resource token carries the live
-        # Clearance claim. The resource validates that token before policy or
-        # data access, then FGA optionally evaluates role + quantity.
+        # Known hard denials stop before delegated tokens are requested. Other
+        # requests continue through token exchange, resource validation, and
+        # (when enabled) the FGA/approval decision.
         workflow.set_entry_point("router")
-        workflow.add_edge("router", "exchange_tokens")
+        workflow.add_edge("router", "pre_exchange_guard")
+
+        def _route_after_pre_exchange_guard(state: WorkflowState) -> str:
+            return "exchange_tokens" if state.get("agents_to_invoke") else "generate_response"
+
+        workflow.add_conditional_edges(
+            "pre_exchange_guard",
+            _route_after_pre_exchange_guard,
+            {
+                "exchange_tokens": "exchange_tokens",
+                "generate_response": "generate_response",
+            },
+        )
         workflow.add_edge("exchange_tokens", "fga_check")
         workflow.add_edge("fga_check", "approval_gate")
 
@@ -240,6 +252,86 @@ class Orchestrator:
         workflow.add_edge("generate_response", END)
 
         return workflow.compile()
+
+    async def _pre_exchange_guard_node(self, state: WorkflowState) -> WorkflowState:
+        """Stop inventory writes that the live Okta role cannot initiate.
+
+        Sales writes are always denied here. In simple mode, Manager writes
+        above 600 units also stop here. In FGA mode those Manager requests are
+        allowed to continue because the later FGA/OIG path can request VP
+        approval. No ID-JAG or resource token is requested for a stopped
+        domain.
+        """
+        agents = list(state.get("agents_to_invoke", []))
+        if AGENT_INVENTORY not in agents:
+            return state
+
+        scopes = state.get("agent_scopes", {}).get(AGENT_INVENTORY, [])
+        if "inventory:write" not in scopes:
+            return state
+
+        clearance_level = normalize_role_level(
+            self.user_info.get("clearance_level", self.user_info.get("Clearance"))
+        )
+        policy = decide_inventory_policy(scopes, state["user_message"], clearance_level)
+        should_stop = bool(policy.hard_denial_reason) or (
+            not state.get("simulate_fga", False) and not policy.direct_allowed
+        )
+        if not should_stop:
+            return state
+
+        message = simple_authorization_message(policy)
+        if message is None:
+            message = "I can’t complete that request with your current permissions."
+        config = get_agent_config(AGENT_INVENTORY)
+        demo = DEMO_AGENTS.get(AGENT_INVENTORY, {})
+        agent_info = {
+            "name": config.name if config else demo.get("name", "Inventory"),
+            "display_name": (
+                config.display_name if config else demo.get("display_name", "Inventory")
+            ),
+            "color": config.color if config else demo.get("color", "#888"),
+        }
+
+        state.setdefault("agent_results", {})[AGENT_INVENTORY] = {
+            "success": False,
+            "access_denied": True,
+            "requested_scopes": scopes,
+            "authorization_reason": message,
+            "error": message,
+            "error_code": "insufficient_clearance",
+            "token_issued": False,
+            "resource_token_validated": False,
+            "agent_info": agent_info,
+        }
+        state.setdefault("authorization_decisions", []).append({
+            "agent": AGENT_INVENTORY,
+            "mode": "okta",
+            "engine": "Okta clearance policy",
+            "operation": policy.operation,
+            "quantity": policy.quantity,
+            "role_level": clearance_level,
+            "role_name": role_name(clearance_level),
+            "required_level": policy.required_level,
+            "required_role": policy.required_role,
+            "relation": policy.relation,
+            "decision": "deny",
+            "outcome": "blocked",
+            "reason": message,
+            "token_issued": False,
+            "token_validated": False,
+            "approval_role": policy.approval_role,
+            "approval_level": policy.approval_level,
+        })
+        state["agents_to_invoke"] = [agent for agent in agents if agent != AGENT_INVENTORY]
+        state.setdefault("agent_flow", []).append({
+            "step": "pre_exchange_guard",
+            "action": "Okta clearance stopped the inventory write before token exchange",
+            "detail": message,
+            "status": "denied",
+            "requested_scopes": scopes,
+        })
+        return state
 
     async def _router_node(self, state: WorkflowState) -> WorkflowState:
         """
@@ -953,8 +1045,12 @@ Return ONLY the JSON object, no other text."""
 
             state["token_exchanges"].append(exchange_record)
 
-        # Store results for next node
-        state["agent_results"] = exchange_results
+        # Preserve any domain stopped by the pre-exchange guard while adding
+        # the exchange results for domains that were allowed to continue.
+        state["agent_results"] = {
+            **state.get("agent_results", {}),
+            **exchange_results,
+        }
 
         # Summary for flow
         granted = sum(1 for r in exchange_results.values() if r.get("token_issued") and not r.get("access_denied"))
@@ -1335,11 +1431,7 @@ Return ONLY the JSON object, no other text."""
         simple_denial_message = (
             agent_results.get(AGENT_INVENTORY, {}).get("authorization_reason")
         )
-        if (
-            inventory_write_denied
-            and not state.get("simulate_fga", False)
-            and simple_denial_message
-        ):
+        if inventory_write_denied and simple_denial_message:
             permission_message = simple_denial_message
         elif inventory_write_denied and hard_denial:
             permission_message = f"I didn’t change the inventory. {hard_denial}"

@@ -691,7 +691,7 @@ If an AI agent is compromised or behaving unexpectedly:
 
 Everything above - Workload Principals, ID-JAG, four Custom Authorization Servers - answers one question well: **may this governed agent obtain a token for this resource and scope while acting for this user?** For Inventory, both read and write scopes let the request reach the resource. A write scope is not permission to bypass the next decision.
 
-That question is necessary, but it is not sufficient for every access decision. This demo adds a second layer—**FGA** (Fine-Grained Authorization)—that runs *after* token exchange to answer: **given this live Okta role and this quantity, may the request execute, stop, or require VP approval?**
+That question is necessary, but it is not sufficient for every access decision. Known Sales writes stop at the live Okta clearance guard before delegated tokens are requested. For eligible requests, this demo adds a second layer—**FGA** (Fine-Grained Authorization)—after token exchange to answer: **given this live Okta role and this quantity, may the request execute, stop, or require VP approval?**
 
 ### Why not just make Okta's policy more granular?
 
@@ -715,7 +715,7 @@ FGA runs on top of the Okta scope check, for the Inventory domain, only after Ok
 
 ### Why this is a second layer, not duplicated work
 
-Okta and FGA are not answering the same question twice. Okta authenticates the user and agent, establishes the role claim, and issues the resource token. The Inventory boundary validates that token; FGA then combines the role with quantity for the per-action decision. OIG records the one human escalation when a Manager crosses 600 units.
+Okta and FGA are not answering the same question twice. Okta authenticates the employee, governs the agent, and supplies the live clearance used to stop known-ineligible writes before delegation. For requests that continue, Okta issues the resource token, the resource validates it, and FGA combines role with quantity for the per-action decision. OIG records the one human escalation when a Manager crosses 600 units.
 
 ---
 
