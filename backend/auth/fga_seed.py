@@ -13,7 +13,7 @@ import asyncio
 
 async def verify() -> None:
     """Run a small decision matrix against the configured live FGA model."""
-    from auth.fga_client import check_inventory_access_via_fga
+    from auth.fga_client import close_fga_client, check_inventory_access_via_fga
 
     checks = [
         ("Sales read", 1, False, "can_read", True),
@@ -28,19 +28,22 @@ async def verify() -> None:
 
     print("--- ProGear Inventory FGA verification ---")
     failed = 0
-    for label, role_level, vacation, relation, expected in checks:
-        result = await check_inventory_access_via_fga(
-            user_email="fga.verification@example.com",
-            is_on_vacation=vacation,
-            role_level=role_level,
-            relation=relation,
-        )
-        passed = result.allowed is expected
-        failed += int(not passed)
-        print(
-            f"{'PASS' if passed else 'FAIL'} {label}: "
-            f"allowed={result.allowed}, expected={expected}"
-        )
+    try:
+        for label, role_level, vacation, relation, expected in checks:
+            result = await check_inventory_access_via_fga(
+                user_email="fga.verification@example.com",
+                is_on_vacation=vacation,
+                role_level=role_level,
+                relation=relation,
+            )
+            passed = result.allowed is expected
+            failed += int(not passed)
+            print(
+                f"{'PASS' if passed else 'FAIL'} {label}: "
+                f"allowed={result.allowed}, expected={expected}"
+            )
+    finally:
+        await close_fga_client()
 
     if failed:
         raise SystemExit(f"{failed} FGA verification check(s) failed")
