@@ -28,7 +28,7 @@ Pages in the running app:
 | `/architecture` | Interactive D3.js diagrams and a sequence walkthrough of the read, Manager-approval, vacation-block, and VP-approval stories |
 | `/fga` | Opt-in live Okta role controls and a simple D3 view of the FGA decision |
 
-The application starts in simple chat mode. **Simulate FGA** is off by default; enabling it on `/fga` reveals the live role/vacation controls and guided inventory prompts, and opts chat requests into hosted FGA checks plus OIG approval routing. Simple mode still enforces the Okta-signed role and context, but denies requests that need a higher role instead of creating approval requests. It is never a bypass. Color preferences are independent: Light is the first-visit default, with Dark and System available from the persistent theme control.
+The application starts with **Simulate FGA** off and shows two everyday prompts: an inventory read and a normal 50-unit write. Enabling the simulation on `/fga` reveals the live role/vacation controls, replaces those examples with the Read, 1–600, and 601+ VP prompt tiers, and opts chat requests into hosted FGA checks plus OIG approval routing. Simple mode still enforces the Okta-signed role and context, but denies requests that need a higher role instead of creating approval requests. It is never a bypass. Color preferences are independent: Light is the first-visit default, with Dark and System available from the persistent theme control.
 
 ## What This Demo Shows
 

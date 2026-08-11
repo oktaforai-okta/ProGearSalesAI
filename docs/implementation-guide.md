@@ -429,7 +429,7 @@ Create three groups to demonstrate RBAC:
 
 For Inventory, `clearance_level` is the single role source of truth:
 
-| Value | Role | Write 1–600 | Write 601+ |
+| Value | Role | Write 1–600 units | Write 601+ units |
 |---:|---|---|---|
 | 1 | Sales | Manager approval | VP approval |
 | 2 | Manager | Direct | VP approval |

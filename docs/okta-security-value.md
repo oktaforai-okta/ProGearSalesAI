@@ -706,8 +706,8 @@ FGA runs on top of the Okta scope check, for the Inventory domain, only after Ok
 | Okta establishes | FGA decides next |
 |---|---|
 | Signed-in user and governed agent identity | Read: all valid role levels may execute |
-| Narrow `inventory:read` or `inventory:write` token | Write 1–600: Level 2+ executes; Level 1 requests Manager approval |
-| `Clearance` role claim and `Vacation` context claim | Write 601+: Level 3 executes; Level 1 or 2 requests VP approval |
+| Narrow `inventory:read` or `inventory:write` token | Write 1–600 units: Level 2+ executes; Level 1 requests Manager approval |
+| `Clearance` role claim and `Vacation` context claim | Write 601+ units: Level 3 executes; Level 1 or 2 requests VP approval |
 | - | Vacation true: every write is denied, including approval submission; reads still work |
 
 `inventory:read` maps to the FGA `can_read` relation. Quantity selects `can_update_standard` for 1–600 or `can_update_large` for 601+. A separate `can_request_change` relation allows an active user whose level is too low to create the correctly tiered OIG request. Low-stock alerts remain reads.

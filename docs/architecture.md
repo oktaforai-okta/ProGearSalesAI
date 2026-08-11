@@ -136,8 +136,8 @@ type inventory_system
 | Request | FGA relation | Direct execution | If requester is below the tier |
 |---|---|---|---|
 | Inventory read | `can_read` | Level 1+ | Deny if no valid role |
-| Write 1–600 | `can_update_standard` | Level 2+ | Manager approval |
-| Write 601+ | `can_update_large` | Level 3 | VP approval |
+| Write 1–600 units | `can_update_standard` | Level 2+ | Manager approval |
+| Write 601+ units | `can_update_large` | Level 3 | VP approval |
 
 Sales, Customer, and Pricing agents have no FGA model today and always pass through. FGA currently only gates Inventory.
 
