@@ -46,6 +46,7 @@ def _approved_raw(required_level: int, required_role: str):
         quantity_delta=601,
         original_task="Add 601 basketballs to inventory",
         submitted_at="2026-08-10T00:00:00Z",
+        agent_id="wlp-agent",
         required_approver_role=required_role,
         required_approver_level=required_level,
     )

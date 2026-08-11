@@ -201,6 +201,7 @@ class ApprovalService:
         scope: str,
         parsed_intent: dict,
         original_task: str,
+        agent_id: str | None = None,
         fga_check_id: str | None = None,
         required_approver_role: str | None = None,
         required_approver_level: int | None = None,
@@ -224,6 +225,7 @@ class ApprovalService:
             quantity_delta=qty,
             original_task=original_task,
             submitted_at=self._now().isoformat().replace("+00:00", "Z"),
+            agent_id=agent_id,
             fga_check_id=fga_check_id,
             required_approver_role=required_approver_role,
             required_approver_level=required_approver_level,
@@ -231,6 +233,7 @@ class ApprovalService:
         subject = f"Inventory write: +{qty} {product}"
         human = (
             f"AI agent requests inventory write on behalf of {user_email}.\n"
+            f"Governed agent: {agent_id or agent}.\n"
             f"Action: Add {qty} units of {product} (scope: {scope}).\n"
             f"Original task: \"{original_task}\".\n"
             f"Required approval: {required_approver_role or 'VP'} "

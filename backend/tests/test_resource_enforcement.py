@@ -97,6 +97,24 @@ class ResourceTokenValidationTests(unittest.IsolatedAsyncioTestCase):
                 required_scopes=["inventory:write"],
             )
 
+    async def test_accepts_explicit_approval_executor(self):
+        result = await self.validator.validate(
+            self.token(actor="0oa-approval-executor"),
+            agent_type="inventory",
+            required_scopes=["inventory:write"],
+            expected_client_ids=["0oa-approval-executor"],
+        )
+        self.assertEqual(result.agent_id, "0oa-approval-executor")
+
+    async def test_rejects_agent_token_when_executor_is_required(self):
+        with self.assertRaises(ResourceTokenError):
+            await self.validator.validate(
+                self.token(actor="wlp-agent"),
+                agent_type="inventory",
+                required_scopes=["inventory:write"],
+                expected_client_ids=["0oa-approval-executor"],
+            )
+
 
 class _Store:
     def __init__(self):

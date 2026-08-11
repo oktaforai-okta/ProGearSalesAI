@@ -91,6 +91,7 @@ class ResourceTokenValidator:
         agent_type: str,
         required_scopes: Iterable[str],
         expected_subjects: Iterable[str] = (),
+        expected_client_ids: Iterable[str] | None = None,
     ) -> ValidatedResourceToken:
         config = get_agent_config(agent_type)
         domain = _normalize_domain(os.getenv("OKTA_DOMAIN", ""))
@@ -136,13 +137,18 @@ class ResourceTokenValidator:
             )
 
         actor = claims.get("act") if isinstance(claims.get("act"), dict) else {}
-        represented_agent_ids = {
+        represented_client_ids = {
             str(value)
             for value in (claims.get("cid"), claims.get("sub"), actor.get("sub"))
             if value
         }
-        if config.agent_id not in represented_agent_ids:
-            raise ResourceTokenError("The token was not issued to the configured ProGear agent.")
+        trusted_client_ids = (
+            {str(value) for value in expected_client_ids if value}
+            if expected_client_ids is not None
+            else {config.agent_id}
+        )
+        if not trusted_client_ids or trusted_client_ids.isdisjoint(represented_client_ids):
+            raise ResourceTokenError("The token was not issued to a trusted ProGear client.")
 
         expected = {str(value).lower() for value in expected_subjects if value}
         if expected:
@@ -166,7 +172,7 @@ class ResourceTokenValidator:
             issuer=issuer,
             audience=config.audience,
             scopes=tuple(sorted(granted_scopes)),
-            agent_id=config.agent_id,
+            agent_id=next(iter(trusted_client_ids & represented_client_ids)),
             key_id=kid,
         )
 

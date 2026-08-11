@@ -23,6 +23,7 @@ class Intent:
     quantity_delta: int
     original_task: str
     submitted_at: str     # ISO8601
+    agent_id: str | None = None  # governed workload principal (wlp...)
     fga_check_id: str | None = None
     required_approver_role: str | None = None
     required_approver_level: int | None = None

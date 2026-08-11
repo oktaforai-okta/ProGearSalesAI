@@ -30,7 +30,7 @@ Token issuance is necessary, not sufficient. Sarah may receive a coarse `invento
 - `ProGear-Managers` contains Managers and VPs as appropriate for ordinary administration.
 - `ProGear-VPs` contains the eligible approvers for Manager requests above 600.
 - The Inventory authorization-server rule may issue `inventory:read` and `inventory:write` to the demo personas. The write scope is a coarse resource capability, not direct permission to change inventory.
-- A separate five-minute `client_credentials` rule permits the governed agent to execute an already-approved inventory write; the application preflights and validates that token before it creates the OIG request.
+- A separate five-minute `client_credentials` rule permits only the dedicated ProGear Approval Executor service client to execute an already-approved inventory write. The application preflights and validates that token before it creates the OIG request; the AI Agent workload principal continues to handle delegated user exchanges.
 
 The demo starts with **Simulate FGA** off. That browser-local preference shows two everyday examples and hides the advanced role control. In simple mode, Sales writes and Manager writes above 600 are denied; no OIG request is created. Enabling FGA reveals the Read, 1–600, and 601+ prompt tiers and allows the one escalation path from Manager to VP. The control may change only the signed-in user's `clearance_level` to 0, 1, or 2. Reset restores that persona's starting role.
 

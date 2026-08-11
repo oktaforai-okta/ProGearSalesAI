@@ -631,14 +631,32 @@ Description: Authorization for Sales Inventory API
 
 **Policy Rules:**
 
-**Rule 1: Approved Agent Execution** (Priority 1)
+Before adding Rule 1, create one OIDC **API Services** app named
+`ProGear Approval Executor`:
+
+1. Enable only the `client_credentials` grant.
+2. Set client authentication to **Public key / Private key** (`private_key_jwt`).
+3. Register only its public JWK in Okta. Store the private JWK as
+   `OKTA_APPROVAL_EXECUTOR_PRIVATE_KEY` on Render.
+4. Add this service app, along with the ProGear Sales Agent, to the Inventory
+   policy's assigned clients.
+
+Do not add `client_credentials` to the AI Agent workload principal. Workload
+principal OAuth metadata is governed by Okta and isn't an application setting
+to repurpose for background execution.
+
+**Rule 1: Approved Workflow Execution** (Priority 1)
 ```
 IF Grant type is: Client Credentials
-AND Client is: ProGear Sales Agent
+AND Client is: ProGear Approval Executor
 AND Scopes: inventory:write
 ```
 
-This rule is used only after a VP approves a Manager's 601+ request. The backend authenticates with the workload principal's `private_key_jwt`, validates the returned token at the Inventory boundary, and executes idempotently.
+This rule is used only after a VP approves a Manager's 601+ request. The
+backend authenticates the dedicated executor with `private_key_jwt`, validates
+the five-minute token at the Inventory boundary, and executes idempotently.
+The OIG request retains the requester, approver, governed agent, requested
+scope, quantity, and FGA check so the complete decision remains auditable.
 
 **Rule 2: Warehouse Full Access** (Priority 2)
 ```
@@ -760,7 +778,7 @@ Once you have create authorization servers per MCP API, Use managed connections 
 3. Configure every backend serving the app with the same `FGA_STORE_ID` and `FGA_MODEL_ID`.
 4. In Okta Identity Governance, create or select the Inventory access-request type and required justification field.
 5. Route only Manager changes above 600 units to `ProGear-VPs`. Sales changes never create access requests. The request intent records the required VP role and Level 2, and the backend verifies the approver's live Okta profile before execution.
-6. On the Inventory Authorization Server, allow the governed agent's `client_credentials` grant for `inventory:write` with a short access-token lifetime. The backend mints and validates this token before creating an OIG request and again before executing an approval.
+6. On the Inventory Authorization Server, allow only the dedicated `ProGear Approval Executor` service client's `client_credentials` grant for `inventory:write`, with a five-minute access-token lifetime. The backend mints and validates this token before creating an OIG request and again before executing an approval.
 
 The model provides four application permissions:
 
@@ -1044,6 +1062,8 @@ In Render, go to **Environment** and add these variables:
 | `OKTA_CLIENT_ID` | Your AI Agent client ID |
 | `OKTA_AI_AGENT_ID` | Your AI Agent ID (`wlp...`) |
 | `OKTA_AI_AGENT_PRIVATE_KEY` | Your JWK private key (entire JSON on one line) |
+| `OKTA_APPROVAL_EXECUTOR_CLIENT_ID` | Dedicated approval executor service-app client ID (`0oa...`) |
+| `OKTA_APPROVAL_EXECUTOR_PRIVATE_KEY` | Executor private JWK (entire JSON on one line; never reuse the agent key) |
 | `OKTA_MAIN_AUTH_SERVER_ID` | (Optional) Used for Step 1. Defaults to `"default"` (Okta's alias for the Org Authorization Server) if unset -- leave it out unless you specifically need Step 1 to hit a non-default server |
 | `OKTA_SALES_AUTH_SERVER_ID` | Your Sales auth server ID |
 | `OKTA_SALES_AUDIENCE` | `api://progear-sales` |
@@ -1135,6 +1155,8 @@ Expected response:
 | `OKTA_OIDC_PRIVATE_KEY` | Vercel | Yes | Server-only private JWK for private_key_jwt |
 | `OKTA_AI_AGENT_ID` | Render | Yes | AI Agent entity ID (`wlp...`) |
 | `OKTA_AI_AGENT_PRIVATE_KEY` | Render | Yes | JWK private key (JSON string) |
+| `OKTA_APPROVAL_EXECUTOR_CLIENT_ID` | Render | Yes | Dedicated post-approval service client (`0oa...`) |
+| `OKTA_APPROVAL_EXECUTOR_PRIVATE_KEY` | Render | Yes | Private JWK for the post-approval service client |
 | `OKTA_MAIN_AUTH_SERVER_ID` | Render | No | Defaults to `"default"` (Org AS) for Step 1 -- only set if you need a non-default server |
 | `OKTA_SALES_AUTH_SERVER_ID` | Render | Yes | Sales domain's Custom Authorization Server ID |
 | `OKTA_SALES_AUDIENCE` | Render | Yes | `api://progear-sales` |
@@ -1164,7 +1186,7 @@ Expected response:
 | `NEXT_PUBLIC_OKTA_ISSUER` | Vercel | Yes | `https://your-org.okta.com` (NO auth server ID - use Org AS) |
 | `CORS_ORIGINS` | Render | Yes | Your Vercel URL |
 
-> **Two distinct runtime keys.** `OKTA_OIDC_PRIVATE_KEY` and `OKTA_AI_AGENT_PRIVATE_KEY` are two separate, unrelated key pairs, not two copies of the same key. `OKTA_OIDC_PRIVATE_KEY` authenticates the Vercel frontend's sign-in and refresh requests to the direct User access app. `OKTA_AI_AGENT_PRIVATE_KEY` authenticates the Render backend's ID-JAG and JWT-bearer exchanges for the agent workload identity. Rotating one never requires touching the other.
+> **Three distinct runtime keys.** `OKTA_OIDC_PRIVATE_KEY`, `OKTA_AI_AGENT_PRIVATE_KEY`, and `OKTA_APPROVAL_EXECUTOR_PRIVATE_KEY` are unrelated key pairs. The first authenticates the Vercel sign-in client, the second authenticates the AI Agent's ID-JAG and JWT-bearer exchanges, and the third authenticates only the post-VP-approval service client. Rotating one never requires touching the others.
 
 ---
 

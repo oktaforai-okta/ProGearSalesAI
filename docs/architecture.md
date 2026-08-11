@@ -166,7 +166,14 @@ When triggered, it first mints and validates a short-lived execution token using
 
 Execution is idempotent: a JSON ledger file (`backend/data/approvals_ledger.json`) tracks which OIG request IDs have already been executed, with a bounded retry count (3 attempts) before a request is marked abandoned, so a flaky write doesn't retry forever and an already-executed request never double-applies.
 
-When approval completes, `backend/services/service_token.py` performs a real Okta `client_credentials` exchange authenticated by the governed agent's `private_key_jwt`. The Inventory boundary validates the resulting signed token before the idempotent store mutation. A placeholder token is never accepted.
+When approval completes, `backend/services/service_token.py` performs a real
+Okta `client_credentials` exchange authenticated by the dedicated ProGear
+Approval Executor's `private_key_jwt`. The executor has only
+`inventory:write`, and its token lasts five minutes. The Inventory boundary
+validates that signed token before the idempotent store mutation. The AI Agent
+workload principal remains the identity for delegated user requests, while the
+OIG record preserves the requester, agent, FGA decision, approver, and action.
+A placeholder token is never accepted.
 
 ---
 

@@ -766,6 +766,7 @@ Return ONLY the JSON object, no other text."""
             fga_check_id = None
             if state.get("fga_checks"):
                 fga_check_id = state["fga_checks"][-1].get("id")
+            inventory_config = get_agent_config(AGENT_INVENTORY)
             request_id, intent = await self.approval_service.create_request(
                 user_email=self.user_info.get("email") or "",
                 requester_id=self.user_info.get("sub") or self.user_info.get("id") or "",
@@ -774,6 +775,7 @@ Return ONLY the JSON object, no other text."""
                 scope="inventory:write",
                 parsed_intent=parsed,
                 original_task=state["user_message"],
+                agent_id=inventory_config.agent_id if inventory_config else None,
                 fga_check_id=fga_check_id,
                 required_approver_role=approval_role,
                 required_approver_level=approval_level,

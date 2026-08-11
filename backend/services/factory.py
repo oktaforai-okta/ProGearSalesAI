@@ -34,10 +34,12 @@ def build_approval_service(store) -> ApprovalService:
     )
 
     async def validate_service_token(token: str, scope: str):
+        executor_client_id = os.environ.get("OKTA_APPROVAL_EXECUTOR_CLIENT_ID", "").strip()
         return await get_resource_token_validator().validate(
             token,
             agent_type=AGENT_INVENTORY,
             required_scopes=[scope],
+            expected_client_ids=[executor_client_id],
         )
 
     return ApprovalService(
