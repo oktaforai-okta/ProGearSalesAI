@@ -203,9 +203,9 @@ cells = [
     ),
     markdown(
         r'''
-        ### Configuration checkpoint
+        ### Configuration receipt — record it once
 
-        You should now have exactly these runtime values:
+        If these objects already exist, use their current values. Otherwise, record the identifiers as you complete Steps 1–5.
 
         | Value | Created in |
         |---|---|
@@ -215,7 +215,26 @@ cells = [
         | Authorization Server ID | Custom Authorization Server |
         | Audience + scope | Resource server configuration |
 
-        Put the private JWK—and the sign-in client secret, if used—in **Colab Secrets**. Everything else can be normal runtime configuration.
+        Choose **Load existing Colab Secrets** to reuse a saved environment, or enter the generated IDs once below. The runtime cells reuse this receipt automatically.
+        '''
+    ),
+    code(
+        r'''
+        # @title Save or load your configuration once
+        MODE = "Guided preview" # @param ["Guided preview", "Live Okta"]
+        CONFIG_SOURCE = "Enter generated IDs once" # @param ["Enter generated IDs once", "Load existing Colab Secrets"]
+        OKTA_DOMAIN_INPUT = "https://your-org.oktapreview.com" # @param {type:"string"}
+        SIGN_IN_CLIENT_ID_INPUT = "your-sign-in-client-id" # @param {type:"string"}
+        AUTHORIZATION_SERVER_ID_INPUT = "your-authorization-server-id" # @param {type:"string"}
+        AGENT_CLIENT_ID_INPUT = "your-workload-principal-id" # @param {type:"string"}
+        AGENT_KEY_ID_INPUT = "your-agent-key-id" # @param {type:"string"}
+        RESOURCE_URL_INPUT = "" # @param {type:"string"}
+        PREVIEW_USER_EMAIL = "alex@example.com" # @param {type:"string"}
+        PREVIEW_POLICY = "Allow requested scope" # @param ["Allow requested scope", "Deny requested scope"]
+
+        print(f"Mode:   {MODE}")
+        print(f"Source: {CONFIG_SOURCE}")
+        print("The runtime will reuse this receipt; these values are not entered again.")
         '''
     ),
     markdown(
@@ -304,32 +323,66 @@ cells = [
     ),
     markdown(
         r'''
-        ## 6. Enter the configuration from Part 1
+        ## Load the saved configuration
 
-        Live mode loads private values from Colab Secrets named `AGENT_PRIVATE_JWK` and, when needed, `USER_CLIENT_SECRET`.
+        This cell reads the receipt above. With **Load existing Colab Secrets**, use the same uppercase names shown in the runtime map plus `AGENT_PRIVATE_JWK` and, when needed, `USER_CLIENT_SECRET`.
         '''
     ),
     code(
         r'''
-        # @title Runtime configuration
-        MODE = "Guided preview" # @param ["Guided preview", "Live Okta"]
-        PREVIEW_USER_EMAIL = "alex@example.com" # @param {type:"string"}
-        PREVIEW_POLICY = "Allow requested scope" # @param ["Allow requested scope", "Deny requested scope"]
-        OKTA_DOMAIN = "https://your-org.oktapreview.com" # @param {type:"string"}
-        SIGN_IN_CLIENT_ID = "your-sign-in-client-id" # @param {type:"string"}
-        AUTHORIZATION_SERVER_ID = "your-authorization-server-id" # @param {type:"string"}
-        AGENT_CLIENT_ID = "your-workload-principal-id" # @param {type:"string"}
-        AGENT_KEY_ID = "your-agent-key-id" # @param {type:"string"}
-        RESOURCE_URL = "" # @param {type:"string"}
-
         LIVE = MODE == "Live Okta"
+        OKTA_DOMAIN = OKTA_DOMAIN_INPUT
+        SIGN_IN_CLIENT_ID = SIGN_IN_CLIENT_ID_INPUT
+        AUTHORIZATION_SERVER_ID = AUTHORIZATION_SERVER_ID_INPUT
+        AGENT_CLIENT_ID = AGENT_CLIENT_ID_INPUT
+        AGENT_KEY_ID = AGENT_KEY_ID_INPUT
+        RESOURCE_URL = RESOURCE_URL_INPUT
+        USER_CLIENT_SECRET = None
+        AGENT_PRIVATE_JWK = None
+
+        if LIVE:
+            try:
+                from google.colab import userdata
+            except ImportError as exc:
+                raise RuntimeError("Live mode is designed for Google Colab Secrets.") from exc
+
+            def required_secret(name: str) -> str:
+                try:
+                    value = userdata.get(name)
+                except Exception as exc:
+                    raise RuntimeError(f"Add {name} to Colab Secrets.") from exc
+                if not value:
+                    raise RuntimeError(f"Add {name} to Colab Secrets.")
+                return value
+
+            if CONFIG_SOURCE == "Load existing Colab Secrets":
+                OKTA_DOMAIN = required_secret("OKTA_DOMAIN")
+                SIGN_IN_CLIENT_ID = required_secret("SIGN_IN_CLIENT_ID")
+                AUTHORIZATION_SERVER_ID = required_secret("AUTHORIZATION_SERVER_ID")
+                AGENT_CLIENT_ID = required_secret("AGENT_CLIENT_ID")
+                AGENT_KEY_ID = required_secret("AGENT_KEY_ID")
+                REDIRECT_URI = required_secret("REDIRECT_URI")
+                RESOURCE_AUDIENCE = required_secret("RESOURCE_AUDIENCE")
+                RESOURCE_SCOPE = required_secret("RESOURCE_SCOPE")
+                try:
+                    RESOURCE_URL = userdata.get("RESOURCE_URL") or ""
+                except Exception:
+                    RESOURCE_URL = ""
+
+            try:
+                USER_CLIENT_SECRET = userdata.get("USER_CLIENT_SECRET")
+            except Exception:
+                USER_CLIENT_SECRET = None
+            try:
+                AGENT_PRIVATE_JWK = json.loads(required_secret("AGENT_PRIVATE_JWK"))
+            except json.JSONDecodeError as exc:
+                raise RuntimeError("AGENT_PRIVATE_JWK must contain valid JSON.") from exc
+
         OKTA_DOMAIN = OKTA_DOMAIN.rstrip("/")
         CUSTOM_ISSUER = f"{OKTA_DOMAIN}/oauth2/{AUTHORIZATION_SERVER_ID}"
         ORG_TOKEN_URL = f"{OKTA_DOMAIN}/oauth2/v1/token"
         CUSTOM_TOKEN_URL = f"{CUSTOM_ISSUER}/v1/token"
 
-        USER_CLIENT_SECRET = None
-        AGENT_PRIVATE_JWK = None
         if LIVE:
             values = {
                 "OKTA_DOMAIN": OKTA_DOMAIN,
@@ -341,17 +394,6 @@ cells = [
             missing = [name for name, value in values.items() if "your-" in value]
             if missing:
                 raise ValueError("Complete these values first: " + ", ".join(missing))
-            try:
-                from google.colab import userdata
-                try:
-                    USER_CLIENT_SECRET = userdata.get("USER_CLIENT_SECRET")
-                except Exception:
-                    USER_CLIENT_SECRET = None
-                AGENT_PRIVATE_JWK = json.loads(userdata.get("AGENT_PRIVATE_JWK"))
-            except ImportError as exc:
-                raise RuntimeError("Live mode is designed for Google Colab Secrets.") from exc
-            except Exception as exc:
-                raise RuntimeError("Add a valid AGENT_PRIVATE_JWK JSON value to Colab Secrets.") from exc
 
         show_rows("Runtime map", [
             ("Mode", MODE),
@@ -366,7 +408,7 @@ cells = [
     ),
     markdown(
         r'''
-        ## 7. Authenticate the user
+        ## 6. Authenticate the user
 
         Your app signs the user in through the Org Authorization Server. The agent backend receives a verified ID token—not the user's password.
         '''
@@ -428,7 +470,7 @@ cells = [
                 raise ValueError("Paste the full redirect URL, then run this cell again.")
             query = parse_qs(urlparse(REDIRECT_URL).query)
             if query.get("state", [None])[0] != oauth_state:
-                raise ValueError("OAuth state mismatch. Restart Step 7.")
+                raise ValueError("OAuth state mismatch. Restart Step 6.")
             authorization_code = query.get("code", [None])[0]
             if not authorization_code:
                 raise ValueError("The redirect URL does not contain an authorization code.")
@@ -462,7 +504,7 @@ cells = [
                 options={"require": ["sub", "iss", "aud", "exp"]},
             )
             if user_claims.get("nonce") != oauth_nonce:
-                raise ValueError("ID token nonce mismatch. Restart Step 7.")
+                raise ValueError("ID token nonce mismatch. Restart Step 6.")
         else:
             user_claims = jwt.decode(
                 ID_TOKEN,
@@ -483,7 +525,7 @@ cells = [
     ),
     markdown(
         r'''
-        ## 8. Authenticate the agent
+        ## 7. Authenticate the agent
 
         The backend signs a short-lived `private_key_jwt` assertion with the agent's private key. Okta verifies it with the public key registered in Step 2.
         '''
@@ -527,7 +569,7 @@ cells = [
     ),
     markdown(
         r'''
-        ## 9. Request an ID-JAG
+        ## 8. Request an ID-JAG
 
         The agent presents the user's ID token and its own client assertion. Okta issues a short-lived ID-JAG for this **user + agent + target + scope**.
 
@@ -589,7 +631,7 @@ cells = [
     ),
     markdown(
         r'''
-        ## 10. Exchange the ID-JAG for a resource token
+        ## 9. Exchange the ID-JAG for a resource token
 
         Your Custom Authorization Server applies its policy. If allowed, it consumes the one-time ID-JAG and returns an access token for your audience and scope.
         '''
@@ -651,7 +693,7 @@ cells = [
     ),
     markdown(
         r'''
-        ## 11. Validate the token and call your resource
+        ## 10. Validate the token and call your resource
 
         The API—not the model—must validate the token's signature, issuer, audience, expiry, and scope before doing any work.
         '''
