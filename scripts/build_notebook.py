@@ -7,7 +7,6 @@ import json
 from pathlib import Path
 from textwrap import dedent
 
-
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "notebooks" / "progear-inventory-authorization-story.ipynb"
 
@@ -271,6 +270,7 @@ cells = [
         import base64
         import hashlib
         import json
+        import os
         import secrets
         import time
         import uuid
@@ -325,7 +325,7 @@ cells = [
         r'''
         ## Load the saved configuration
 
-        This cell automatically combines the choices from the planning cell with the Okta-generated identifiers in the receipt. Live mode loads only sensitive values from Colab Secrets: `AGENT_PRIVATE_JWK` and, when needed, `USER_CLIENT_SECRET`.
+        This cell automatically combines the choices from the planning cell with the Okta-generated identifiers in the receipt. Live mode loads only sensitive values from Colab Secrets: `AGENT_PRIVATE_JWK` and, when needed, `USER_CLIENT_SECRET`. Local and CI checks may provide the same names as environment variables.
         '''
     ),
     code(
@@ -341,22 +341,28 @@ cells = [
         if LIVE:
             try:
                 from google.colab import userdata
-            except ImportError as exc:
-                raise RuntimeError("Live mode is designed for Google Colab Secrets.") from exc
+            except ImportError:
+                userdata = None
+
+            def optional_secret(name: str) -> str | None:
+                if userdata is not None:
+                    try:
+                        value = userdata.get(name)
+                    except Exception:
+                        value = None
+                    if value:
+                        return value
+                return os.environ.get(name)
 
             def required_secret(name: str) -> str:
-                try:
-                    value = userdata.get(name)
-                except Exception as exc:
-                    raise RuntimeError(f"Add {name} to Colab Secrets.") from exc
+                value = optional_secret(name)
                 if not value:
-                    raise RuntimeError(f"Add {name} to Colab Secrets.")
+                    raise RuntimeError(
+                        f"Add {name} to Colab Secrets or provide it as an environment variable."
+                    )
                 return value
 
-            try:
-                USER_CLIENT_SECRET = userdata.get("USER_CLIENT_SECRET")
-            except Exception:
-                USER_CLIENT_SECRET = None
+            USER_CLIENT_SECRET = optional_secret("USER_CLIENT_SECRET")
             try:
                 AGENT_PRIVATE_JWK = json.loads(required_secret("AGENT_PRIVATE_JWK"))
             except json.JSONDecodeError as exc:
@@ -460,12 +466,15 @@ cells = [
                 raise ValueError("The redirect URL does not contain an authorization code.")
             form = {
                 "grant_type": "authorization_code",
-                "client_id": SIGN_IN_CLIENT_ID,
                 "code": authorization_code,
                 "redirect_uri": REDIRECT_URI,
                 "code_verifier": pkce_verifier,
             }
-            basic_auth = (SIGN_IN_CLIENT_ID, USER_CLIENT_SECRET) if USER_CLIENT_SECRET else None
+            if USER_CLIENT_SECRET:
+                basic_auth = (SIGN_IN_CLIENT_ID, USER_CLIENT_SECRET)
+            else:
+                basic_auth = None
+                form["client_id"] = SIGN_IN_CLIENT_ID
             response = requests.post(ORG_TOKEN_URL, data=form, auth=basic_auth, timeout=15)
             if not response.ok:
                 raise oauth_error(response, "User sign-in exchange failed")
