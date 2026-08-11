@@ -98,7 +98,7 @@ export default function FGAExplanationCard({ checks, isLoading = false }: Props)
               </p>
             </div>
             <div className="rounded-lg border border-purple-200 bg-purple-50 p-3 dark:border-purple-900 dark:bg-purple-950/40">
-              <div className="text-xs font-bold uppercase tracking-wide text-purple-700">2. Auth0 FGA</div>
+              <div className="text-xs font-bold uppercase tracking-wide text-purple-700">2. FGA</div>
               <p className="mt-1 text-xs leading-relaxed text-purple-900 dark:text-purple-100">
                 Combines those live values with the action and quantity on every request.
               </p>

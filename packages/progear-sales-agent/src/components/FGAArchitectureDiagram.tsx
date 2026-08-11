@@ -24,7 +24,7 @@ type DiagramLink = {
 const NODES: DiagramNode[] = [
   { id: 'okta', x: 28, y: 126, width: 170, height: 78, title: 'Okta identity', detail: 'Role + vacation', color: '#2563eb' },
   { id: 'token', x: 255, y: 126, width: 170, height: 78, title: 'Inventory token', detail: 'Signed live claims', color: '#0284c7' },
-  { id: 'fga', x: 492, y: 105, width: 195, height: 120, title: 'Auth0 FGA', detail: 'Role + action + quantity', color: '#7c3aed' },
+  { id: 'fga', x: 492, y: 105, width: 195, height: 120, title: 'FGA', detail: 'Role + action + quantity', color: '#7c3aed' },
   { id: 'allow', x: 772, y: 30, width: 178, height: 70, title: 'Execute', detail: 'Role is high enough', color: '#059669' },
   { id: 'approve', x: 772, y: 137, width: 178, height: 70, title: 'Ask for approval', detail: 'Manager or VP', color: '#d97706' },
   { id: 'deny', x: 772, y: 244, width: 178, height: 70, title: 'Block the write', detail: 'Vacation is True', color: '#dc2626' },
@@ -112,7 +112,7 @@ export default function FGAArchitectureDiagram() {
         viewBox="0 0 980 344"
         className="w-full min-w-[760px]"
         role="img"
-        aria-label="Okta sends the user's role and vacation status to Auth0 FGA. FGA either executes the inventory action, creates the required Manager or VP approval, or blocks a write while the user is on vacation."
+        aria-label="Okta sends the user's role and vacation status to FGA. FGA either executes the inventory action, creates the required Manager or VP approval, or blocks a write while the user is on vacation."
       />
     </div>
   );
