@@ -24,6 +24,8 @@ class Intent:
     original_task: str
     submitted_at: str     # ISO8601
     fga_check_id: str | None = None
+    required_approver_role: str | None = None
+    required_approver_level: int | None = None
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), separators=(",", ":"))

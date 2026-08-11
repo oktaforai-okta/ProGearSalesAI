@@ -24,6 +24,8 @@ type Intent = {
   product_name?: string;
   quantity_delta?: number;
   original_task?: string;
+  required_approver_role?: string;
+  required_approver_level?: number;
 };
 
 type ExecutionResult = {
@@ -44,6 +46,8 @@ export type ApprovalStatus = {
   denial_reason?: string | null;
   poll_error?: boolean;
   approver_group?: string;
+  approver_role?: string;
+  approver_level?: number;
 };
 
 interface Props {
@@ -182,6 +186,16 @@ export default function ApprovalStatusCard({ initial, onStatusChange }: Props) {
             <div>
               <span className="text-gray-500">Approver group:</span>{' '}
               <span className="font-medium">{status.approver_group}</span>
+            </div>
+          )}
+
+          {(status.approver_role || intent.required_approver_role) && (
+            <div>
+              <span className="text-gray-500">Required role:</span>{' '}
+              <span className="font-medium">
+                {status.approver_role || intent.required_approver_role} (Level{' '}
+                {status.approver_level || intent.required_approver_level}+)
+              </span>
             </div>
           )}
 

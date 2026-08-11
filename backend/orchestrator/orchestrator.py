@@ -30,7 +30,8 @@ from auth.multi_agent_auth import (
     AGENT_SALES, AGENT_INVENTORY, AGENT_CUSTOMER, AGENT_PRICING
 )
 from auth.agent_config import get_agent_config, DEMO_AGENTS
-from auth.fga_client import check_agent_access, is_fga_configured, FGACheckResult, ensure_manager_relationship, ensure_clearance_tuple, ensure_viewer_relationship
+from auth.fga_client import check_agent_access, is_fga_configured, FGACheckResult
+from auth.inventory_policy import decide_inventory_policy, role_name
 
 # Import agent classes
 from agents import SalesAgent, InventoryAgent, PricingAgent, CustomerAgent
@@ -345,25 +346,14 @@ Return ONLY the JSON object, no other text."""
         return state
 
     async def _fga_check_node(self, state: WorkflowState) -> WorkflowState:
-        """
-        Check FGA permissions AFTER token exchange.
-        Filters out agents the user cannot invoke based on fine-grained rules.
+        """Apply the live Okta role claim to the three-tier FGA model.
 
-        This is the "Okta + FGA Better Together" integration point:
-        1. Reads Manager claim from ID token -> creates/deletes manager tuple in FGA
-        2. Extracts Vacation claim from Auth Server token
-        3. Passes is_on_vacation as contextual tuple to FGA API
-        4. FGA checks: can_increase_inventory = manager but not on_vacation
-        5. If FGA denies, marks the token exchange result as denied
-
-        Currently checks:
-        - inventory agent -> FGA inventory_system with can_increase_inventory relation
-        - all other agents -> pass through (no FGA model yet)
+        The role and vacation facts are contextual tuples, not stored copies.
+        That makes a role change in Okta effective on the next token exchange
+        and avoids a stale Manager boolean drifting away from clearance_level.
         """
         agents = state["agents_to_invoke"]
         agent_results = state.get("agent_results", {})
-
-        # Extract user email for FGA checks (more human-readable than sub)
         user_email = self.user_info.get("email", "")
 
         if not user_email or not agents:
@@ -375,9 +365,6 @@ Return ONLY the JSON object, no other text."""
             "status": "processing"
         })
 
-        # Extract Manager, Vacation, and Clearance claims from Auth Server token
-        # (Org Auth Server doesn't support custom claims, so we use Custom Auth Server token)
-        is_manager = False
         is_on_vacation = False
         clearance_level = 0
 
@@ -387,19 +374,15 @@ Return ONLY the JSON object, no other text."""
                 from jose import jwt as jose_jwt
                 auth_token_claims = jose_jwt.get_unverified_claims(inventory_result["access_token"])
 
-                # Extract Manager claim from Auth Server token
-                manager_claim = auth_token_claims.get("Manager", auth_token_claims.get("is_a_manager"))
-                if manager_claim is not None:
-                    is_manager = bool(manager_claim)
-                    logger.info(f"Extracted Manager claim from Auth Server token: {manager_claim}")
-
-                # Extract Vacation claim from Auth Server token
                 vacation_claim = auth_token_claims.get("Vacation", auth_token_claims.get("is_on_vacation"))
                 if vacation_claim is not None:
-                    is_on_vacation = bool(vacation_claim)
+                    is_on_vacation = (
+                        vacation_claim.lower() == "true"
+                        if isinstance(vacation_claim, str)
+                        else bool(vacation_claim)
+                    )
                     logger.info(f"Extracted Vacation claim from Auth Server token: {vacation_claim}")
 
-                # Extract Clearance claim from Auth Server token
                 clearance_claim = auth_token_claims.get("Clearance", auth_token_claims.get("clearance_level"))
                 if clearance_claim is not None:
                     try:
@@ -412,65 +395,69 @@ Return ONLY the JSON object, no other text."""
             except Exception as e:
                 logger.warning(f"Could not extract claims from Auth Server token: {e}")
 
-        # Fallback to ID token claims (in case Custom Auth Server not configured)
-        if not is_manager:
-            is_manager = self.user_info.get("is_manager", self.user_info.get("Manager", False))
         if not is_on_vacation:
             is_on_vacation = self.user_info.get("is_on_vacation", self.user_info.get("Vacation", False))
         if clearance_level == 0:
-            clearance_level = int(self.user_info.get("clearance_level", self.user_info.get("Clearance", 0)))
+            try:
+                clearance_level = int(self.user_info.get("clearance_level", self.user_info.get("Clearance", 0)))
+            except (TypeError, ValueError):
+                clearance_level = 0
 
-        logger.info(f"FGA check for {user_email}: is_manager={is_manager}, is_on_vacation={is_on_vacation}, clearance={clearance_level}")
+        logger.info(
+            "FGA check for %s: role_level=%s (%s), is_on_vacation=%s",
+            user_email,
+            clearance_level,
+            role_name(clearance_level),
+            is_on_vacation,
+        )
 
-        # Step 1: Ensure manager tuple in FGA matches Manager claim
-        manager_result = await ensure_manager_relationship(user_email, is_manager, system_id="warehouse")
-        logger.info(f"FGA: Manager tuple management result: {manager_result}")
-
-        # Step 2: Ensure viewer tuple for non-managers who need inventory read access
-        # Viewer = non-manager who has inventory agent access (can read but not manage)
-        is_viewer = not is_manager and AGENT_INVENTORY in agents
-        viewer_result = await ensure_viewer_relationship(user_email, is_viewer, system_id="warehouse")
-        logger.info(f"FGA: Viewer tuple management result: {viewer_result}")
-
-        # Step 3: Ensure clearance tuple in FGA matches Clearance claim
-        if clearance_level > 0:
-            clearance_result = await ensure_clearance_tuple(user_email, clearance_level)
-            logger.info(f"FGA: Clearance tuple management result: {clearance_result}")
-
-        # Step 4: Check each agent against FGA with vacation as contextual tuple
         allowed_agents = []
         fga_checks = []
 
         for agent_type in agents:
             scopes = state["agent_scopes"].get(agent_type, [])
-
-            # Determine which item this request concerns BEFORE running the real
-            # check, so the real check and the UI-displayed item/clearance always
-            # agree. Previously the real check always ran against "widget-a" while
-            # the displayed item/clearance could independently switch to
-            # "classified-part" based on message content - the two could disagree.
-            item_id = "widget-a"  # Default item
-            item_required_clearance = 3  # widget-a requires clearance 3
-            if "classified" in state["user_message"].lower():
-                item_id = "classified-part"
-                item_required_clearance = 7  # classified-part requires clearance 7
-
-            # Run FGA check using FGA API with new model
-            # - user_email: from token's email claim
-            # - is_on_vacation: passed as contextual tuple if true
-            # - item_id: the item determined above, so display and enforcement match
+            policy = decide_inventory_policy(
+                scopes,
+                state["user_message"],
+                clearance_level,
+                is_on_vacation,
+            )
             result: FGACheckResult = await check_agent_access(
                 user_email=user_email,
                 agent_type=agent_type,
                 scopes=scopes,
                 is_on_vacation=is_on_vacation,
-                item_id=item_id,
+                role_level=clearance_level,
+                relation=policy.relation if agent_type == AGENT_INVENTORY else None,
             )
 
-            # Record the FGA check for UI visibility with real values
+            request_allowed = False
+            request_check_reason = None
+            if agent_type == AGENT_INVENTORY and policy.approval_required:
+                request_result = await check_agent_access(
+                    user_email=user_email,
+                    agent_type=agent_type,
+                    scopes=scopes,
+                    is_on_vacation=is_on_vacation,
+                    role_level=clearance_level,
+                    relation="can_request_change",
+                )
+                request_allowed = request_result.allowed
+                request_check_reason = request_result.reason
+
+            effective_allowed = result.allowed
+            if agent_type == AGENT_INVENTORY:
+                effective_allowed = (
+                    result.allowed
+                    and not policy.approval_required
+                    and policy.hard_denial_reason is None
+                )
             fga_check_record = {
                 "agent": agent_type,
-                "allowed": result.allowed,
+                "allowed": effective_allowed,
+                "direct_allowed": result.allowed,
+                "request_allowed": request_allowed,
+                "request_check_reason": request_check_reason,
                 "relation": result.relation,
                 "object": result.object,
                 "user": result.user,
@@ -478,42 +465,45 @@ Return ONLY the JSON object, no other text."""
                 "reason": result.reason,
                 "requested_scopes": scopes,
                 "contextual_tuples": result.contextual_tuples or [],
-                # Real values from Okta claims
                 "user_claims": {
-                    "is_manager": is_manager,
                     "is_on_vacation": is_on_vacation,
                     "clearance_level": clearance_level,
+                    "role_name": role_name(clearance_level),
                 },
-                # Item info for clearance comparison
-                "item_info": {
-                    "item_id": item_id,
-                    "required_clearance": item_required_clearance,
-                },
-                # Tuple summary for display
-                "stored_tuples": {
-                    "manager": f"inventory_system:warehouse" if is_manager else None,
-                    "clearance": f"clearance_level:{clearance_level}" if clearance_level > 0 else None,
+                "policy": {
+                    "operation": policy.operation,
+                    "quantity": policy.quantity,
+                    "required_level": policy.required_level,
+                    "required_role": policy.required_role,
+                    "approval_required": policy.approval_required,
+                    "approval_level": policy.approval_level,
+                    "approval_role": policy.approval_role,
+                    "hard_denial_reason": policy.hard_denial_reason,
                 },
             }
             fga_checks.append(fga_check_record)
 
-            if result.allowed:
+            approval_route = (
+                agent_type == AGENT_INVENTORY
+                and policy.approval_required
+                and request_allowed
+                and policy.hard_denial_reason is None
+            )
+
+            if effective_allowed:
                 allowed_agents.append(agent_type)
-            else:
-                # FGA denied - update the existing token_exchange record to show denial.
-                # A token (real or demo) may have already been issued by Okta's coarser
-                # scope grant before this finer-grained FGA check ran - clear it out so
-                # the record is never "access_denied: true" AND "here's a token" at the
-                # same time. The UI treats presence of a token as proof of a real grant,
-                # so a stale one left behind here reads as a bypassed policy, not a
-                # denied one.
+            elif not approval_route:
+                denial_reason = (
+                    policy.hard_denial_reason
+                    or result.reason
+                )
                 for tx in state["token_exchanges"]:
                     if tx.get("agent") == agent_type:
                         tx["success"] = False
                         tx["access_denied"] = True
                         tx["status"] = "denied"
-                        tx["error"] = f"FGA: {result.reason}"
-                        tx["fga_denied"] = True  # Flag for UI to show FGA-specific styling
+                        tx["error"] = f"FGA: {denial_reason}"
+                        tx["fga_denied"] = True
                         tx["access_token"] = None
                         tx["id_jag_token"] = None
                         tx["token_claims"] = None
@@ -521,7 +511,6 @@ Return ONLY the JSON object, no other text."""
                         tx["demo_mode"] = False
                         break
                 else:
-                    # Fallback: add new record if not found (shouldn't happen)
                     config = get_agent_config(agent_type)
                     demo = DEMO_AGENTS.get(agent_type, {})
                     state["token_exchanges"].append({
@@ -533,45 +522,57 @@ Return ONLY the JSON object, no other text."""
                         "status": "denied",
                         "scopes": [],
                         "requested_scopes": scopes,
-                        "error": f"FGA: {result.reason}",
+                        "error": f"FGA: {denial_reason}",
                         "demo_mode": False,
                         "fga_denied": True,
                     })
 
-                # Mark agent result as denied so process_agents skips it
                 if agent_type in agent_results:
                     agent_results[agent_type]["access_denied"] = True
                     agent_results[agent_type]["success"] = False
 
+            # An approval route is not a failed Okta token exchange and not a
+            # hard FGA denial. Keep the real tokens as evidence that the
+            # coarse resource boundary passed; the approval gate below owns
+            # the pending action and prevents direct Inventory execution.
+
         state["agents_to_invoke"] = allowed_agents
         state["fga_checks"] = fga_checks
 
-        denied_count = len(agents) - len(allowed_agents)
+        approval_count = sum(
+            1
+            for check in fga_checks
+            if check.get("policy", {}).get("approval_required")
+            and check.get("request_allowed")
+            and not check.get("policy", {}).get("hard_denial_reason")
+        )
+        denied_count = len(agents) - len(allowed_agents) - approval_count
         fga_status = "API" if is_fga_configured() else "not configured"
 
         state["agent_flow"].append({
             "step": "fga_check",
-            "action": f"FGA ({fga_status}): {len(allowed_agents)} allowed, {denied_count} denied",
+            "action": (
+                f"FGA ({fga_status}): {len(allowed_agents)} direct, "
+                f"{approval_count} approval, {denied_count} denied"
+            ),
             "status": "completed",
             "details": {
                 "vacation_status": is_on_vacation,
+                "role_level": clearance_level,
+                "role_name": role_name(clearance_level),
                 "user_email": user_email,
-                "contextual_tuples_used": is_on_vacation,  # True if on_vacation tuple was passed
+                "contextual_tuples_used": True,
             }
         })
 
         return state
 
     async def _approval_gate_node(self, state: WorkflowState) -> WorkflowState:
-        """Insert an OIG Access Request gate for high-quantity inventory writes.
+        """Create the Manager or VP OIG request selected by the FGA policy.
 
-        Fires only when:
-          - inventory:write is among the requested scopes, AND
-          - the parsed quantity_delta >= APPROVAL_QUANTITY_THRESHOLD.
-
-        When triggered, creates an OIG Access Request and sets
-        state["pending_approval"]. Routing downstream reads that value
-        to decide whether to execute agents or short-circuit.
+        Sales writes of 1-600 route to a Manager. Any non-VP write of 601+
+        routes to a VP. Vacation and malformed requests are hard denials and
+        never turn into approval requests.
         """
         from services.intent import parse_inventory_intent  # local import — same style as existing backend modules
 
@@ -586,40 +587,55 @@ Return ONLY the JSON object, no other text."""
             })
             return state
 
-        # Respect FGA's decision: if the inventory agent was denied upstream
-        # (e.g., manager on vacation, insufficient clearance), do NOT create an
-        # OIG approval request for an action the user isn't authorized to do.
-        allowed_agents = state.get("agents_to_invoke", []) or []
-        if AGENT_INVENTORY not in allowed_agents:
+        fga_record = next(
+            (check for check in state.get("fga_checks", []) if check.get("agent") == AGENT_INVENTORY),
+            None,
+        )
+        policy = (fga_record or {}).get("policy") or {}
+
+        hard_denial = policy.get("hard_denial_reason")
+        if hard_denial:
             state["agent_flow"].append({
                 "step": "approval_gate",
-                "action": "FGA denied inventory agent; skipping approval request",
-                "status": "skipped",
+                "action": hard_denial,
+                "status": "denied",
             })
             return state
 
         parsed = parse_inventory_intent(state["user_message"])
         state["parsed_intent"] = parsed
 
+        if not policy.get("approval_required"):
+            state["agent_flow"].append({
+                "step": "approval_gate",
+                "action": "The user's role can execute this quantity directly",
+                "status": "skipped",
+            })
+            return state
+
+        if not (fga_record or {}).get("request_allowed"):
+            state["agent_flow"].append({
+                "step": "approval_gate",
+                "action": "FGA denied permission to submit an inventory change request",
+                "status": "denied",
+            })
+            return state
+
         if self.approval_service is None:
-            # ApprovalService not wired — treat as if gate is disabled.
             state["agent_flow"].append({
                 "step": "approval_gate",
-                "action": "Approval service not configured; skipping gate",
-                "status": "skipped",
+                "action": "Approval is required, but the approval service is not configured",
+                "status": "error",
             })
             return state
 
-        if not self.approval_service.should_gate("inventory:write", parsed):
-            qty_str = str(parsed.get("quantity_delta")) if parsed else "?"
-            state["agent_flow"].append({
-                "step": "approval_gate",
-                "action": f"Quantity {qty_str} below threshold; no approval needed",
-                "status": "skipped",
-            })
-            return state
-
-        approver_group = os.getenv("OKTA_APPROVER_GROUP_NAME", "InventoryApprovers")
+        approval_role = str(policy.get("approval_role") or "Manager")
+        approval_level = int(policy.get("approval_level") or 2)
+        approver_group = (
+            os.getenv("OKTA_VP_APPROVER_GROUP_NAME", "ProGear-VPs")
+            if approval_level == 3
+            else os.getenv("OKTA_MANAGER_APPROVER_GROUP_NAME", "ProGear-Managers")
+        )
         try:
             fga_check_id = None
             if state.get("fga_checks"):
@@ -633,6 +649,8 @@ Return ONLY the JSON object, no other text."""
                 parsed_intent=parsed,
                 original_task=state["user_message"],
                 fga_check_id=fga_check_id,
+                required_approver_role=approval_role,
+                required_approver_level=approval_level,
             )
         except Exception as exc:
             logger.error(f"approval_gate create_request failed: {exc}")
@@ -655,6 +673,8 @@ Return ONLY the JSON object, no other text."""
             "request_id": request_id,
             "status": "pending",
             "approver_group": approver_group,
+            "approver_role": approval_role,
+            "approver_level": approval_level,
             "submitted_at": intent.submitted_at,
             "intent": {
                 "product_name": intent.product_name,
@@ -1015,11 +1035,12 @@ Return ONLY the JSON object, no other text."""
         if state.get("pending_approval") is not None:
             pa = state["pending_approval"]
             intent = pa.get("intent") or {}
+            approval_role = pa.get("approver_role") or "Manager"
             state["final_response"] = (
-                f"This inventory update ({intent.get('original_task', 'inventory write')!r}) "
-                f"requires manager approval. Request {pa['request_id']} sent to "
-                f"{pa['approver_group']}. I'll complete it automatically the moment "
-                "it's approved — you can close this tab."
+                "I didn’t change the inventory. "
+                f"This request requires {approval_role} approval, so I created Okta request "
+                f"{pa['request_id']} for {pa['approver_group']}. Once an eligible "
+                f"{approval_role} approves it, the change will execute automatically."
             )
             state["agent_flow"].append({
                 "step": "generate_response",
@@ -1064,11 +1085,21 @@ Return ONLY the JSON object, no other text."""
             and "inventory:write" in denial["requested_scopes"]
             for denial in denied_requests
         )
+        inventory_fga = next(
+            (check for check in state.get("fga_checks", []) if check.get("agent") == AGENT_INVENTORY),
+            {},
+        )
+        inventory_policy = inventory_fga.get("policy") or {}
+        hard_denial = inventory_policy.get("hard_denial_reason")
         permission_message = (
-            "I can’t increase inventory with your current permissions. "
-            "Please contact your manager for assistance or approval."
-            if inventory_write_denied
-            else "I can’t complete that request with your current permissions. Please contact your manager for assistance."
+            f"I didn’t change the inventory. {hard_denial}"
+            if inventory_write_denied and hard_denial
+            else (
+                "I didn’t change the inventory because the live FGA check denied direct execution. "
+                "Review the role level and vacation setting on the FGA page."
+                if inventory_write_denied
+                else "I can’t complete that request with your current permissions."
+            )
         )
 
         # Generate combined response

@@ -82,17 +82,14 @@ interface Scenario {
   branches?: { approve: Message[]; reject: Message[] };
 }
 
-// Content verified against the app's actual code (backend/auth/agent_config.py,
-// fga_client.py, services/factory.py::APPROVAL_QUANTITY_THRESHOLD=500) rather
-// than assumed — real scope strings and the real 500-unit approval threshold
-// appear as note chips so the story stays grounded in what the system
-// actually does, not a plausible-sounding paraphrase of it.
+// Content follows the live three-tier policy: Level 1 Sales, Level 2 Manager,
+// Level 3 VP; 600 is the Manager ceiling and 601 starts the VP tier.
 const SCENARIOS: Scenario[] = [
   {
     key: 'happy',
     label: 'Happy path',
     persona: 'sarah',
-    question: 'How many climbing helmets do we have in stock?',
+    question: 'How many basketballs are in stock?',
     messages: [
       { from: 'you', to: 'ai', kind: 'call', label: 'asks a question', caption: 'Sarah asks the assistant a question in plain English.' },
       { from: 'ai', to: 'okta', kind: 'call', label: "requests a pass, on Sarah's behalf", caption: "Before touching anything, the assistant asks Okta for permission, on Sarah's behalf." },
@@ -107,15 +104,17 @@ const SCENARIOS: Scenario[] = [
   },
   {
     key: 'denied',
-    label: 'Access denied',
+    label: 'Sales needs Manager',
     persona: 'sarah',
-    question: 'Set climbing-helmet stock to 50.',
+    question: 'Add 50 basketballs to inventory.',
     messages: [
-      { from: 'you', to: 'ai', kind: 'call', label: 'asks to change inventory', caption: 'Sarah asks the assistant to change inventory: "Set climbing-helmet stock to 50."' },
+      { from: 'you', to: 'ai', kind: 'call', label: 'asks to change inventory', caption: 'Sarah asks the assistant to add 50 basketballs.' },
       { from: 'ai', to: 'okta', kind: 'call', label: 'requests a write pass', caption: "The assistant asks Okta for permission to write, on Sarah's behalf." },
-      { from: 'okta', to: 'ai', kind: 'deny', label: 'role not allowed — refused', caption: "Sarah's role can read inventory but not change it. Okta refuses — the whole request stops.", note: 'requested: inventory:write' },
+      { from: 'okta', to: 'ai', kind: 'return', label: 'issues a scoped pass', caption: 'Okta issues a scoped token containing Sarah’s Level 1 Sales role.', note: 'Clearance: 1 (Sales)' },
+      { from: 'ai', to: 'rules', kind: 'call', label: 'checks role + quantity', caption: 'FGA checks Sarah’s role against a standard 50-unit write.' },
+      { from: 'rules', to: 'approver', kind: 'call', label: 'Manager approval required', caption: 'Level 1 cannot execute the change, so the system creates a Manager approval request.', note: 'required: Level 2' },
     ],
-    closingLine: 'The AI asked. Okta said no. The inventory system was never even contacted. Nothing leaked.',
+    closingLine: 'Nothing changed yet. A Manager must approve before the inventory write executes.',
   },
   {
     key: 'vacation',
@@ -125,7 +124,7 @@ const SCENARIOS: Scenario[] = [
     messages: [
       { from: 'you', to: 'ai', kind: 'call', label: 'asks to adjust stock', caption: "Mike, a warehouse manager, asks to adjust his warehouse's stock." },
       { from: 'ai', to: 'okta', kind: 'call', label: 'requests a pass', caption: "The assistant asks Okta for permission, on Mike's behalf." },
-      { from: 'okta', to: 'ai', kind: 'return', label: 'role + relationship OK', caption: "Mike's role and manager relationship both check out, so Okta issues the pass.", note: 'scope: inventory:write' },
+      { from: 'okta', to: 'ai', kind: 'return', label: 'Manager role confirmed', caption: "Okta issues a token containing Mike's Level 2 Manager role.", note: 'Clearance: 2 (Manager)' },
       { from: 'ai', to: 'rules', kind: 'call', label: 'checks live context', caption: "The assistant checks the live access rules for Mike's warehouse." },
       { from: 'rules', to: 'ai', kind: 'deny', label: 'on vacation — blocked', caption: 'But the access rules see a live flag: Mike is on vacation right now. Blocked this second.', note: 'on_vacation: true' },
     ],
@@ -135,22 +134,22 @@ const SCENARIOS: Scenario[] = [
     key: 'approval',
     label: 'Needs approval',
     persona: 'mike',
-    question: 'Add 10,000 units to warehouse stock.',
+    question: 'Add 601 basketballs to inventory.',
     messages: [
-      { from: 'you', to: 'ai', kind: 'call', label: 'asks for a large change', caption: 'Mike asks to add a large amount of stock: 10,000 units.' },
+      { from: 'you', to: 'ai', kind: 'call', label: 'asks for a large change', caption: 'Mike asks to add 601 basketballs — the first quantity in the VP tier.' },
       { from: 'ai', to: 'okta', kind: 'call', label: 'requests a write pass', caption: "The assistant asks Okta for permission, on Mike's behalf." },
       { from: 'okta', to: 'ai', kind: 'return', label: 'issues a scoped write pass', caption: 'Okta issues a scoped pass for warehouse writes.', note: 'scope: inventory:write' },
-      { from: 'ai', to: 'rules', kind: 'call', label: 'checks context', caption: "The assistant confirms Mike isn't on vacation right now." },
-      { from: 'rules', to: 'ai', kind: 'return', label: 'context is fine', caption: 'Context checks out too.' },
-      { from: 'ai', to: 'approver', kind: 'approvalPause', label: 'high-impact — needs sign-off', caption: "This change is 10,000 units — big enough to require a human sign-off. The request pauses.", note: 'threshold: 500 units' },
+      { from: 'ai', to: 'rules', kind: 'call', label: 'checks role + quantity', caption: "FGA sees Mike is Level 2, not on vacation, and asks whether he can execute a 601-unit write." },
+      { from: 'rules', to: 'ai', kind: 'deny', label: 'VP tier — no direct write', caption: 'A Manager can execute through 600. At 601, FGA requires Level 3.', note: 'required: Level 3 (VP)' },
+      { from: 'ai', to: 'approver', kind: 'approvalPause', label: 'creates VP approval', caption: 'The system creates an Okta VP approval request. Inventory is unchanged while it waits.', note: '601+ → VP' },
     ],
     closingLine: '',
     branches: {
       approve: [
-        { from: 'approver', to: 'ai', kind: 'return', label: 'approved', caption: 'Approved. Now, and only now, the large change is written.' },
-        { from: 'ai', to: 'system', kind: 'call', label: 'writes the change', caption: 'The assistant writes the 10,000-unit adjustment.' },
+        { from: 'approver', to: 'ai', kind: 'return', label: 'VP approved', caption: 'An eligible Level 3 VP approves. Now, and only now, the change can be written.' },
+        { from: 'ai', to: 'system', kind: 'call', label: 'writes the change', caption: 'The assistant writes the 601-unit adjustment.' },
         { from: 'system', to: 'ai', kind: 'return', label: 'confirms', caption: 'Inventory confirms the update.' },
-        { from: 'ai', to: 'you', kind: 'return', label: 'confirms to Mike', caption: 'Mike gets confirmation that his 10,000-unit adjustment went through.' },
+        { from: 'ai', to: 'you', kind: 'return', label: 'confirms to Mike', caption: 'Mike gets confirmation that the 601-unit adjustment went through.' },
       ],
       reject: [
         { from: 'approver', to: 'ai', kind: 'deny', label: 'denied by approver', caption: 'A human denied it. The AI could not push it through on its own.' },

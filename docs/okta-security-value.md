@@ -689,50 +689,51 @@ If an AI agent is compromised or behaving unexpectedly:
 
 ## Layer Two: Fine-Grained Authorization with Auth0 FGA
 
-Everything above - Workload Principals, ID-JAG, four Custom Authorization Servers - answers one question well: **is this role/group allowed to use this scope at all?** That's Okta's job, and it's a coarse, mostly-static question, checked once per token exchange: is the user in `ProGear-Warehouse`? Does that group's policy grant `inventory:write` on the Inventory Custom Authorization Server?
+Everything above - Workload Principals, ID-JAG, four Custom Authorization Servers - answers one question well: **may this governed agent obtain a token for this resource and scope while acting for this user?** For Inventory, both read and write scopes let the request reach the resource. A write scope is not permission to bypass the next decision.
 
-That question is necessary, but it is not sufficient for every access decision. This demo adds a second layer - **Auth0 FGA** (Fine-Grained Authorization) - that runs *after* Okta has already said yes, to answer a different question: **does the live relationship, clearance, or context hold right now, for this specific object?**
+That question is necessary, but it is not sufficient for every access decision. This demo adds a second layer - **Auth0 FGA** (Fine-Grained Authorization) - that runs *after* token exchange to answer: **given this live Okta role, this quantity, and this vacation status, may the request execute or ask for approval?**
 
 ### Why not just make Okta's policy more granular?
 
-Consider what it would take to enforce, using Okta group policy alone: "a warehouse manager can update an inventory item only if they manage that specific warehouse, they are not currently on vacation, and their clearance level covers that item's required sensitivity."
+The user has one custom Okta profile value, `clearance_level`, with three intentional meanings: **1 = Sales, 2 = Manager, 3 = VP**. It is a role level, not an item-sensitivity score and not a second value combined with a Manager switch.
 
-To express that with Okta groups and policies, you would need a distinct group for every combination of *(warehouse × manager × vacation-state × clearance-level)*, and you would need to move people between groups the moment any one of those facts changes - potentially several times a week, per person, as vacations start and end or clearance gets reviewed. Okta's directory and policy model was built to answer "does this person's role entitle them to this class of access," not "is this specific person, in this specific moment, cleared for this specific object." Forcing the second question into the first tool doesn't scale - it turns group membership into a combinatorial explosion that's stale the moment anyone's status changes, and staleness in an access control system is its own security problem.
+Okta remains the source of truth for that role and for `is_on_vacation`. The Inventory access token carries both claims. The backend converts them into contextual FGA tuples for the current check, rather than persisting a second mutable role copy in FGA. That keeps the identity value and the authorization relationship from drifting apart.
 
 ### What FGA actually checks (the real model behind this demo)
 
 FGA runs on top of the Okta scope check, for the Inventory domain, only after Okta has already granted `inventory:read` or `inventory:write`:
 
-| Okta already checked (coarse, role-based) | FGA checks next (fine-grained, contextual) |
+| Okta establishes | FGA decides next |
 |---|---|
-| Is the user in a group that can request `inventory:read` / `inventory:write` at all? | Is this specific user an **active manager** (or viewer) **of this specific warehouse**, right now? |
-| - | Is this specific user **currently on vacation**? (evaluated as a live fact at request time, not something stored and left to go stale) |
-| - | Does this specific user hold **clearance at or above** this specific inventory item's required clearance level? |
+| Signed-in user and governed agent identity | Read: all valid role levels may execute |
+| Narrow `inventory:read` or `inventory:write` token | Write 1–600: Level 2+ executes; Level 1 requests Manager approval |
+| `Clearance` role claim and `Vacation` context claim | Write 601+: Level 3 executes; Level 1 or 2 requests VP approval |
+| - | Vacation true: every write is denied, including approval submission; reads still work |
 
-`inventory:read` maps to an FGA `can_view` check (active manager or viewer, and not on vacation). `inventory:write` maps to a stricter `can_update` check (active manager *and* sufficient clearance for that item). Low-stock alerts are read operations and therefore use `inventory:read`.
+`inventory:read` maps to the FGA `can_read` relation. Quantity selects `can_update_standard` for 1–600 or `can_update_large` for 601+. A separate `can_request_change` relation allows an active user whose level is too low to create the correctly tiered OIG request. Low-stock alerts remain reads.
 
-**Concretely:** Mike Manager's Okta group membership grants him the `inventory:write` scope, and his ID-JAG token exchange with the Inventory Custom Authorization Server succeeds. But if Mike is currently marked on vacation, or the specific item he's trying to update requires a clearance level he doesn't hold, FGA denies the write anyway - *after* Okta already said yes. Two independent systems, checking two different kinds of facts, both have to agree before a write executes.
+**Concretely:** Sarah (Level 1) may read. If she asks to add 50 basketballs, the inventory is unchanged and a Manager request is created. Mike (Level 2) may add 50 directly, but adding 601 creates a VP request. A Level 3 VP may perform either write directly. Setting vacation true blocks any of them from writing while leaving reads available.
 
 ### Why this is a second layer, not duplicated work
 
-Okta and FGA aren't answering the same question twice - they're answering two questions that change at two very different rates. Roles and group membership change occasionally (a promotion, a team transfer). Relationships and context change constantly (vacation starts and ends, clearance gets reviewed, warehouse assignments shift). Baking the fast-changing, relationship-shaped question into Okta's policy engine would mean re-provisioning groups every time any of those facts changed for any user - a maintenance burden Okta's group model was never designed to absorb. FGA is purpose-built to answer exactly this kind of live, relationship-shaped question cheaply, without ever touching the identity layer.
+Okta and FGA are not answering the same question twice. Okta authenticates the user and agent, establishes the role/context claims, and issues the resource token. FGA combines those facts with the requested quantity to make the per-action decision. OIG then records and resolves the human decision when a higher role is required.
 
 ---
 
 ## Layer Three: Human Approval for High-Risk Actions (Okta Identity Governance)
 
-An action can pass both layers above - the right Okta scope, the right FGA relationship and clearance - and still be worth stopping for a human to look at, purely because of its *scale*.
+An action can have a valid token but still require a higher role before it executes. That is where Okta Identity Governance supplies the human-in-the-loop step.
 
-In this demo, an inventory write above a configurable quantity threshold (500 units by default, `APPROVAL_QUANTITY_THRESHOLD`) does not execute automatically - even for a fully-authorized active manager, with sufficient clearance, who is not on vacation. Instead it opens an access request through **Okta Identity Governance (OIG)**, with a required justification, and waits for a human approver before the write is committed.
+In this demo, **Sales writes from 1 through 600 require Manager approval**. **Writes of 601 or more require VP approval unless the requester is already a VP**. The backend creates an **Okta Identity Governance (OIG)** request with the required role and justification, makes no inventory change while it is pending, and verifies the approver's current Okta role level before executing an approved change.
 
 ### Why add a third gate when the first two already said yes?
 
 Because "is this action within policy" and "is this action a good idea right now" are different questions, answered by different mechanisms:
 
-- **Authorization (Okta + FGA) asks:** does this identity, with this relationship, in this context, have the *right* to perform this action? That is a question about permission, decided in milliseconds by a token exchange and a fine-grained check.
-- **Governance (the approval gate) asks:** given that they have the right, is doing it *at this scale, right now, without a second set of eyes* an acceptable business risk? That is a question about risk and controls, not permission - and it's not one a policy engine can decide, because "acceptable risk" is a judgment call, not a fact about relationships.
+- **Authorization (Okta + FGA) asks:** may this role execute this exact quantity now, or may it submit a request to the next role?
+- **Governance (the approval gate) asks:** did a currently qualified Manager or VP approve the queued change?
 
-A correctly-authorized 5-unit inventory adjustment and a correctly-authorized 5,000-unit inventory adjustment are identical from an authorization standpoint - same user, same relationship, same clearance. They are not identical from a business-risk standpoint: the larger one is harder to reverse and more consequential if it turns out to be a mistake, or an authorized session behaving in an unusual way. That is exactly the kind of action that segregation-of-duties controls - SOX, financial controls, and equivalent frameworks in regulated industries - require a second person to review, *specifically because* the system already confirmed the action was permitted, and permission was never meant to be the only control on irreversible or high-magnitude actions.
+The 600/601 boundary makes the story deterministic. A Manager is trusted to execute normal inventory adjustments through 600 units. A VP must authorize changes at 601 or above. Sales cannot directly execute either class of write, but can request the appropriate human decision.
 
 Routing this through Okta Identity Governance, rather than a bespoke approval box bolted onto the app, matters for the same reason the rest of this document does: the request, the justification, and the approval decision all land in the same governance system that already owns your access-review and audit story, instead of creating a second, disconnected place your auditors have to go find.
 
@@ -776,7 +777,7 @@ Routing this through Okta Identity Governance, rather than a bespoke approval bo
 
 **Audit Trail:** 1 success, 3 denials - all logged with Mike Manager as the user.
 
-**Note on the `inventory:write` grant above:** the token exchange succeeding means Okta confirmed Mike's *role* allows him to request inventory writes at all - it is necessary, not sufficient. Whether a specific write actually executes still depends on the FGA check (is he an active manager of this warehouse, right now, and cleared for this item?) and, above the quantity threshold, on a human approving the request in Okta Identity Governance. See [Layer Two](#layer-two-fine-grained-authorization-with-auth0-fga) and [Layer Three](#layer-three-human-approval-for-high-risk-actions-okta-identity-governance) above.
+**Note on the `inventory:write` grant above:** the token exchange succeeding is necessary, not sufficient. FGA still applies Mike's Level 2 role, requested quantity, and vacation context. He can execute 1–600 while active; 601+ creates a Level 3 VP request. See [Layer Two](#layer-two-fine-grained-authorization-with-auth0-fga) and [Layer Three](#layer-three-human-approval-for-high-risk-actions-okta-identity-governance) above.
 
 ---
 
@@ -836,7 +837,7 @@ Routing this through Okta Identity Governance, rather than a bespoke approval bo
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-No single layer above is sufficient by itself. Identity without fine-grained context would let a correctly-scoped token update an item its holder has no clearance for. Fine-grained context without identity would have nothing to check a relationship against. And authorization without governance would let a fully-permitted action execute at any scale, unreviewed. The value isn't any one control - it's that all three are independently enforced, by three different systems, none of which the other two can silently bypass.
+No single layer above is sufficient by itself. Identity establishes the user, agent, role, and resource boundary. FGA combines role, quantity, and live vacation context for each action. OIG records the qualified Manager or VP decision when escalation is required. The value is the enforced chain, not any one control in isolation.
 
 ---
 

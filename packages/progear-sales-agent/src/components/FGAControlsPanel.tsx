@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
-import { ShieldAlert, Palmtree, Key as KeyIcon, RotateCcw, Loader2 } from 'lucide-react';
+import { BadgeCheck, Loader2, Palmtree, RotateCcw, ShieldAlert } from 'lucide-react';
 import { API_BASE_URL } from '@/lib/config';
 
 interface Props {
@@ -11,61 +11,63 @@ interface Props {
 
 interface DemoStatus {
   is_on_vacation: boolean;
-  is_a_manager: boolean;
   clearance_level: number;
 }
 
-// Mutates the signed-in user's REAL Okta profile via the backend's
-// /api/admin/demo-toggle (scoped server-side to the caller's own sub - see
-// backend/auth/demo_admin.py). Deliberately not a client-side simulation:
-// the point is to remove the "log into Okta Admin Console mid-demo" friction
-// while keeping the FGA check genuinely live.
+const ROLES = [
+  { level: 1, name: 'Sales', summary: 'Read inventory and submit change requests.' },
+  { level: 2, name: 'Manager', summary: 'Make inventory changes up to 600 units.' },
+  { level: 3, name: 'VP', summary: 'Make inventory changes of any size.' },
+] as const;
+
 export default function FGAControlsPanel({ onApplied }: Props) {
   const { data: session } = useSession();
   const [status, setStatus] = useState<DemoStatus | null>(null);
-  const [clearance, setClearance] = useState(5);
+  const [roleLevel, setRoleLevel] = useState(1);
   const [busy, setBusy] = useState<string | null>(null);
   const [lastResult, setLastResult] = useState<string | null>(null);
-
   const idToken = session?.idToken;
 
-  async function loadStatus() {
+  const loadStatus = useCallback(async () => {
     if (!idToken) return;
     try {
-      const res = await fetch(`${API_BASE_URL}/api/admin/demo-status`, {
+      const response = await fetch(`${API_BASE_URL}/api/admin/demo-status`, {
         headers: { Authorization: `Bearer ${idToken}` },
       });
-      if (!res.ok) return;
-      const data: DemoStatus = await res.json();
+      if (!response.ok) return;
+      const data: DemoStatus = await response.json();
       setStatus(data);
-      setClearance(data.clearance_level ?? 5);
+      setRoleLevel(data.clearance_level ?? 1);
     } catch {
-      // Non-fatal - buttons just fall back to showing nothing selected.
+      // The controls remain usable after the next successful status refresh.
     }
-  }
-
-  useEffect(() => {
-    loadStatus();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [idToken]);
 
-  async function callToggle(attribute: string, value: unknown) {
+  useEffect(() => {
+    void loadStatus();
+  }, [loadStatus]);
+
+  async function callToggle(attribute: 'is_on_vacation' | 'clearance_level', value: boolean | number) {
     if (!idToken) return;
     setBusy(attribute);
     setLastResult(null);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/admin/demo-toggle`, {
+      const response = await fetch(`${API_BASE_URL}/api/admin/demo-toggle`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
         body: JSON.stringify({ attribute, value }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Toggle failed');
-      setStatus((prev) => (prev ? { ...prev, [attribute]: data.value } : prev));
-      setLastResult(`Updated your Okta profile: ${attribute} = ${JSON.stringify(data.value)}. ${data.note || ''}`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || 'Update failed');
+      setStatus((previous) => (previous ? { ...previous, [attribute]: data.value } : previous));
+      const message =
+        attribute === 'clearance_level'
+          ? `Role changed to Level ${data.value} — ${ROLES[data.value - 1]?.name ?? 'Unknown'}.`
+          : `On vacation is now ${data.value ? 'True' : 'False'}.`;
+      setLastResult(`${message} The next prompt uses the new Okta value.`);
       onApplied?.();
-    } catch (err) {
-      setLastResult(`Error: ${err instanceof Error ? err.message : 'Toggle failed'}`);
+    } catch (error) {
+      setLastResult(`Error: ${error instanceof Error ? error.message : 'Update failed'}`);
     } finally {
       setBusy(null);
     }
@@ -76,203 +78,142 @@ export default function FGAControlsPanel({ onApplied }: Props) {
     setBusy('reset');
     setLastResult(null);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/admin/demo-reset`, {
+      const response = await fetch(`${API_BASE_URL}/api/admin/demo-reset`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${idToken}` },
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Reset failed');
-      setLastResult(
-        data.reset?.length
-          ? `Reset ${data.reset.join(', ')} to the demo starting values.`
-          : 'Nothing to reset - no attributes have been toggled yet.'
-      );
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || 'Reset failed');
       await loadStatus();
+      setLastResult('Restored this persona’s starting role and set On vacation to False.');
       onApplied?.();
-    } catch (err) {
-      setLastResult(`Error: ${err instanceof Error ? err.message : 'Reset failed'}`);
+    } catch (error) {
+      setLastResult(`Error: ${error instanceof Error ? error.message : 'Reset failed'}`);
     } finally {
       setBusy(null);
     }
   }
 
-  // Active state gets a solid, filled style; inactive gets a plain outline -
-  // so it's obvious at a glance which value is actually live right now,
-  // not just which button happens to be styled "colored".
-  function toggleButtonClass(isActive: boolean, color: 'orange' | 'green') {
-    if (isActive) {
-      return color === 'orange'
-        ? 'px-3 py-1.5 text-xs rounded-lg border-2 border-orange-500 bg-orange-500 text-white font-semibold shadow-sm disabled:opacity-50 flex items-center gap-1'
-        : 'px-3 py-1.5 text-xs rounded-lg border-2 border-green-600 bg-green-600 text-white font-semibold shadow-sm disabled:opacity-50 flex items-center gap-1';
+  const vacationButtonClass = (active: boolean, trueButton: boolean) => {
+    if (active) {
+      return trueButton
+        ? 'rounded-lg border-2 border-orange-500 bg-orange-500 px-3 py-1.5 text-xs font-semibold text-white shadow-sm disabled:opacity-50'
+        : 'rounded-lg border-2 border-emerald-600 bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm disabled:opacity-50';
     }
-    return 'px-3 py-1.5 text-xs rounded-lg border border-gray-300 bg-white hover:bg-gray-50 text-gray-500 disabled:opacity-50 flex items-center gap-1';
-  }
+    return 'rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-50 disabled:opacity-50';
+  };
 
   return (
-    <div className="bg-white rounded-xl border-2 border-purple-200 shadow-sm overflow-hidden">
+    <section className="overflow-hidden rounded-xl border-2 border-purple-200 bg-white shadow-sm">
       <div className="bg-gradient-to-r from-purple-600 to-indigo-600 px-4 py-3">
-        <h3 className="text-white font-semibold flex items-center gap-2">
-          <ShieldAlert className="w-5 h-5" />
+        <h2 className="flex items-center gap-2 font-semibold text-white">
+          <ShieldAlert className="h-5 w-5" />
           FGA Demo Controls
-        </h3>
-        <p className="text-white/80 text-xs mt-1">
-          Changes your real Okta profile{session?.user?.email ? ` - ${session.user.email}` : ''}
+        </h2>
+        <p className="mt-1 text-xs text-white/80">
+          Changes your live Okta profile{session?.user?.email ? ` — ${session.user.email}` : ''}
         </p>
       </div>
 
-      <div className="p-4 space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2 text-sm text-gray-700">
-            <Palmtree className="w-4 h-4 text-orange-500" />
-            On vacation
+      <div className="space-y-5 p-4">
+        <div>
+          <div className="mb-2 flex items-center gap-2 text-sm font-medium text-gray-800">
+            <BadgeCheck className="h-4 w-4 text-blue-600" />
+            Role level
+            {status ? (
+              <span className="text-xs font-normal text-gray-500">
+                Current: {status.clearance_level} — {ROLES[status.clearance_level - 1]?.name}
+              </span>
+            ) : null}
+          </div>
+          <div className="grid gap-2 sm:grid-cols-3">
+            {ROLES.map((role) => {
+              const active = roleLevel === role.level;
+              return (
+                <button
+                  key={role.level}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => setRoleLevel(role.level)}
+                  disabled={busy !== null}
+                  className={`rounded-lg border-2 p-3 text-left transition disabled:opacity-50 ${
+                    active
+                      ? 'border-blue-500 bg-blue-50 shadow-sm'
+                      : 'border-gray-200 bg-white hover:border-blue-200 hover:bg-gray-50'
+                  }`}
+                >
+                  <div className="text-sm font-semibold text-gray-900">
+                    {role.level} — {role.name}
+                  </div>
+                  <div className="mt-1 text-[11px] leading-relaxed text-gray-600">{role.summary}</div>
+                </button>
+              );
+            })}
+          </div>
+          <button
+            type="button"
+            onClick={() => callToggle('clearance_level', roleLevel)}
+            disabled={busy !== null || status?.clearance_level === roleLevel}
+            className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-blue-300 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {busy === 'clearance_level' ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            Apply role level
+          </button>
+        </div>
+
+        <div className="flex items-center justify-between border-t border-gray-100 pt-4">
+          <div>
+            <div className="flex items-center gap-2 text-sm font-medium text-gray-800">
+              <Palmtree className="h-4 w-4 text-orange-500" />
+              On vacation
+            </div>
+            <p className="mt-1 text-[11px] text-gray-500">False is the default. True blocks inventory writes.</p>
           </div>
           <div className="flex gap-2">
             <button
+              type="button"
+              aria-pressed={status?.is_on_vacation === true}
               onClick={() => callToggle('is_on_vacation', true)}
               disabled={busy !== null}
-              className={toggleButtonClass(status?.is_on_vacation === true, 'orange')}
+              className={vacationButtonClass(status?.is_on_vacation === true, true)}
             >
-              {busy === 'is_on_vacation' && <Loader2 className="w-3 h-3 animate-spin" />}
               True
             </button>
             <button
+              type="button"
+              aria-pressed={status?.is_on_vacation === false}
               onClick={() => callToggle('is_on_vacation', false)}
               disabled={busy !== null}
-              className={toggleButtonClass(status?.is_on_vacation === false, 'orange')}
+              className={vacationButtonClass(status?.is_on_vacation === false, false)}
             >
               False
-            </button>
-          </div>
-        </div>
-
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2 text-sm text-gray-700">
-            <ShieldAlert className="w-4 h-4 text-green-600" />
-            Manager
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={() => callToggle('is_a_manager', true)}
-              disabled={busy !== null}
-              className={toggleButtonClass(status?.is_a_manager === true, 'green')}
-            >
-              {busy === 'is_a_manager' && <Loader2 className="w-3 h-3 animate-spin" />}
-              True
-            </button>
-            <button
-              onClick={() => callToggle('is_a_manager', false)}
-              disabled={busy !== null}
-              className={toggleButtonClass(status?.is_a_manager === false, 'green')}
-            >
-              False
-            </button>
-          </div>
-        </div>
-
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2 text-sm text-gray-700">
-            <KeyIcon className="w-4 h-4 text-blue-600" />
-            Clearance level
-            {status && (
-              <span className="text-[10px] text-gray-400">(current: {status.clearance_level})</span>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <select
-              value={clearance}
-              onChange={(e) => setClearance(Number(e.target.value))}
-              className="text-xs border border-gray-300 rounded-lg px-2 py-1.5"
-            >
-              {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
-                <option key={n} value={n}>{n}</option>
-              ))}
-            </select>
-            <button
-              onClick={() => callToggle('clearance_level', clearance)}
-              disabled={busy !== null}
-              className="px-3 py-1.5 text-xs rounded-lg border border-blue-300 bg-blue-50 hover:bg-blue-100 text-blue-700 disabled:opacity-50"
-            >
-              Apply
             </button>
           </div>
         </div>
 
         <button
+          type="button"
           onClick={callReset}
           disabled={busy !== null}
-          className="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm rounded-lg border border-gray-300 bg-gray-50 hover:bg-gray-100 text-gray-700 disabled:opacity-50"
+          className="flex w-full items-center justify-center gap-2 rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50"
         >
-          <RotateCcw className="w-4 h-4" />
-          Reset to demo defaults
+          {busy === 'reset' ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+          Reset my demo attributes
         </button>
 
-        {lastResult && (
+        {lastResult ? (
           <div
-            className={`text-xs p-2 rounded-lg border ${
+            role="status"
+            className={`rounded-lg border p-2 text-xs ${
               lastResult.startsWith('Error')
-                ? 'bg-red-50 text-red-700 border-red-200'
-                : 'bg-green-50 text-green-700 border-green-200'
+                ? 'border-red-200 bg-red-50 text-red-700'
+                : 'border-green-200 bg-green-50 text-green-700'
             }`}
           >
             {lastResult}
           </div>
-        )}
-
-        <div className="border-t border-purple-100 pt-4">
-          <div className="mb-3">
-            <h4 className="text-sm font-semibold text-gray-800">How FGA uses these settings</h4>
-            <p className="mt-1 text-xs text-gray-500">
-              For an inventory update, FGA checks all three conditions on every request.
-            </p>
-          </div>
-
-          <div className="grid gap-2 sm:grid-cols-3">
-            <div className="rounded-lg border border-green-200 bg-green-50 p-3">
-              <div className="flex items-center gap-2 text-xs font-semibold text-green-800">
-                <ShieldAlert className="h-4 w-4" />
-                Manager = True
-              </div>
-              <p className="mt-1 text-[11px] leading-relaxed text-green-700">
-                The user must be an inventory manager to make changes.
-              </p>
-            </div>
-
-            <div className="rounded-lg border border-orange-200 bg-orange-50 p-3">
-              <div className="flex items-center gap-2 text-xs font-semibold text-orange-800">
-                <Palmtree className="h-4 w-4" />
-                On vacation = False
-              </div>
-              <p className="mt-1 text-[11px] leading-relaxed text-orange-700">
-                False is the demo default. True temporarily blocks inventory access.
-              </p>
-            </div>
-
-            <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
-              <div className="flex items-center gap-2 text-xs font-semibold text-blue-800">
-                <KeyIcon className="h-4 w-4" />
-                Enough clearance
-              </div>
-              <p className="mt-1 text-[11px] leading-relaxed text-blue-700">
-                The user&apos;s level must be at least the level required by the item.
-              </p>
-            </div>
-          </div>
-
-          <div className="mt-3 rounded-lg border border-purple-200 bg-purple-50 px-3 py-2.5 text-center">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-purple-600">
-              Inventory update allowed
-            </p>
-            <p className="mt-1 text-xs font-medium text-purple-900">
-              Manager is True&nbsp; + &nbsp;Vacation is False&nbsp; + &nbsp;Clearance is high enough
-            </p>
-          </div>
-
-          <p className="mt-2 text-center text-[10px] leading-relaxed text-gray-400">
-            Okta provides the user values. FGA combines them with the inventory relationship and
-            item requirement to allow or block the request.
-          </p>
-        </div>
+        ) : null}
       </div>
-    </div>
+    </section>
   );
 }

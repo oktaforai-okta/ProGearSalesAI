@@ -210,9 +210,10 @@ class ChatResponse(BaseModel):
     session_id: str
     agent_flow: List[AgentFlowStep]
     token_exchanges: List[TokenExchange]
+    fga_checks: List[Dict[str, Any]]
     user_info: Optional[Dict[str, Any]] = None
-    # Populated by the OIG approval gate when a high-quantity inventory write
-    # is awaiting manager approval. Null for normal responses.
+    # Populated when an inventory write awaits Manager or VP approval.
+    # Null for direct execution and hard denials.
     pending_approval: Optional[Dict[str, Any]] = None
 
 
@@ -274,10 +275,10 @@ async def chat(
         try:
             user_claims = await okta_auth.validate_token(user_token)
 
-            # Extract claims from Okta ID token
-            # Note: Custom claims (Manager, Vacation, Clearance) come from Custom Auth Server, not ID token
+            # Extract any fallback role/context claims from the Okta ID token.
+            # The Inventory Custom Authorization Server token is authoritative
+            # during the FGA check; clearance_level is the sole role source.
             # ID token is used for initial authentication only
-            is_manager = user_claims.get("Manager", user_claims.get("is_a_manager", False))
             is_on_vacation = user_claims.get("Vacation", user_claims.get("is_on_vacation", False))
             clearance_level = 0
             clearance_claim = user_claims.get("Clearance", user_claims.get("clearance_level"))
@@ -292,7 +293,6 @@ async def chat(
                 "email": user_claims.get("email"),
                 "name": user_claims.get("name"),
                 "groups": user_claims.get("groups", []),
-                "is_manager": is_manager,  # Fallback from ID token
                 "is_on_vacation": is_on_vacation,  # Fallback from ID token
                 "clearance_level": clearance_level,  # Fallback from ID token
             }
@@ -304,8 +304,6 @@ async def chat(
             logger.info(f"User: {user_info.get('email')}")
             logger.info(f"Subject (sub): {user_claims.get('sub')}")
             logger.info(f"Groups: {user_claims.get('groups', [])}")
-            logger.info(f"Manager claim (raw): {user_claims.get('Manager')} | is_a_manager: {user_claims.get('is_a_manager')}")
-            logger.info(f"Resolved is_manager: {is_manager}")
             logger.info(f"Vacation claim (raw): {user_claims.get('Vacation')} | is_on_vacation: {user_claims.get('is_on_vacation')}")
             logger.info(f"Resolved is_on_vacation: {is_on_vacation}")
             logger.info(f"Clearance claim (raw): {user_claims.get('Clearance')} | clearance_level: {user_claims.get('clearance_level')}")
@@ -313,9 +311,9 @@ async def chat(
             logger.info(f"Claim keys present: {list(user_claims.keys())}")
         except Exception as e:
             logger.warning(f"Token validation failed: {e}")
-            user_info = {"email": "anonymous", "groups": [], "is_manager": False, "is_on_vacation": False, "clearance_level": 0}
+            user_info = {"email": "anonymous", "groups": [], "is_on_vacation": False, "clearance_level": 0}
     else:
-        user_info = {"email": "anonymous", "groups": [], "is_manager": False, "is_on_vacation": False, "clearance_level": 0}
+        user_info = {"email": "anonymous", "groups": [], "is_on_vacation": False, "clearance_level": 0}
 
     # Create orchestrator and process request
     try:
@@ -331,6 +329,7 @@ async def chat(
             session_id=request.session_id or "session-1",
             agent_flow=[AgentFlowStep(**step) for step in result["agent_flow"]],
             token_exchanges=[TokenExchange(**ex) for ex in result["token_exchanges"]],
+            fga_checks=result.get("fga_checks", []),
             user_info=user_info,
             pending_approval=result.get("pending_approval"),
         )
@@ -346,6 +345,7 @@ async def chat(
                 AgentFlowStep(step="error", action=str(e), status="error")
             ],
             token_exchanges=[],
+            fga_checks=[],
             user_info=user_info
         )
 
@@ -629,7 +629,7 @@ async def _resolve_caller_user_id(authorization: Optional[str]) -> str:
 async def demo_status(authorization: Optional[str] = Header(None, alias="Authorization")):
     """
     Demo-only, read-only: the signed-in user's current is_on_vacation /
-    is_a_manager / clearance_level values, so the UI can show which state is
+    role level / vacation values, so the UI can show which state is
     actually active instead of a static button style.
     """
     user_id = await _resolve_caller_user_id(authorization)
@@ -649,9 +649,9 @@ async def demo_toggle(
     authorization: Optional[str] = Header(None, alias="Authorization")
 ):
     """
-    Demo-only: toggle the SIGNED-IN user's own is_on_vacation / is_a_manager /
-    clearance_level Okta attribute for real, so the FGA scenarios (manager on
-    vacation, insufficient clearance) can be shown live without an Okta Admin
+    Demo-only: toggle the SIGNED-IN user's own is_on_vacation /
+    clearance_level Okta attribute for real, so the FGA role and vacation
+    scenarios can be shown live without an Okta Admin
     Console detour mid-demo. See auth/demo_admin.py for the scoping rules.
     """
     user_id = await _resolve_caller_user_id(authorization)
@@ -661,6 +661,8 @@ async def demo_toggle(
 
     try:
         return await toggle_demo_attribute(user_id, request.attribute, request.value)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:

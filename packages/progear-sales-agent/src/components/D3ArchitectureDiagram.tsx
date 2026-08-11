@@ -99,9 +99,9 @@ const VIEW_H = 620;
 // ---------------------------------------------------------------------------
 // Data model — 8 nodes across 3 tiers (actor / trust / resource), 7 edges.
 // Content verified against the app's actual code (backend/auth/agent_config.py,
-// fga_client.py, services/factory.py::APPROVAL_QUANTITY_THRESHOLD=500), not
-// assumed — see SequenceDiagram.tsx for the note chips carrying the exact
-// scope strings and the confirmed 500-unit approval threshold.
+// fga_client.py and auth/inventory_policy.py), not assumed — see
+// SequenceDiagram.tsx for the note chips carrying the exact scope strings,
+// role tiers, and the confirmed 600/601 boundary.
 // ---------------------------------------------------------------------------
 
 const NODES: DiagramNode[] = [
@@ -168,9 +168,8 @@ const NODES: DiagramNode[] = [
   "scp": [
     "inventory:write"
   ],
-  "Manager": true,
   "Vacation": false,
-  "Clearance": 5,
+  "Clearance": 2,
   "exp": 1751500300
 }`,
       },
@@ -179,18 +178,19 @@ const NODES: DiagramNode[] = [
   {
     id: 'fga',
     label: 'Access Rules',
-    sublabel: 'Relationship + context check',
+    sublabel: 'Role + quantity + context',
     x: 610, y: 300, w: 150, h: 70,
     accent: C.accent,
     hero: true,
     order: 4,
-    description: 'A live check of your relationships and current context, like whether you manage this warehouse or are on vacation.',
+    description: 'A live check of role level, requested quantity, and vacation status.',
     detail: {
-      body: "A live check beyond your role: do you manage this warehouse? Is your clearance high enough? Are you on vacation? Any mismatch blocks access instantly.",
+      body: 'A live decision using one Okta role value: Level 1 Sales, Level 2 Manager, or Level 3 VP. Quantity selects the required tier, and vacation blocks every write.',
       subpoints: [
-        'Relationship: are you the manager or an approved viewer of this specific warehouse?',
-        'Clearance: higher clearance automatically includes everything below it.',
-        "Context: a live flag (for example 'on vacation') can block access this second, with no code change.",
+        'Reads: Levels 1, 2, and 3 can read inventory.',
+        'Writes of 1–600: Manager or VP executes; Sales creates Manager approval.',
+        'Writes of 601+: VP executes; Sales or Manager creates VP approval.',
+        "Context: 'on vacation' blocks every write, including approval submission.",
       ],
       callouts: ['Blocks instantly on context change', 'No redeploy needed to revoke'],
       architect: "Auth0 FGA (Zanzibar-style relationship graph). Vacation is a contextual tuple, not stored — takes effect next check.",
@@ -207,12 +207,13 @@ const NODES: DiagramNode[] = [
     detail: {
       body: "High-impact writes pause for a real person to approve or deny. The AI can't push them through on its own.",
       subpoints: [
-        'Triggered by impact (a write of 500 units or more), not by every action.',
-        'A named human approves or denies. Fully audited.',
+        'A Sales write of 1–600 requires Manager approval.',
+        'Any non-VP write of 601 or more requires VP approval.',
+        'The approver’s current Okta role level is verified before execution.',
         'Nothing happens to the business system until sign-off lands.',
       ],
       callouts: ['Human-in-the-loop', 'Auto-resumes once approved'],
-      architect: 'A real Okta Identity Governance (OIG) Access Request, created once a write crosses the 500-unit threshold.',
+      architect: 'A real Okta Identity Governance (OIG) Access Request carrying the required approver role and level.',
     },
   },
   {
@@ -223,7 +224,7 @@ const NODES: DiagramNode[] = [
     accent: C.green,
     description: 'Stock levels and adjustments.',
     detail: {
-      body: 'Stock levels and adjustments. Reading is broadly allowed; large writes need approval and a manager relationship.',
+      body: 'Stock levels and adjustments. Reads are available to all three roles; writes execute or route to Manager/VP approval based on role and quantity.',
     },
   },
   {

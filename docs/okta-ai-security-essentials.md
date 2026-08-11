@@ -771,28 +771,29 @@ But for the highest-stakes actions - the ones with real business consequences if
 
 ### Check #2: Does the situation actually hold right now?
 
-Think about it this way: Mike's badge says "Warehouse Manager," and that badge is real and current. But a badge doesn't say "Warehouse Manager, except while on vacation" or "Warehouse Manager, but only for shipments below a certain sensitivity level." Those facts change too often, and are too specific to the moment, to print on a badge.
+Think about it this way: Okta holds one role level for the inventory story: **1 = Sales, 2 = Manager, 3 = VP**. Mike's Level 2 role is real and current, but the decision also depends on the quantity he asked to change and whether he is on vacation now.
 
-So this demo adds a second, automatic check that looks past the badge and asks about the actual, current situation:
-- Is this specific person responsible for *this specific* warehouse, right now - not on vacation, not off the assignment?
-- Does this specific person's clearance level actually cover *this specific* item they're trying to change?
+So this demo adds a second, automatic check that uses the live Okta facts for each request:
+- Is the request a read, a standard write of 1–600, or a large write of 601 or more?
+- Is the person's role high enough to execute it directly, or should it create a Manager/VP request?
+- Is the person on vacation? Vacation blocks every write, including approval submission, while reads continue to work.
 
-**Why not just make the badge system handle this?** Because you'd need a different badge for every combination of warehouse, manager, vacation status, and clearance level - and you'd need to reissue that badge every time any one of those facts changed, for every employee, potentially several times a week. Badge systems (and Okta's role-based access) are built to answer "does your job title entitle you to this category of access" - a question that changes rarely. They were never built to track "is this specific fact true about this specific person right at this moment" - a question that changes constantly. Trying to force the second kind of question into the first kind of system creates a losing game of constantly reissuing badges that are stale the moment anyone's situation changes. So instead, a purpose-built check runs alongside the badge system, checking the live facts every single time, without ever needing to touch the badge itself.
+**Why use both Okta and FGA?** Okta remains the source of truth for identity, role level, and vacation status, and issues the narrow Inventory token. FGA is purpose-built to combine those facts with the requested quantity for one action. The backend passes the role and vacation as contextual relationships, so FGA does not keep a second mutable copy that could drift from Okta.
 
-**In plain terms:** Mike's role clears him to update inventory. But if Mike happens to be on vacation that day, or the item requires a higher clearance level than he currently holds, the update still doesn't happen - even though his badge was completely valid.
+**In plain terms:** Sarah (Level 1) can read, but her write creates an approval request. Mike (Level 2) can write through 600 units, but 601 needs a VP. A Level 3 VP can execute any quantity. Any of them is blocked from writing while on vacation.
 
 ### Check #3: Should a human still look at this one?
 
 Even after both of the above say yes, one more question remains: is this action, at this size, something a computer should be allowed to finish on its own?
 
-In this demo, an inventory change above a set size (500 units, by default) doesn't happen automatically - even for a fully-authorized, on-duty, properly-cleared manager. Instead, it's routed as a request, with a required explanation, to a human who has to approve it before it's carried out.
+In this demo, a Sales write of 1–600 becomes a Manager request. Any write of 601 or more by someone below VP becomes a VP request. Nothing changes in Inventory while the request is pending. When OIG reports approval, the backend checks the approver's current Okta role level before it executes.
 
 **Why require a person to sign off on something that's already fully authorized?** Because "is this allowed" and "is this a good idea right now" are genuinely different questions:
 
-- "Is this allowed" is a fact about permission - the same, correctly-authorized 5-unit change and 5,000-unit change look identical on that front. Same person, same role, same clearance.
-- "Is this a good idea right now" is a fact about business risk - and the 5,000-unit change is not identical on that front. It's harder to undo, and more costly if it turns out to be a mistake, or an authorized account being used in an unusual way. That's exactly the kind of action that financial and operational controls (the same category of rule as SOX and similar regulations) require a second person to review, precisely *because* the system has already said the action is permitted - permission was never meant to be the only safeguard on the biggest, hardest-to-reverse actions.
+- "May this role execute this quantity?" is the FGA decision: Manager for normal changes, VP for 601+.
+- "Did a qualified person approve it?" is the governance decision. The request and decision are recorded in Okta Identity Governance, and the approver still has to hold the required role when execution occurs.
 
-Put the two checks together and the picture is complete: a role tells you who's generally allowed to do a kind of thing; the live-situation check tells you whether the specific circumstances actually support it right now; and the human sign-off tells you whether the size of this particular action calls for a second opinion before it becomes permanent. None of the three can be skipped by getting past the other two.
+Put the checks together and the picture is crisp: Okta establishes identity and the role claim; FGA decides direct execution versus Manager/VP escalation using role, quantity, and vacation; OIG records the required human decision. None can be skipped by getting past another.
 
 ---
 

@@ -1,9 +1,9 @@
 """
 Demo-only Okta profile mutation for live FGA demos.
 
-Lets the signed-in user toggle their OWN is_on_vacation / is_a_manager /
-clearance_level custom attributes for real, via the Okta Users API, so the
-FGA "manager on vacation" / "insufficient clearance" scenarios can be shown
+Lets the signed-in user toggle their OWN is_on_vacation / clearance_level
+custom attributes for real, via the Okta Users API, so the three role tiers
+and the "manager on vacation" scenario can be shown
 live without an Okta Admin Console detour mid-demo.
 
 Scoped deliberately tight:
@@ -22,11 +22,11 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-ALLOWED_ATTRIBUTES = {"is_on_vacation", "is_a_manager", "clearance_level"}
+ALLOWED_ATTRIBUTES = {"is_on_vacation", "clearance_level"}
 
 # A demo reset always returns vacation status to the normal working state.
-# Manager and clearance remain persona-specific and are restored to the values
-# captured before they were first changed.
+# Role level remains persona-specific and is restored to the value captured
+# before it was first changed.
 DEMO_DEFAULT_VALUES: Dict[str, Any] = {"is_on_vacation": False}
 
 # In-memory only - fine for a single-process demo backend. Keyed by Okta
@@ -74,6 +74,12 @@ async def toggle_demo_attribute(user_id: str, attribute: str, value: Any) -> Dic
     """Set one allow-listed profile attribute on the caller's own Okta user."""
     if attribute not in ALLOWED_ATTRIBUTES:
         raise ValueError(f"Attribute '{attribute}' is not toggleable")
+    if attribute == "is_on_vacation" and not isinstance(value, bool):
+        raise ValueError("is_on_vacation must be true or false")
+    if attribute == "clearance_level" and (
+        isinstance(value, bool) or not isinstance(value, int) or value not in (1, 2, 3)
+    ):
+        raise ValueError("clearance_level must be 1 (Sales), 2 (Manager), or 3 (VP)")
 
     domain, api_token = _require_config()
 

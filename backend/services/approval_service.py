@@ -157,7 +157,8 @@ class ApprovalService:
         request_type_id: str,
         justification_field_id: str,
         ledger_path: str | os.PathLike[str],
-        quantity_threshold: int = 500,
+        quantity_threshold: int = 601,
+        resolve_approver_level: Callable[[dict], Awaitable[int]] | None = None,
         clock: Callable[[], dt.datetime] = lambda: dt.datetime.now(dt.timezone.utc),
     ):
         self._oig = oig
@@ -166,6 +167,7 @@ class ApprovalService:
         self._request_type_id = request_type_id
         self._justification_field_id = justification_field_id
         self._threshold = quantity_threshold
+        self._resolve_approver_level = resolve_approver_level
         self._now = clock
         self._locks: dict[str, asyncio.Lock] = {}
         self._ledger = _Ledger(ledger_path)
@@ -193,6 +195,8 @@ class ApprovalService:
         parsed_intent: dict,
         original_task: str,
         fga_check_id: str | None = None,
+        required_approver_role: str | None = None,
+        required_approver_level: int | None = None,
     ) -> tuple[str, Intent]:
         """Create an OIG Access Request and return (request_id, intent)."""
         _ = requester_id  # explicit: Okta infers requester from API token
@@ -207,13 +211,17 @@ class ApprovalService:
             original_task=original_task,
             submitted_at=self._now().isoformat().replace("+00:00", "Z"),
             fga_check_id=fga_check_id,
+            required_approver_role=required_approver_role,
+            required_approver_level=required_approver_level,
         )
         subject = f"Inventory write: +{qty} {product}"
         human = (
             f"AI agent requests inventory write on behalf of {user_email}.\n"
             f"Action: Add {qty} units of {product} (scope: {scope}).\n"
             f"Original task: \"{original_task}\".\n"
-            f"Assigned approver group: {approver_group_name}."
+            f"Required approval: {required_approver_role or 'Manager'} "
+            f"(level {required_approver_level or 2}+).\n"
+            f"Approver group: {approver_group_name}."
         )
         justification = encode_justification(human, intent)
 
@@ -277,6 +285,7 @@ class ApprovalService:
 
             resolver = step.get("resolvedBy") or step.get("approver") or {}
             resolver_summary = {
+                "id": resolver.get("id") or step.get("approverId"),
                 "email": resolver.get("email") or resolver.get("login"),
                 "display_name": resolver.get("displayName")
                 or resolver.get("name")
@@ -287,6 +296,7 @@ class ApprovalService:
                 approver_id = step.get("approverId")
                 if approver_id or step.get("approverName"):
                     resolver_summary = {
+                        "id": approver_id,
                         "email": None,
                         "display_name": step.get("approverName"),
                     }
@@ -299,12 +309,12 @@ class ApprovalService:
             if decision in ("DENIED", "REJECTED") or step_status in ("DENIED", "REJECTED"):
                 any_denied = True
                 denial_reason = step.get("reason") or step.get("comment") or denial_reason
-                if approver_summary is None and (resolver_summary["email"] or resolver_summary["display_name"]):
+                if approver_summary is None and any(resolver_summary.values()):
                     approver_summary = resolver_summary
                 if approved_at is None:
                     approved_at = decided_at
             elif decision == "APPROVED" or step_status == "APPROVED":
-                if approver_summary is None and (resolver_summary["email"] or resolver_summary["display_name"]):
+                if approver_summary is None and any(resolver_summary.values()):
                     approver_summary = resolver_summary
                 if approved_at is None:
                     approved_at = decided_at
@@ -410,6 +420,27 @@ class ApprovalService:
                 self._ledger.put(request_id, ledger_entry)
                 status.denial_reason = msg
                 return status
+
+            required_level = intent.required_approver_level
+            if required_level:
+                if self._resolve_approver_level is None:
+                    status.status = "denied"
+                    status.denial_reason = "The approver role could not be verified in Okta."
+                    return status
+                try:
+                    actual_level = await self._resolve_approver_level(status.approver or {})
+                except Exception as exc:  # fail closed on an Okta lookup error
+                    logger.warning("Approver role lookup failed for %s: %s", request_id, exc)
+                    status.status = "denied"
+                    status.denial_reason = "The approver role could not be verified in Okta."
+                    return status
+                if actual_level < required_level:
+                    status.status = "denied"
+                    status.denial_reason = (
+                        f"Approval requires {intent.required_approver_role or 'role'} "
+                        f"level {required_level}; the Okta approver has level {actual_level}."
+                    )
+                    return status
 
             if ledger_entry.failed_attempts >= MAX_EXECUTION_ATTEMPTS:
                 ledger_entry.abandoned = True

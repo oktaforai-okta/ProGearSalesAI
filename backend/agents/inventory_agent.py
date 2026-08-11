@@ -6,9 +6,10 @@ Uses raw Anthropic SDK for LLM calls.
 Uses demo_store for actual data operations.
 
 IMPORTANT: This agent has FGA (Fine-Grained Authorization) integration.
-- Write operations require FGA check with contextual tuples
-- Users on vacation are denied write access via FGA
-- FGA model: can_increase_inventory = manager but not on_vacation
+- Role level and vacation are supplied to FGA as contextual tuples
+- Sales writes route to Manager or VP approval
+- Managers execute 1-600; VPs execute any quantity
+- Vacation blocks writes but not reads
 """
 
 from typing import Dict, Any, Optional
@@ -31,7 +32,7 @@ class InventoryAgent(BaseAgent):
     - Registered as Okta AI Agent
     - Uses ID-JAG token exchange for MCP access
     - Scopes: inventory:read, inventory:write
-    - FGA check for write operations (vacation check via contextual tuples)
+    - FGA action check using role, quantity, and contextual vacation status
     """
 
     def __init__(self, user_token: str):
@@ -60,7 +61,9 @@ You are operating with Okta AI Agent governance:
 - Your identity is registered in Okta's AI Agent Directory
 - Your access is controlled by scopes: inventory:read, inventory:write
 - WRITE operations are additionally protected by Auth0 FGA (Fine-Grained Authorization)
-- FGA checks if the user is on vacation - managers on vacation cannot modify inventory
+- FGA maps Okta clearance_level to Sales (1), Manager (2), or VP (3)
+- Sales writes require approval; 601+ requires VP unless the requester is a VP
+- Vacation blocks every write, including approval submission, but does not block reads
 - All your actions are audited through Okta
 
 When processing inventory updates, confirm the action clearly."""

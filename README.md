@@ -1,6 +1,6 @@
 # ProGear Sales AI: Okta AI Agent Governance + Auth0 FGA Demo
 
-> A sales-demo app for **CourtEdge ProGear**, a basketball-equipment retailer. An AI shopping/sales assistant is secured end-to-end with **Okta AI Agent Governance** (Workload Principal identity, ID-JAG token exchange), **Auth0 Fine-Grained Authorization (FGA)** for relationship- and context-aware inventory checks, and **Okta Identity Governance (OIG)** for human-in-the-loop approval on large orders.
+> A sales-demo app for **CourtEdge ProGear**, a basketball-equipment retailer. An AI shopping/sales assistant is secured end-to-end with **Okta AI Agent Governance** (Workload Principal identity, ID-JAG token exchange), **Auth0 Fine-Grained Authorization (FGA)** for role-, quantity-, and context-aware inventory checks, and **Okta Identity Governance (OIG)** for Manager and VP approval.
 
 ![Okta AI Agent Governance](https://img.shields.io/badge/Okta-AI%20Agent%20Governance-blue)
 ![Auth0 FGA](https://img.shields.io/badge/Auth0-FGA-orange)
@@ -15,7 +15,7 @@
 | **Frontend** | [progear-sales-aiagent.vercel.app](https://progear-sales-aiagent.vercel.app) |
 | **Backend API** | [progearsalesai-p2wm.onrender.com](https://progearsalesai-p2wm.onrender.com) |
 
-Both are deployed from this single repo and auto-deploy on every push to `main` (Vercel builds `packages/progear-sales-agent`; Render builds the `backend/` service).
+Both are deployed from this single repo. `main` is the single deployment branch: Vercel builds `packages/progear-sales-agent`, and Render builds the `backend/` service. Feature branches may produce temporary previews, but they are not production sources.
 
 User sign-in uses Okta **direct User access** on the registered ProGear Sales Agent. The agent-bound OIDC app shares the agent's `wlp...` client ID and authenticates token requests with `private_key_jwt`; there is no separate sign-on client secret.
 
@@ -25,7 +25,8 @@ Pages in the running app:
 |---|---|
 | `/` | The chat UI ("CourtEdge ProGear"), talk to the sales assistant |
 | `/tokens` | Raw token exchanges, FGA checks, and pending approvals as they happen |
-| `/architecture` | Interactive D3.js diagrams: a relationship graph (with the four business domains, Inventory, Customer, Pricing, Sales, as separate boxes) and a UML-style sequence walkthrough of 4 scenarios (happy path, access denied, blocked on vacation, needs approval) |
+| `/architecture` | Interactive D3.js diagrams and a sequence walkthrough of the read, Manager-approval, vacation-block, and VP-approval stories |
+| `/fga` | Live Okta role controls and a simple D3 view of the FGA decision |
 
 ## What This Demo Shows
 
@@ -33,7 +34,7 @@ An AI sales agent needs to read and write real business data (inventory, pricing
 
 - **WHO** requested this access, and **WHAT** agent acted on their behalf?
 - **WHICH** scopes were actually granted, per resource domain, per user?
-- **CAN** a second, contextual check (relationship, clearance, vacation status) still block an otherwise-authorized action?
+- **CAN** a second, contextual check (role level, quantity, vacation status) still block or route an otherwise-authenticated action?
 - **WHEN** does a human need to approve before an action executes?
 - **CAN** access be revoked instantly?
 
@@ -41,12 +42,12 @@ An AI sales agent needs to read and write real business data (inventory, pricing
 |---|---|---|
 | Identity for the agent | Okta AI Agent Governance | The AI has its own Workload Principal (`wlp`) identity, distinct from any human user |
 | Token exchange | ID-JAG (Identity Assertion JWT Authorization Grant) | Two-step exchange: ID token → ID-JAG assertion (Org Authorization Server) → scoped access token (per-domain Custom Authorization Server). RSA keypair auth, no shared secret. No down-scoping: an ungrantable scope fails the whole exchange. |
-| Fine-grained authorization | Auth0 FGA | Second layer for inventory actions: relationship checks (active manager), clearance-level checks, and a live vacation-flag check, on top of Okta's coarse-grained RBAC |
-| Human-in-the-loop | Okta Identity Governance (OIG) | Large inventory writes (≥500 units by default) route to an approval workflow instead of executing immediately |
+| Fine-grained authorization | Auth0 FGA | Maps Okta's role level (1 Sales, 2 Manager, 3 VP), the requested quantity, and live vacation context to a direct-execution or approval decision |
+| Human-in-the-loop | Okta Identity Governance (OIG) | Sales writes route to Manager approval; writes of 601+ route to VP approval unless the requester is already a VP |
 | Orchestration | LangGraph | Routes each user query to the right internal domain component and coordinates the response |
 | LLM calls | Anthropic Claude, via the raw Anthropic SDK | Internal domain components call Claude directly (not through LangChain's LLM wrapper) for routing and response generation |
 
-For the full technical walkthrough, including sequence diagrams, token shapes, the FGA model, and the approval flow, see **[docs/architecture.md](docs/architecture.md)**.
+For the role matrix and live configuration, see **[docs/inventory-role-levels.md](docs/inventory-role-levels.md)**. For the broader technical walkthrough, see **[docs/architecture.md](docs/architecture.md)**.
 
 ## One governed agent, four resource domains
 

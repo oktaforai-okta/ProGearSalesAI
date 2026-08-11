@@ -1,69 +1,19 @@
-"""
-Auth0 FGA Client for Agent Permission Gating
+"""Auth0 FGA client for ProGear's three-level inventory policy.
 
-Uses FGA API with full o4aa-fga-example model combining ReBAC + ABAC.
-This demonstrates "Okta + FGA Better Together":
-- Okta: Identity (ID-JAG), coarse-grained RBAC (group membership), claims (Manager, Vacation, Clearance)
-- FGA: Fine-grained ReBAC + ABAC (relationships, hierarchies, contextual conditions)
+Okta's ``Clearance`` access-token claim is the role source of truth:
+1 = Sales, 2 = Manager, 3 = VP.  The claim is translated into exactly one
+contextual FGA role tuple on every check.  Vacation is also contextual, so a
+profile change takes effect on the next request without stale stored roles.
 
-Key Logic - Scope-Based FGA Check:
-- inventory:read  -> FGA check: can_view (active_manager)
-- inventory:write -> FGA check: can_update (active_manager + has_clearance)
+FGA evaluates these application relations on ``inventory_system:warehouse``:
 
-This means:
-- User on vacation CANNOT VIEW or UPDATE inventory (active_manager blocks both)
-- User with insufficient clearance can VIEW but CANNOT UPDATE high-sensitivity items
-- Users need both manager status AND adequate clearance to update items
+* ``can_read``: Sales, Manager, or VP
+* ``can_request_change``: any non-vacation role
+* ``can_update_standard``: non-vacation Manager or VP (1-600 units)
+* ``can_update_large``: non-vacation VP (601+ units)
 
-FGA Model (Store: ProGear - 01KNSR7472HW2PAYFR224NAPCY):
-  type user
-  type clearance_level
-    relations
-      define next_higher: [clearance_level]
-      define granted_to: [user]
-      define holder: granted_to or holder from next_higher
-  type inventory_system
-    relations
-      define manager: [user]
-      define viewer: [user]
-      define on_vacation: [user]
-      define active_manager: manager but not on_vacation
-      define active_viewer: viewer but not on_vacation
-      define can_manage: active_manager
-      define can_read: active_manager or active_viewer
-  type inventory_item
-    relations
-      define parent: [inventory_system]
-      define required_clearance: [clearance_level]
-      define has_clearance: holder from required_clearance
-      define can_view: can_read from parent
-      define can_update: has_clearance and can_manage from parent
-
-Non-managers who have Okta RBAC read access to inventory get a "viewer" tuple
-(see ensure_viewer_relationship) so can_view covers manager OR viewer, while
-can_update stays manager-only + clearance-gated. This reconciles the two
-descriptions that used to live in this file (this docstring vs.
-get_fga_model_info() below) - they disagreed on whether viewers could
-can_view at all; they can, now that the model actually matches this text.
-
-Tuples:
-- Manager roles: Pre-seeded in FGA store (user:{email} -> manager -> inventory_system:warehouse)
-- Clearance grants: Pre-seeded (user:{email} -> granted_to -> clearance_level:N)
-- Vacation status: Passed as contextual tuple per request (NOT stored in FGA)
-
-Okta Claims Used (from Inventory Auth Server Access Token):
-- Manager (user.is_a_manager): User is a manager (tuple must be pre-seeded in FGA)
-- Vacation (user.is_on_vacation): Passed as contextual tuple at check time
-- Clearance (user.clearance_level): User's clearance level (tuple must be pre-seeded in FGA)
-
-Approach:
-1. Router determines scopes based on user intent (read vs write)
-2. Token exchange retrieves Auth Server token with Manager, Vacation, Clearance claims
-3. FGA check runs with:
-   - can_view for inventory:read
-   - can_update for inventory:write (checks clearance + active_manager)
-   - Vacation passed as contextual tuple if user is on vacation
-4. If FGA denies, user gets clear message about vacation or clearance
+The older tuple-management helpers remain below for compatibility with old
+demo data, but the current orchestrator uses contextual role tuples only.
 """
 
 import os
@@ -79,6 +29,8 @@ from openfga_sdk.client.models import (
     ClientWriteRequest,
 )
 from openfga_sdk.credentials import Credentials, CredentialConfiguration
+
+from auth.inventory_policy import ROLE_RELATIONS, normalize_role_level, role_name
 
 logger = logging.getLogger(__name__)
 
@@ -747,41 +699,31 @@ async def ensure_clearance_tuple(
 async def check_inventory_access_via_fga(
     user_email: str,
     is_on_vacation: bool,
-    item_id: str = "widget-a",
-    relation: str = "can_view",
+    role_level: int = 1,
+    relation: str = "can_read",
     system_id: str = "warehouse",
 ) -> FGACheckResult:
-    """
-    Check inventory access using FGA API with new o4aa-fga-example model.
-
-    Args:
-        user_email: User's email/login from Okta (e.g., bob.manager@atko.email)
-        is_on_vacation: From Okta 'Vacation' claim (user.is_on_vacation)
-        item_id: The inventory item ID (default: widget-a)
-        relation: FGA relation to check (can_view or can_update)
-        system_id: The inventory system ID (default: warehouse)
-
-    Returns:
-        FGACheckResult with allowed status and explanation
-    """
+    """Check one inventory permission with role/vacation contextual tuples."""
     fga_user = f"user:{user_email}"
-    fga_object = f"inventory_item:{item_id}"
-    fga_system = f"inventory_system:{system_id}"
+    fga_object = f"inventory_system:{system_id}"
+    level = normalize_role_level(role_level)
+    role_relation = ROLE_RELATIONS.get(level)
 
-    # Build contextual tuples - only add on_vacation if user is on vacation
-    # Vacation is checked at inventory_system level (not item level)
     contextual_tuples = []
+    if role_relation:
+        contextual_tuples.append(
+            ClientTuple(user=fga_user, relation=role_relation, object=fga_object)
+        )
     if is_on_vacation:
         contextual_tuples.append(
-            ClientTuple(
-                user=fga_user,
-                relation="on_vacation",
-                object=fga_system  # vacation applies to system, not item
-            )
+            ClientTuple(user=fga_user, relation="on_vacation", object=fga_object)
         )
 
     context = {
         "is_on_vacation": is_on_vacation,
+        "role_level": level,
+        "role_name": role_name(level),
+        "role_relation": role_relation,
         "contextual_tuples_count": len(contextual_tuples),
     }
 
@@ -802,7 +744,6 @@ async def check_inventory_access_via_fga(
         )
 
     try:
-        # Build the check request
         check_request = ClientCheckRequest(
             user=fga_user,
             relation=relation,
@@ -810,24 +751,27 @@ async def check_inventory_access_via_fga(
             contextual_tuples=contextual_tuples if contextual_tuples else None,
         )
 
-        # Call FGA API
         response = await fga_client.check(check_request)
         allowed = response.allowed
 
-        # Build human-readable reason
         if allowed:
-            reason = f"Access granted: {user_email} has {relation} on {fga_object}"
+            reason = (
+                f"Allowed: {role_name(level)} (level {level}) satisfies {relation}."
+            )
+        elif not role_relation:
+            reason = "Denied: no valid ProGear role level was supplied by Okta."
         else:
             if is_on_vacation:
-                reason = f"Access denied: {user_email} is on vacation (active_manager exclusion)"
-            elif relation == "can_update":
-                reason = f"Access denied: {user_email} lacks clearance or manager status for {fga_object}"
+                reason = "Denied: inventory writes are blocked while the requester is on vacation."
             else:
-                reason = f"Access denied: {user_email} does not have {relation} on {fga_object}"
+                reason = (
+                    f"Denied: {role_name(level)} (level {level}) does not satisfy {relation}."
+                )
 
         logger.info(
             f"FGA API check: {fga_user} {relation} {fga_object} "
-            f"(vacation={is_on_vacation}, contextual_tuples={len(contextual_tuples)}) -> {allowed}"
+            f"(role={level}, vacation={is_on_vacation}, "
+            f"contextual_tuples={len(contextual_tuples)}) -> {allowed}"
         )
 
         return FGACheckResult(
@@ -838,8 +782,9 @@ async def check_inventory_access_via_fga(
             context=context,
             reason=reason,
             contextual_tuples=[
-                {"user": fga_user, "relation": "on_vacation", "object": fga_system}
-            ] if is_on_vacation else [],
+                {"user": item.user, "relation": item.relation, "object": item.object}
+                for item in contextual_tuples
+            ],
         )
 
     except Exception as e:
@@ -860,28 +805,10 @@ async def check_agent_access(
     agent_type: str,
     scopes: list = None,
     is_on_vacation: bool = False,
-    item_id: str = "widget-a",
+    role_level: int = 1,
+    relation: str | None = None,
 ) -> FGACheckResult:
-    """
-    Check if a user can access a specific agent using FGA API with new model.
-
-    Currently only inventory has FGA checks.
-    Other agents pass through (return allowed=True).
-
-    For inventory with new model:
-    - inventory:read -> checks "can_view" on inventory_item (active_manager)
-    - inventory:write -> checks "can_update" on inventory_item (active_manager + has_clearance)
-
-    Args:
-        user_email: User's email/login from Okta (e.g., "bob.manager@atko.email")
-        agent_type: Agent type (sales, inventory, customer, pricing)
-        scopes: Requested scopes (used to determine which permission to check)
-        is_on_vacation: From Okta token claim (passed as contextual tuple)
-        item_id: The inventory item to check (default: widget-a)
-
-    Returns:
-        FGACheckResult with allowed status and explanation
-    """
+    """Check an agent permission; only inventory currently has an FGA model."""
     scopes = scopes or []
 
     # Only inventory has FGA checks - others pass through
@@ -891,24 +818,18 @@ async def check_agent_access(
             relation="n/a",
             object=f"{agent_type}_system",
             user=f"user:{user_email}",
-            context={"is_on_vacation": is_on_vacation},
+            context={"is_on_vacation": is_on_vacation, "role_level": role_level},
             reason=f"No FGA model for {agent_type} - Okta RBAC only",
             contextual_tuples=[],
         )
 
-    # Determine FGA permission based on scope
-    # inventory:write -> can_update (requires active_manager + has_clearance)
-    # inventory:read -> can_view (requires active_manager only)
-    if "inventory:write" in scopes:
-        relation = "can_update"
-    else:
-        relation = "can_view"
+    if relation is None:
+        relation = "can_update_standard" if "inventory:write" in scopes else "can_read"
 
-    # Perform FGA check on inventory_item
     return await check_inventory_access_via_fga(
         user_email=user_email,
         is_on_vacation=is_on_vacation,
-        item_id=item_id,
+        role_level=role_level,
         relation=relation,
         system_id="warehouse",
     )
@@ -926,54 +847,40 @@ def is_fga_configured() -> bool:
 def get_fga_model_info() -> Dict[str, Any]:
     """Get FGA model information for UI display."""
     return {
-        "mode": "rebac-abac",
-        "description": "Full o4aa-fga-example model with clearance hierarchy, viewer role, and delegation",
+        "mode": "role-context",
+        "description": "Three ProGear role levels with a live vacation context check",
         "store_name": "ProGear",
         "api_url": FGA_API_URL,
         "store_id": FGA_STORE_ID,
         "model_id": FGA_MODEL_ID,
         "model_types": {
-            "user": "Human principals (managers, viewers)",
-            "clearance_level": "Hierarchical clearance tiers (1-10)",
-            "inventory_system": "Top-level resource (warehouse) with manager and viewer roles",
-            "inventory_item": "Items with parent system and required clearance"
+            "user": "Human principal from Okta",
+            "inventory_system": "Warehouse with Sales, Manager, and VP permissions",
         },
         "key_relations": {
-            "active_manager": "manager but not on_vacation",
-            "active_viewer": "viewer but not on_vacation",
-            "can_read": "active_manager or active_viewer",
-            "has_clearance": "holder from required_clearance (hierarchy walk)",
-            "can_view": "can_read from parent (manager OR viewer, not on vacation)",
-            "can_update": "has_clearance and can_manage from parent (manager only)"
+            "can_read": "Sales or Manager or VP",
+            "can_request_change": "Any assigned role, when not on vacation",
+            "can_update_standard": "Manager or VP, when not on vacation (1-600)",
+            "can_update_large": "VP, when not on vacation (601+)",
         },
         "scope_to_permission": {
             "inventory:read": {
-                "fga_permission": "can_view",
-                "requirements": "active_manager OR active_viewer (not on vacation)"
+                "fga_permission": "can_read",
+                "requirements": "level 1+"
             },
             "inventory:write": {
-                "fga_permission": "can_update",
-                "requirements": "active_manager + has_clearance"
+                "fga_permission": "can_update_standard or can_update_large",
+                "requirements": "level 2 through 600; level 3 at 601+"
             }
         },
-        "tuples_seeded": {
-            "manager": "Dynamic based on Okta Manager claim",
-            "viewer": "Dynamic for non-managers with inventory access",
-            "clearance_grants": "Dynamic based on Okta Clearance claim",
-            "clearance_hierarchy": "Pre-seeded (level chains)",
-            "inventory_hierarchy": "Pre-seeded (system -> parent -> item)",
-            "vacation": "Contextual tuple per request (NOT stored)"
+        "contextual_tuples": {
+            "role": "Mapped from the live Okta Clearance claim on each request",
+            "vacation": "Mapped from the live Okta Vacation claim on each request",
         },
         "claims_used": [
-            {"name": "Manager", "okta_attribute": "user.is_a_manager", "description": "Creates manager tuple if true"},
+            {"name": "Clearance", "okta_attribute": "user.clearance_level", "description": "1=Sales, 2=Manager, 3=VP"},
             {"name": "Vacation", "okta_attribute": "user.is_on_vacation", "description": "Passed as contextual tuple"},
-            {"name": "Clearance", "okta_attribute": "user.clearance_level", "description": "Creates clearance grant tuple"}
         ],
-        "viewer_role": {
-            "description": "Non-managers who need read access get viewer role automatically",
-            "logic": "If Manager=false and user requests inventory agent, viewer tuple is created",
-            "permissions": "can_view only (cannot update even with clearance)"
-        }
     }
 
 

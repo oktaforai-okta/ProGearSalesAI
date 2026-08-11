@@ -9,6 +9,7 @@ from pathlib import Path
 
 from .approval_service import ApprovalService
 from .okta_oig_client import OktaOIGClient
+from .okta_role_resolver import OktaRoleResolver
 from .service_token import mint_service_token
 
 
@@ -22,9 +23,13 @@ def build_approval_service(store) -> ApprovalService:
     api_token = os.environ["OKTA_OIG_API_TOKEN"]
     request_type_id = os.environ["OKTA_OIG_INVENTORY_REQUEST_TYPE_ID"]
     justification_field_id = os.environ["OKTA_OIG_JUSTIFICATION_FIELD_ID"]
-    threshold = int(os.environ.get("APPROVAL_QUANTITY_THRESHOLD", "500"))
+    threshold = int(os.environ.get("APPROVAL_QUANTITY_THRESHOLD", "601"))
     ledger_path = os.environ.get("APPROVALS_LEDGER_PATH") or str(_default_ledger_path())
     oig = OktaOIGClient(base_url=base_url, api_token=api_token)
+    role_resolver = OktaRoleResolver(
+        base_url=os.environ["OKTA_DOMAIN"],
+        api_token=os.environ["OKTA_API_TOKEN"],
+    )
     return ApprovalService(
         oig=oig,
         demo_store=store,
@@ -33,4 +38,5 @@ def build_approval_service(store) -> ApprovalService:
         justification_field_id=justification_field_id,
         ledger_path=ledger_path,
         quantity_threshold=threshold,
+        resolve_approver_level=role_resolver,
     )

@@ -63,7 +63,7 @@ The core mechanism is the **Identity Assertion JWT Authorization Grant (ID-JAG)*
 The user's Okta ID token (from their NextAuth login) is exchanged for an ID-JAG assertion. This assertion names *both* the user and the agent: "Agent X is acting on behalf of User Y." This happens at Okta's Org AS (configured via `OKTA_MAIN_AUTH_SERVER_ID`), using the agent's RSA keypair, not the user's credentials.
 
 **Step 2: ID-JAG → scoped access token (at a per-domain Custom Authorization Server)**
-The ID-JAG assertion is then exchanged for an actual access token at the Custom Authorization Server for the specific business domain the request needs (Sales, Inventory, Customer, or Pricing). This is where Okta's access policies actually evaluate: is this user, in this group, allowed to receive these scopes? The resulting access token is scoped, short-lived, and, for the Inventory domain, carries custom claims (`Manager`, `Vacation`, `Clearance`) that feed the FGA layer described below.
+The ID-JAG assertion is then exchanged for an actual access token at the Custom Authorization Server for the specific business domain the request needs (Sales, Inventory, Customer, or Pricing). This is where Okta's access policies evaluate whether this user and agent may receive the requested resource scope. The resulting access token is scoped, short-lived, and, for Inventory, carries `Vacation` and `Clearance` claims that feed the FGA layer described below. A compatibility `Manager` claim may still exist in Okta, but application authorization does not read it.
 
 **No down-scoping.** If any one of the requested scopes isn't grantable to this user under this agent's policy, Okta doesn't silently drop that scope and grant the rest: the *entire* exchange fails with `access_denied`. `multi_agent_auth.py` treats `no_matching_policy`, `access_denied`, and Okta's generic "Policy evaluation failed" 401 as the same outcome and returns a clean `access_denied` result rather than a partial grant or a raw error.
 
@@ -107,69 +107,45 @@ The model name comes from `LLM_MODEL_NAME` (default `claude-sonnet-4-6`); the ke
 
 ## 4. Auth0 FGA: the second authorization layer
 
-Okta's ID-JAG check answers "is this role allowed to do this *kind* of thing at all" (coarse: group membership → scope). Auth0 FGA, implemented in `backend/auth/fga_client.py`, answers a different question: "does *this specific person* have the right *live* relationship, clearance, and context for *this specific object*, right now?" It's a genuinely separate authorization system, called via the OpenFGA SDK against a hosted FGA store, not a re-implementation of Okta's logic.
+Okta authenticates the human and agent, grants a coarse inventory scope, and signs the user's live `Clearance` and `Vacation` values into the inventory access token. Auth0 FGA, implemented in `backend/auth/fga_client.py`, answers the next question: "given this role, quantity, and current context, may this request execute directly?" It is a separate authorization call against the hosted FGA store.
 
 ### The model
 
-The FGA store defines these types and relations (see the full docstring at the top of `fga_client.py` for the authoritative version):
+`clearance_level` now means role, not item sensitivity: 1 = Sales, 2 = Manager, 3 = VP. The version-controlled FGA model is `backend/auth/fga_role_model.json`:
 
 ```
 type user
 
-type clearance_level
-  relations
-    define next_higher: [clearance_level]
-    define granted_to:  [user]
-    define holder:      granted_to or holder from next_higher
-
 type inventory_system
   relations
-    define manager:        [user]
-    define viewer:         [user]
-    define on_vacation:    [user]
-    define active_manager: manager but not on_vacation
-    define active_viewer:  viewer but not on_vacation
-    define can_manage:     active_manager
-    define can_read:       active_manager or active_viewer
-
-type inventory_item
-  relations
-    define parent:             [inventory_system]
-    define required_clearance: [clearance_level]
-    define has_clearance:      holder from required_clearance
-    define can_view:            can_read from parent
-    define can_update:          has_clearance and can_manage from parent
+    define role_sales:          [user]
+    define role_manager:        [user]
+    define role_vp:             [user]
+    define on_vacation:         [user]
+    define active_sales:        role_sales but not on_vacation
+    define active_manager:      role_manager but not on_vacation
+    define active_vp:           role_vp but not on_vacation
+    define can_read:            role_sales or role_manager or role_vp
+    define can_request_change:  active_sales or active_manager or active_vp
+    define can_update_standard: active_manager or active_vp
+    define can_update_large:    active_vp
 ```
 
-Two things worth calling out about this model:
-
-- **Clearance is hierarchical.** `clearance_level` forms a chain via `next_higher`: holding level *N* also makes you a holder of every level below it (`holder: granted_to or holder from next_higher`). A user with clearance 7 satisfies an item that requires clearance 3.
-- **Read access is broader than write access.** Both managers and plain viewers get `can_view` (via `can_read: active_manager or active_viewer`), but only managers with sufficient clearance get `can_update` (`has_clearance and can_manage from parent`, and `can_manage` is manager-only). Non-managers who request the Inventory agent are automatically given a `viewer` tuple (see "dynamic tuples" below) so they can read but never write.
-
-### How scopes map to FGA checks
-
-| Requested scope | FGA check | What it actually requires |
-|---|---|---|
-| `inventory:read` | `can_view` on the relevant `inventory_item` | active manager OR active viewer (i.e., not on vacation) |
-| `inventory:write` | `can_update` on the relevant `inventory_item` | active manager AND sufficient clearance for that item |
+| Request | FGA relation | Direct execution | If requester is below the tier |
+|---|---|---|---|
+| Inventory read | `can_read` | Level 1+ | Deny if no valid role |
+| Write 1–600 | `can_update_standard` | Level 2+ | Manager approval |
+| Write 601+ | `can_update_large` | Level 3 | VP approval |
 
 Sales, Customer, and Pricing agents have no FGA model today and always pass through. FGA currently only gates Inventory.
 
-### Vacation is contextual, not stored
+### Role and vacation are contextual
 
-`is_on_vacation` is **not** written into the FGA store as a persistent fact. It's read from the `Vacation` claim on the Inventory Custom Authorization Server's access token (or, as a fallback, the ID token) and passed as a **contextual tuple** at check time: `user:X on_vacation inventory_system:warehouse`, added to the request only when true. Because it's evaluated per-request rather than stored, flipping someone's vacation status takes effect on their very next check: no redeploy, no tuple cleanup.
-
-### Manager, viewer, and clearance tuples are kept in sync dynamically
-
-Unlike vacation, manager/viewer/clearance relationships *are* stored as FGA tuples, but the backend keeps them in sync with the live Okta claims on every request rather than requiring a one-time seed:
-
-- `ensure_manager_relationship()` writes or deletes the `manager` tuple to match the `Manager` claim.
-- `ensure_viewer_relationship()` writes or deletes a `viewer` tuple for non-managers who are requesting the Inventory agent, so they get read-only access without ever being a manager.
-- `ensure_clearance_tuple()` enforces a single active clearance tuple per user: it deletes any stale level and writes the current one, so clearance changes on the Okta side (the `Clearance` claim) propagate into FGA on the next request.
+The backend maps the `Clearance` token claim to exactly one contextual tuple (`role_sales`, `role_manager`, or `role_vp`) and adds `on_vacation` when the claim is true. Neither fact is persisted as a mutable role copy in FGA. A role or vacation change in Okta therefore applies on the next token exchange. Reads remain available while on vacation; writes and approval submission are blocked.
 
 ### The check itself
 
-`check_agent_access()` picks `can_view` or `can_update` based on the requested scope, then `check_inventory_access_via_fga()` calls the FGA API with the user, relation, the target `inventory_item` (the demo uses `widget-a`, which requires clearance 3, or `classified-part` if the message mentions "classified," which requires clearance 7), and the contextual vacation tuple if applicable. The orchestrator's `fga_check` node records the full result (allowed/denied, the relation checked, the object, the contextual tuples used, and a human-readable reason) into `state["fga_checks"]`, which the frontend's `/tokens` page and Token Exchange UI render directly.
+`backend/auth/inventory_policy.py` parses quantity and selects the required FGA relation and approval tier. `check_inventory_access_via_fga()` checks `inventory_system:warehouse` with the contextual role and vacation tuples. The orchestrator records the decision, role, quantity, direct permission, and approval route in `state["fga_checks"]`; `ChatResponse.fga_checks` returns that evidence to the browser for `/fga` and `/tokens`.
 
 **Fail-closed by design.** If the FGA client isn't configured or the API call fails, `check_inventory_access_via_fga()` denies access by default rather than allowing it. Authorization for inventory writes and reads depends on FGA actually answering.
 
@@ -177,14 +153,14 @@ Unlike vacation, manager/viewer/clearance relationships *are* stored as FGA tupl
 
 ## 5. Governance: human-in-the-loop approval for large writes
 
-Not every authorized write executes immediately. `backend/services/factory.py` builds an `ApprovalService` (`backend/services/approval_service.py`) wired to a real **Okta Identity Governance (OIG) Access Request** flow via `backend/services/okta_oig_client.py`. The threshold is configurable (`APPROVAL_QUANTITY_THRESHOLD`, default `500`).
+`backend/services/factory.py` builds an `ApprovalService` wired to a real **Okta Identity Governance (OIG) Access Request** flow. Approval is role-based: Level 1 needs Manager approval for 1–600, while any non-VP needs VP approval for 601+.
 
 The orchestrator's **approval_gate** node fires only when all of the following are true:
 1. The request needs `inventory:write`.
-2. FGA didn't already deny the Inventory agent (an unauthorized action never reaches the approval gate, it's just denied).
-3. `backend/services/intent.py` parses a quantity from the message (`parse_inventory_intent`) that is `>= APPROVAL_QUANTITY_THRESHOLD`.
+2. FGA confirms the active user may submit a change request.
+3. The user's level is below the direct-execution level for the parsed quantity.
 
-When triggered, it builds an `Intent` (user, product, quantity, original request text) and calls the OIG API (`POST /governance/api/v1/requests`) to create a real Access Request, with the intent JSON fenced inside the request's justification field (`[INTENT_JSON]{...}[/INTENT_JSON]`) so it can be recovered later without a separate database. The chat response tells the user their request is pending and which approver group (`OKTA_APPROVER_GROUP_NAME`, default `InventoryApprovers`) it went to.
+When triggered, it builds an `Intent` containing the required approver role and level and creates a real OIG request. The intent JSON is fenced inside the justification field so it can be recovered later without a separate database. After OIG approval, `OktaRoleResolver` retrieves the approver's current profile and the service fails closed unless the approver meets the required level.
 
 **Resolution happens two ways:**
 - **Foreground fast path**: `GET /api/approvals/{request_id}` (polled by the frontend) calls `ApprovalService.execute_if_approved()`, which checks OIG's current decision and executes the write immediately if approved.
@@ -221,13 +197,13 @@ Every ID-JAG exchange, granted or denied, is a token-grant event in **Okta's Sys
 Two independent mechanisms can stop the agent from acting, and both take effect almost immediately because every credential in this system is short-lived and re-derived per request: there's no long-lived session to revoke.
 
 - **Deactivate the Workload Principal.** An admin can deactivate the AI agent's identity in Okta directly. The next ID-JAG exchange attempt for that agent fails outright.
-- **Flip a context flag FGA reads.** Because vacation status is a contextual tuple evaluated at check time (not a stored fact), setting `is_on_vacation` denies the very next inventory check for that user: no redeploy, no cache to bust. This repo ships a scoped demo endpoint for this exact purpose: `POST /api/admin/demo-toggle` (and `/api/admin/demo-reset`) let the *signed-in* user flip their own `is_on_vacation` / `is_a_manager` / `clearance_level` Okta profile attributes via the Okta Users API, specifically so the FGA "manager on vacation" and "insufficient clearance" scenarios can be demonstrated live without an Admin Console detour. It only ever mutates the caller's own profile: the user ID always comes from their validated token, never from the request body (`backend/auth/demo_admin.py`).
+- **Change live FGA inputs.** Vacation status and the role derived from `clearance_level` are contextual tuples evaluated at check time, so the next exchanged token drives the next decision: no redeploy and no mutable role copy in FGA. This repo ships scoped demo endpoints for that purpose: `POST /api/admin/demo-toggle` lets the *signed-in* user change only their own `is_on_vacation` or `clearance_level` (validated as 1, 2, or 3), while `/api/admin/demo-reset` restores the persona's starting role and sets vacation to false. The user ID always comes from the validated token, never from the request body (`backend/auth/demo_admin.py`).
 
 ---
 
 ## 10. Deployment topology
 
-Both halves deploy from this single repo and auto-deploy on every push to `main`:
+Both halves deploy from this single repo with `main` as the single production source branch:
 
 | Component | Platform | Detail |
 |---|---|---|

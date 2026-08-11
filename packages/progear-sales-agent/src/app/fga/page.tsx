@@ -42,17 +42,17 @@ export default function FGAPage() {
               <span className="text-sm">Back to Chat</span>
             </Link>
             <div>
-              <h1 className="text-white text-xl font-bold">Fine-Grained Authorization</h1>
-              <p className="text-gray-300 text-xs">Okta + Auth0 FGA, better together</p>
+              <h1 className="text-white text-xl font-bold">Fine-Grained Authorization (FGA) Architecture</h1>
+              <p className="text-gray-300 text-xs">Role levels, live context, and approval routing</p>
             </div>
           </div>
         </div>
       </header>
 
       <div className="max-w-4xl mx-auto p-6 space-y-4">
-        <FGAExplanationCard checks={fgaChecks} />
-
         <FGAControlsPanel onApplied={loadFromStorage} />
+
+        <FGAExplanationCard checks={fgaChecks} />
 
         {fgaChecks.length === 0 && (
           <div className="text-center py-12 text-gray-400">

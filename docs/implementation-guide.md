@@ -424,6 +424,24 @@ Create three groups to demonstrate RBAC:
 
    > **Verification:** Click on each user in **Directory** → **People** and check the **Groups** tab to confirm they're in the correct group.
 
+#### Configure the Inventory role level
+
+For Inventory, `clearance_level` is the single role source of truth:
+
+| Value | Role | Write 1–600 | Write 601+ |
+|---:|---|---|---|
+| 1 | Sales | Manager approval | VP approval |
+| 2 | Manager | Direct | VP approval |
+| 3 | VP | Direct | Direct |
+
+1. Add a user-profile property named `clearance_level` and label it **ProGear role level**. Its description should state `1 = Sales, 2 = Manager, 3 = VP`.
+2. Add the Boolean profile property `is_on_vacation` if it does not already exist. Use false as the normal demo default.
+3. Set Sarah to Level 1 and Mike to Level 2.
+4. Create `ProGear-Managers` with a group rule matching Level 2 or 3.
+5. Create `ProGear-VPs` with a group rule matching Level 3.
+
+Do not use a separate Manager Boolean for application authorization. A compatibility `Manager` token claim may evaluate true for Levels 2 and 3, but the backend and FGA policy use only `clearance_level`.
+
 ### Step 3: Register the AI Agent and Configure Access
 
 This is the only place the AI Agent identity and its user-facing sign-in app get created. Do the sub-steps in this order; the direct User access app depends on the agent already existing, and the web-runtime key depends on that app already existing.
@@ -620,12 +638,23 @@ AND User is member of: ProGear-Warehouse
 AND Scopes: inventory:read, inventory:write
 ```
 
-**Rule 2: Sales Read Access** (Priority 2)
+**Rule 2: Sales Inventory Access (FGA gated)** (Priority 2)
 ```
 IF Grant type is: Authorization Code, Token Exchange, JWT Bearer
 AND User is member of: ProGear-Sales
-AND Scopes: inventory:read
+AND Scopes: inventory:read, inventory:write
 ```
+
+The Sales write scope only lets the request reach Auth0 FGA. It does **not** authorize direct execution. FGA routes Sales writes through 600 to Manager approval and writes of 601 or more to VP approval.
+
+On the Inventory Authorization Server, add these access-token claims:
+
+| Claim | Value |
+|---|---|
+| `Clearance` | `user.clearance_level` |
+| `Vacation` | `user.is_on_vacation` |
+
+If an older integration still reads `Manager`, define it as `user.clearance_level == 2 OR user.clearance_level == 3`; the current application does not depend on it.
 
 #### 5.3 Customer MCP Authorization Server
 
@@ -716,7 +745,28 @@ Once you have create authorization servers per MCP API, Use managed connections 
      | `ProGear Inventory MCP` | Only allow | inventory:write inventory:read |
      | `ProGear Sales MCP` | Only allow | sales:order sales:read sales:quote |
 
-### Step 7: Record All Your IDs
+### Step 7: Configure Auth0 FGA and OIG approval
+
+1. Create an Auth0 FGA store and publish [`backend/auth/fga_role_model.json`](../backend/auth/fga_role_model.json).
+2. Record the store ID and the returned authorization model ID. Configure a client allowed to call that store.
+3. Configure every backend serving the app with the same `FGA_STORE_ID` and `FGA_MODEL_ID`.
+4. In Okta Identity Governance, create or select the Inventory access-request type and required justification field.
+5. Route normal Sales changes to `ProGear-Managers` and 601+ changes to `ProGear-VPs`. The request intent records the required role and level, and the backend verifies the actual approver's live Okta profile before execution.
+
+The model provides four application permissions:
+
+```text
+can_read            = Sales or Manager or VP
+can_request_change  = active Sales or active Manager or active VP
+can_update_standard = active Manager or active VP       # 1–600
+can_update_large    = active VP                          # 601+
+
+active role = role but not on_vacation
+```
+
+Role and vacation are contextual tuples derived from the Inventory token for each request. Do not seed or maintain a second persistent role copy in FGA. See [Inventory role levels and approval routing](./inventory-role-levels.md) for the exact business matrix and demo prompts.
+
+### Step 8: Record All Your IDs
 
 **Before proceeding, verify you have collected all these values.** You'll need them for Vercel and Render configuration.
 
@@ -850,7 +900,7 @@ Before updating live Vercel or Render secrets:
 - Confirm each authorization-server policy references the replacement client and still enables the JWT Bearer grant for the intended users, groups, and scopes.
 - Confirm the sign-on app's assignments, callback URLs, logout URLs, and `private_key_jwt` public key.
 - Test sign-in and both token exchanges against a preview or staging deployment first.
-- Prove allowed and denied paths, including FGA vacation and clearance denials, before changing production traffic.
+- Prove all inventory paths before changing production traffic: read at Levels 1/2/3; Sales write through 600 to Manager approval; Manager direct write through 600; non-VP write of 601+ to VP approval; VP direct write; and vacation blocking every write while reads remain available.
 
 ### Cleanup is a separate change
 
@@ -996,6 +1046,19 @@ In Render, go to **Environment** and add these variables:
 | `OKTA_CUSTOMER_AUDIENCE` | `api://progear-customer` |
 | `OKTA_PRICING_AUTH_SERVER_ID` | Your Pricing auth server ID |
 | `OKTA_PRICING_AUDIENCE` | `api://progear-pricing` |
+| `OKTA_API_TOKEN` | Admin API token used for scoped profile controls and approver-role verification |
+| `FGA_API_URL` | Your Auth0 FGA API URL |
+| `FGA_STORE_ID` | Your Auth0 FGA store ID |
+| `FGA_MODEL_ID` | The published role-model ID |
+| `FGA_CLIENT_ID` | Auth0 FGA client ID |
+| `FGA_CLIENT_SECRET` | Auth0 FGA client secret |
+| `OKTA_OIG_BASE_URL` | Your Okta org URL |
+| `OKTA_OIG_API_TOKEN` | API token used for OIG access requests |
+| `OKTA_OIG_INVENTORY_REQUEST_TYPE_ID` | Inventory request type ID |
+| `OKTA_OIG_JUSTIFICATION_FIELD_ID` | Required justification field ID |
+| `APPROVAL_QUANTITY_THRESHOLD` | `601` |
+| `OKTA_MANAGER_APPROVER_GROUP_NAME` | `ProGear-Managers` |
+| `OKTA_VP_APPROVER_GROUP_NAME` | `ProGear-VPs` |
 | `CORS_ORIGINS` | Your Vercel URL: `https://your-project-name.vercel.app` |
 
 ### Step 4: Deploy
@@ -1075,6 +1138,19 @@ Expected response:
 | `OKTA_CUSTOMER_AUDIENCE` | Render | Yes | `api://progear-customer` |
 | `OKTA_PRICING_AUTH_SERVER_ID` | Render | Yes | Pricing domain's Custom Authorization Server ID |
 | `OKTA_PRICING_AUDIENCE` | Render | Yes | `api://progear-pricing` |
+| `OKTA_API_TOKEN` | Render | Yes | Scoped demo profile updates and OIG approver-role verification |
+| `FGA_API_URL` | Render | Yes | Auth0 FGA API base URL |
+| `FGA_STORE_ID` | Render | Yes | Auth0 FGA store ID |
+| `FGA_MODEL_ID` | Render | Yes | Published three-tier role model ID |
+| `FGA_CLIENT_ID` | Render | Yes | Auth0 FGA client ID |
+| `FGA_CLIENT_SECRET` | Render | Yes | Auth0 FGA client secret |
+| `OKTA_OIG_BASE_URL` | Render | Yes | Okta org URL used by the OIG client |
+| `OKTA_OIG_API_TOKEN` | Render | Yes | OIG API token |
+| `OKTA_OIG_INVENTORY_REQUEST_TYPE_ID` | Render | Yes | Inventory request type ID |
+| `OKTA_OIG_JUSTIFICATION_FIELD_ID` | Render | Yes | OIG justification field ID |
+| `APPROVAL_QUANTITY_THRESHOLD` | Render | Yes | `601` (kept aligned with the fixed 600/601 policy boundary) |
+| `OKTA_MANAGER_APPROVER_GROUP_NAME` | Render | Yes | `ProGear-Managers` |
+| `OKTA_VP_APPROVER_GROUP_NAME` | Render | Yes | `ProGear-VPs` |
 | `NEXTAUTH_URL` | Vercel | Yes | Your Vercel URL |
 | `NEXTAUTH_SECRET` | Vercel | Yes | Generate: `openssl rand -base64 32` |
 | `NEXT_PUBLIC_API_URL` | Vercel | Yes | Your Render URL |
@@ -1089,7 +1165,7 @@ Expected response:
 
 ## Demo Scenarios
 
-Three key scenarios to demonstrate RBAC and governance:
+Four key scenarios demonstrate resource RBAC and the three-tier Inventory story:
 
 ### Scenario 1: Access across all resource domains (Sarah Sales)
 
@@ -1127,7 +1203,18 @@ Three key scenarios to demonstrate RBAC and governance:
 - Partial answer with the information the agent is allowed to retrieve
 - Demonstrates governance working without introducing additional user-facing agents
 
-### Scenario 3: One resource domain (Frank Finance)
+### Scenario 3: Inventory authorization and approval tiers
+
+Use the preset prompts in this order:
+
+1. `How many basketballs are in stock?`
+2. `Add 50 basketballs to inventory`
+3. `Add 600 basketballs to inventory`
+4. `Add 601 basketballs to inventory`
+
+Sarah's read succeeds. Her 50- and 600-unit writes create Manager requests, while 601 creates a VP request. Mike's 50- and 600-unit writes execute directly, while 601 creates a VP request. Change either user to Level 3 and 601 executes directly. Setting vacation to true leaves the read available but blocks every write and does not create an approval request.
+
+### Scenario 4: One resource domain (Frank Finance)
 
 **Login as**: Your frank.finance user
 
@@ -1161,8 +1248,12 @@ Use these talking points when presenting:
 > [Show three resource decisions denied and Inventory allowed]
 > "Same agent, same question, different user permissions. Mike can see inventory, but not customer or pricing data."
 
-### Demo 3: Governance in Action
-> "Notice in the Okta System Log that every token exchange is recorded. We see the ProGear Sales Agent actor, the user it's acting for, the scopes requested, and whether access was granted or denied."
+### Demo 3: FGA and human approval
+> "Sarah can read inventory. Her normal write becomes a Manager request; at 601 units it becomes a VP request. Mike can execute normal writes but still needs a VP at 601. The same `clearance_level` in Okta drives every outcome."
+> [Show the `/fga` role control, D3 decision diagram, and the pending OIG request]
+
+### Demo 4: Governance evidence
+> "Notice that the token exchanges and FGA decisions identify the user, agent, requested scope, role level, quantity, and outcome. OIG records the required human decision before a pending write executes."
 
 ### Closing
 > "With Okta AI Agent Governance, you know which governed agent is accessing each resource, for which user, and with which permissions. Full visibility, full control."
@@ -1280,9 +1371,13 @@ Use this checklist to verify your deployment is complete:
 - [ ] Direct User access app created from the AI Agent and Token Exchange enabled
 - [ ] 3 demo users created and can log in
 - [ ] 3 groups created with correct user assignments
+- [ ] `clearance_level` configured as 1 Sales, 2 Manager, or 3 VP
+- [ ] `ProGear-Managers` rule includes Levels 2 and 3
+- [ ] `ProGear-VPs` rule includes Level 3
 - [ ] AI Agent registered with JWK credentials
 - [ ] AI Agent configured for direct User access
 - [ ] 4 authorization servers with scopes configured
+- [ ] Inventory token carries `Clearance` and `Vacation` claims
 - [ ] **Access policies include the ProGear Sales Agent client**
 - [ ] All demo users assigned to the direct User access app
 - [ ] **`NEXT_PUBLIC_OKTA_ISSUER` set to Org AS URL (no auth server ID)**
@@ -1299,6 +1394,7 @@ Use this checklist to verify your deployment is complete:
 - [ ] All environment variables configured
 - [ ] `CORS_ORIGINS` includes Vercel URL
 - [ ] `/health` endpoint returns 200
+- [ ] FGA store/model and OIG request variables are configured
 
 ### Integration
 - [ ] `NEXT_PUBLIC_API_URL` in Vercel points to Render
@@ -1311,7 +1407,10 @@ Use this checklist to verify your deployment is complete:
 - [ ] Sarah's request can obtain the required scopes across all four resource domains
 - [ ] Mike's request can obtain Inventory scopes only
 - [ ] Frank's request can obtain Pricing scopes only
-- [ ] Access denied scenarios show clear user-facing guidance
+- [ ] Sarah read succeeds; 1–600 requests Manager; 601+ requests VP
+- [ ] Mike writes through 600 directly; 601+ requests VP
+- [ ] VP writes any quantity directly
+- [ ] Vacation blocks writes and approval submission but not reads
 - [ ] Okta System Log shows the single agent identity, user, resource, scope, and outcome for token exchange events
 
 ---
