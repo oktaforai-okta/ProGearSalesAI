@@ -127,9 +127,9 @@ For a full walkthrough of Okta org setup (AI Agent, Custom Authorization Servers
 
 ## Customer Learning Notebook
 
-<a href="https://colab.research.google.com/github/oktaforai-okta/ProGearSalesAI/blob/main/notebooks/progear-inventory-authorization-story.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open ProGear Inventory Authorization Story in Colab"/></a>
+<a href="https://colab.research.google.com/github/oktaforai-okta/ProGearSalesAI/blob/main/notebooks/progear-inventory-authorization-story.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open Wire your custom AI agent to Okta in Colab"/></a>
 
-**[Secure the ProGear AI agent with Okta](notebooks/progear-inventory-authorization-story.ipynb)** is a concise, runnable walkthrough of the complete delegated-access chain: employee sign-in, verified ID token, Workload Principal proof, ID-JAG, Inventory authorization policy, and verified scoped resource token. New readers can use a credential-free guided preview; builders can switch to Live Okta and keep private values in Colab Secrets. The Sarah-versus-Mike policy and vacation delegation stop remain easy to explain, while advanced FGA and OIG behavior stays in the web application.
+**[Wire your custom AI agent to Okta](notebooks/progear-inventory-authorization-story.ipynb)** helps builders apply the ProGear pattern to an agent of their own. Five configuration cards walk through the one-time Okta setup—OIDC sign-in, custom-agent registration, one Custom Authorization Server, one least-privilege scope and policy, and one resource connection—with direct links to the supporting Okta documentation. The runnable half then follows user ID token → agent proof → ID-JAG → scoped resource token → protected API. A credential-free preview is included; Live Okta mode keeps private values in Colab Secrets. FGA and OIG remain optional extensions in the web application.
 
 ## Documentation
 
