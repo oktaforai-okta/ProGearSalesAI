@@ -119,7 +119,7 @@ function graphNodes(fgaEnabled: boolean): GraphNode[] {
 
   if (fgaEnabled) {
     nodes.push({
-      id: 'fga', label: 'FGA', sublabel: 'role + quantity + vacation',
+      id: 'fga', label: 'FGA', sublabel: 'role + quantity',
       detail: 'Inventory decision: execute, OIG approval, or block.',
       x: 755, y: 40, w: 190, h: 90, color: COLORS.fga,
     });

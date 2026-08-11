@@ -11,6 +11,8 @@ from .approval_service import ApprovalService
 from .okta_oig_client import OktaOIGClient
 from .okta_role_resolver import OktaRoleResolver
 from .service_token import mint_service_token
+from auth.agent_config import AGENT_INVENTORY
+from auth.resource_token import get_resource_token_validator
 
 
 def _default_ledger_path() -> Path:
@@ -30,10 +32,19 @@ def build_approval_service(store) -> ApprovalService:
         base_url=os.environ["OKTA_DOMAIN"],
         api_token=os.environ["OKTA_API_TOKEN"],
     )
+
+    async def validate_service_token(token: str, scope: str):
+        return await get_resource_token_validator().validate(
+            token,
+            agent_type=AGENT_INVENTORY,
+            required_scopes=[scope],
+        )
+
     return ApprovalService(
         oig=oig,
         demo_store=store,
         mint_service_token=mint_service_token,
+        validate_service_token=validate_service_token,
         request_type_id=request_type_id,
         justification_field_id=justification_field_id,
         ledger_path=ledger_path,

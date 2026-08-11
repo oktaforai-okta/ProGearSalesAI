@@ -8,7 +8,7 @@ const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
   title: 'ProGear Sales AI',
-  description: 'AI-powered sales assistant secured by Okta and Auth0',
+  description: 'AI-powered sales assistant secured by Okta and FGA',
 };
 
 export default function RootLayout({

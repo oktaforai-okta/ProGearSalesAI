@@ -76,12 +76,12 @@ function buildSteps(agentActive: boolean, fgaEnabled: boolean): Step[] {
   if (fgaEnabled) {
     steps.push(
       {
-        from: 'agent', to: 'fga', label: 'Role + quantity + vacation',
-        detail: 'FGA evaluates the live inventory context.',
+        from: 'agent', to: 'fga', label: 'Role + quantity',
+        detail: 'FGA evaluates the live clearance level and requested quantity.',
       },
       {
-        from: 'fga', to: 'agent', label: 'Allow · OIG approval · block',
-        detail: 'The inventory action executes, waits for a Manager/VP, or stops.',
+        from: 'fga', to: 'agent', label: 'Allow · VP approval · block',
+        detail: 'The action executes, waits for a VP, or stops.',
       }
     );
   }

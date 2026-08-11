@@ -154,6 +154,7 @@ class ApprovalService:
         oig: OktaOIGClient,
         demo_store: Any,
         mint_service_token: Callable[[str], Awaitable[str]],
+        validate_service_token: Callable[[str, str], Awaitable[Any]],
         request_type_id: str,
         justification_field_id: str,
         ledger_path: str | os.PathLike[str],
@@ -164,6 +165,7 @@ class ApprovalService:
         self._oig = oig
         self._store = demo_store
         self._mint_token = mint_service_token
+        self._validate_token = validate_service_token
         self._request_type_id = request_type_id
         self._justification_field_id = justification_field_id
         self._threshold = quantity_threshold
@@ -181,6 +183,11 @@ class ApprovalService:
             return False
         qty = parsed_intent.get("quantity_delta")
         return isinstance(qty, int) and qty >= self._threshold
+
+    async def preflight_execution(self, scope: str = "inventory:write") -> None:
+        """Prove that the approved-action token path is currently usable."""
+        execution_token = await self._mint_token(scope)
+        await self._validate_token(execution_token, scope)
 
     # ---------- creation ----------
 
@@ -200,6 +207,13 @@ class ApprovalService:
     ) -> tuple[str, Intent]:
         """Create an OIG Access Request and return (request_id, intent)."""
         _ = requester_id  # explicit: Okta infers requester from API token
+
+        # Fail before creating a human approval task if the approved action
+        # could not actually execute. This preflight uses the same real Okta
+        # client-credentials token and resource validation as the post-approval
+        # write path; an OIG card is never used to mask broken credentials.
+        await self.preflight_execution(scope)
+
         qty = int(parsed_intent["quantity_delta"])
         product = str(parsed_intent["product_name"])
         intent = Intent(
@@ -219,7 +233,7 @@ class ApprovalService:
             f"AI agent requests inventory write on behalf of {user_email}.\n"
             f"Action: Add {qty} units of {product} (scope: {scope}).\n"
             f"Original task: \"{original_task}\".\n"
-            f"Required approval: {required_approver_role or 'Manager'} "
+            f"Required approval: {required_approver_role or 'VP'} "
             f"(level {required_approver_level or 2}+).\n"
             f"Approver group: {approver_group_name}."
         )
@@ -450,7 +464,8 @@ class ApprovalService:
 
             attempt_num = ledger_entry.failed_attempts + 1
             try:
-                _token = await self._mint_token(intent.scope)
+                service_token = await self._mint_token(intent.scope)
+                await self._validate_token(service_token, intent.scope)
                 result = self._store.update_inventory_quantity(
                     sku=intent.product_name,
                     quantity_change=intent.quantity_delta,

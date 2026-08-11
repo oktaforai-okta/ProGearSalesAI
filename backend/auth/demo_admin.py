@@ -1,17 +1,15 @@
 """
 Demo-only Okta profile mutation for live FGA demos.
 
-Lets the signed-in user toggle their OWN is_on_vacation / clearance_level
-custom attributes for real, via the Okta Users API, so the three role tiers
-and the "manager on vacation" scenario can be shown
-live without an Okta Admin Console detour mid-demo.
+Lets the signed-in user change their OWN ``clearance_level`` custom attribute
+through the Okta Users API so the three role tiers can be shown live without
+an Okta Admin Console detour mid-demo.
 
 Scoped deliberately tight:
 - Only the caller's own Okta user (resolved from their validated ID token,
   never from the request body) can be mutated.
 - Only a fixed allow-list of demo attributes can be touched.
-- Persona-specific values are captured once per user/attribute. Reset restores
-  those values and always returns vacation status to the demo default (False).
+- Persona-specific values are captured once per user. Reset restores that role.
 """
 
 import os
@@ -22,17 +20,22 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-ALLOWED_ATTRIBUTES = {"is_on_vacation", "clearance_level"}
+ALLOWED_ATTRIBUTES = {"clearance_level"}
+PERSONA_DEFAULT_LEVELS = {
+    "sarah.sales@atko.email": 0,
+    "mike.manager@atko.email": 1,
+    "joe.vp@atko.email": 2,
+}
 
-# A demo reset always returns vacation status to the normal working state.
-# Role level remains persona-specific and is restored to the value captured
-# before it was first changed.
-DEMO_DEFAULT_VALUES: Dict[str, Any] = {"is_on_vacation": False}
-
-# In-memory only - fine for a single-process demo backend. Keyed by Okta
-# login/email, then attribute name, holding the value seen before the first
-# toggle for that (user, attribute) pair.
+# The cache preserves the starting value for non-persona users during one
+# process lifetime. Named personas also have deterministic reset levels, so a
+# backend restart cannot strand Sarah, Mike, or Joe in a simulated role.
 _original_values: Dict[str, Dict[str, Any]] = {}
+
+
+def _reset_level(profile: Dict[str, Any]) -> Any:
+    login = str(profile.get("login") or profile.get("email") or "").lower()
+    return PERSONA_DEFAULT_LEVELS.get(login, profile.get("clearance_level"))
 
 
 def _okta_domain() -> str:
@@ -74,23 +77,18 @@ async def toggle_demo_attribute(user_id: str, attribute: str, value: Any) -> Dic
     """Set one allow-listed profile attribute on the caller's own Okta user."""
     if attribute not in ALLOWED_ATTRIBUTES:
         raise ValueError(f"Attribute '{attribute}' is not toggleable")
-    if attribute == "is_on_vacation" and not isinstance(value, bool):
-        raise ValueError("is_on_vacation must be true or false")
     if attribute == "clearance_level" and (
-        isinstance(value, bool) or not isinstance(value, int) or value not in (1, 2, 3)
+        isinstance(value, bool) or not isinstance(value, int) or value not in (0, 1, 2)
     ):
-        raise ValueError("clearance_level must be 1 (Sales), 2 (Manager), or 3 (VP)")
+        raise ValueError("clearance_level must be 0 (Sales), 1 (Manager), or 2 (VP)")
 
     domain, api_token = _require_config()
 
     if user_id not in _original_values:
         _original_values[user_id] = {}
     if attribute not in _original_values[user_id]:
-        if attribute in DEMO_DEFAULT_VALUES:
-            _original_values[user_id][attribute] = DEMO_DEFAULT_VALUES[attribute]
-        else:
-            current_profile = await _get_profile(user_id, domain, api_token)
-            _original_values[user_id][attribute] = current_profile.get(attribute)
+        current_profile = await _get_profile(user_id, domain, api_token)
+        _original_values[user_id][attribute] = _reset_level(current_profile)
 
     async with httpx.AsyncClient() as client:
         resp = await client.post(
@@ -111,11 +109,12 @@ async def toggle_demo_attribute(user_id: str, attribute: str, value: Any) -> Dic
 
 
 async def reset_demo_attributes(user_id: str) -> Dict[str, Any]:
-    """Restore persona attributes and enforce the safe demo defaults."""
-    originals = _original_values.get(user_id, {})
-    reset_values = {**originals, **DEMO_DEFAULT_VALUES}
-
+    """Restore the persona's original role level."""
     domain, api_token = _require_config()
+    reset_values = _original_values.get(user_id)
+    if not reset_values:
+        current_profile = await _get_profile(user_id, domain, api_token)
+        reset_values = {"clearance_level": _reset_level(current_profile)}
 
     async with httpx.AsyncClient() as client:
         resp = await client.post(

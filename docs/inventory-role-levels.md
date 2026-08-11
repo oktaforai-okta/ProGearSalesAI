@@ -1,49 +1,51 @@
-# Inventory role levels and approval routing
+# Inventory role levels and VP approval routing
 
-`clearance_level` is the single source of truth for the ProGear inventory role. It is no longer an item-sensitivity score and it is not combined with a separate Manager switch.
+`clearance_level` is the single source of truth for the ProGear inventory role. It is a role—not item sensitivity—and it is not combined with a Manager Boolean.
 
 | Okta value | Role | Read inventory | Write 1–600 units | Write 601+ units |
 |---:|---|---|---|---|
-| 1 | Sales | Execute | Manager approval | VP approval |
-| 2 | Manager | Execute | Execute | VP approval |
-| 3 | VP | Execute | Execute | Execute |
+| 0 | Sales | Execute | Deny; contact manager | Deny; contact manager |
+| 1 | Manager | Execute | Execute | VP approval with FGA on; deny in simple mode |
+| 2 | VP | Execute | Execute | Execute |
 
-`is_on_vacation=true` blocks every inventory write. It does not block reads and it does not create an approval request.
+Sarah never creates an access request. She asks her manager to make the change. The only OIG escalation in this demo is Mike, as a Manager, requesting more than 600 units from a VP.
 
 ## End-to-end decision
 
-1. Okta authenticates the user and the Inventory Custom Authorization Server signs `Clearance` (`user.clearance_level`) and `Vacation` (`user.is_on_vacation`) into the access token.
-2. The backend maps the live `Clearance` value to one contextual FGA relationship: `role_sales`, `role_manager`, or `role_vp`.
-3. Quantity selects the FGA permission: `can_update_standard` for 1–600, or `can_update_large` for 601+.
-4. If the user's level can execute, the write proceeds. If a higher level is required, the backend creates an Okta Identity Governance request for that level. Vacation is a hard denial.
-5. After OIG approval, the backend looks up the approver in Okta and verifies their current `clearance_level` before executing. A Level 2 approver can satisfy a Manager request; only Level 3 can satisfy a VP request.
+1. Okta authenticates the employee and identifies the ProGear agent Workload Principal.
+2. ID-JAG carries the employee + agent delegation to the Inventory Authorization Server.
+3. The server issues a coarse, scoped Inventory token and signs `Clearance = user.clearance_level` into it.
+4. Inventory independently validates the token signature, issuer, audience, expiry, agent identity, delegated employee, and required scope.
+5. Simple mode applies the same role matrix locally. FGA mode maps the validated `Clearance` value to one contextual relationship—`role_sales`, `role_manager`, or `role_vp`—and combines it with the requested quantity.
+6. The resource mutates inventory only when the final decision is `allow`. Before creating a VP request, the backend proves that it can mint and validate the real execution token; a broken execution path cannot create a theatrical approval card.
+7. A Manager request above 600 is left unchanged while the VP OIG request is pending. After approval, the backend verifies that the approver currently has Level 2 in Okta, mints and validates a fresh scoped Okta service token for the governed agent, and performs the write once using the request ID as an idempotency key.
+
+Token issuance is necessary, not sufficient. Sarah may receive a coarse `inventory:write` token because the authorization server permits the request to reach the application policy. Her Level 0 business decision still blocks the write, and the token page shows those as separate stages.
 
 ## Live Okta configuration
 
-- Custom profile property: `clearance_level`, titled **ProGear role level**.
+- Custom profile property: `clearance_level`, titled **Clearance level**.
 - Access-token claim: `Clearance = user.clearance_level`.
-- Compatibility claim: `Manager = clearance_level is 2 or 3`; application authorization does not depend on this claim.
-- `ProGear-Managers` membership rule: level 2 or 3.
-- `ProGear-VPs` membership rule: level 3.
-- Demo personas: Sarah Sales = Level 1, Mike Manager = Level 2, and Joe VP = Level 3; vacation defaults to false. Joe also belongs to `ProGear-Warehouse` so the Inventory authorization server can issue the coarse inventory scopes before FGA evaluates his VP level.
-- The Sales inventory authorization-server rule grants `inventory:read` and `inventory:write`. The write scope only lets the request reach the FGA layer; it does not itself authorize direct execution.
+- Demo personas: Sarah Sales = Level 0, Mike Manager = Level 1, Joe VP = Level 2.
+- `ProGear-Managers` contains Managers and VPs as appropriate for ordinary administration.
+- `ProGear-VPs` contains the eligible approvers for Manager requests above 600.
+- The Inventory authorization-server rule may issue `inventory:read` and `inventory:write` to the demo personas. The write scope is a coarse resource capability, not direct permission to change inventory.
+- A separate five-minute `client_credentials` rule permits the governed agent to execute an already-approved inventory write; the application preflights and validates that token before it creates the OIG request.
 
-The demo starts with **Simulate FGA** off. That browser-local preference shows only two everyday examples—Sarah's read and Mike's normal write—and hides the role/vacation controls. Enabling it replaces those examples with the three FGA tiers and reveals the advanced controls; changing the preference does not itself mutate Okta. In simple mode, the backend still applies the Okta-signed role and vacation context, but a request that needs a higher role is denied instead of being sent to FGA/OIG. This makes the switch safe: turning simulation off can never bypass the Manager/VP execution boundary. Once enabled, the controls may only change the signed-in user's `clearance_level` and `is_on_vacation`. They validate the role as 1, 2, or 3. Reset restores that persona's starting role and always sets vacation to false.
+The demo starts with **Simulate FGA** off. That browser-local preference shows two everyday examples and hides the advanced role control. In simple mode, Sales writes and Manager writes above 600 are denied; no OIG request is created. Enabling FGA reveals the Read, 1–600, and 601+ prompt tiers and allows the one escalation path from Manager to VP. The control may change only the signed-in user's `clearance_level` to 0, 1, or 2. Reset restores that persona's starting role.
 
-## Auth0 FGA model
+## FGA model
 
 The version-controlled model is [`backend/auth/fga_role_model.json`](../backend/auth/fga_role_model.json).
 
 ```text
 can_read            = Sales or Manager or VP
-can_request_change  = active Sales or active Manager or active VP
-can_update_standard = active Manager or active VP
-can_update_large    = active VP
-
-active role = role but not on_vacation
+can_request_change  = Manager
+can_update_standard = Manager or VP
+can_update_large    = VP
 ```
 
-Role and vacation tuples are contextual: they are derived from the signed Okta token for that check and are not left behind as mutable role copies in the FGA store.
+The role tuple is contextual: it is derived from the validated Okta Inventory token for the current check and is not persisted as a second mutable role copy in FGA.
 
 ## Deterministic demo prompts
 
@@ -53,16 +55,17 @@ These prompts replace the two everyday examples after **Simulate FGA** is enable
 2. `Add 50 basketballs to inventory`
 3. `Add 601 basketballs to inventory`
 
-For Sarah's default Level 1, prompt 1 reads successfully, prompt 2 creates a Manager request, and prompt 3 creates a VP request. For Mike's default Level 2, prompt 2 executes while prompt 3 creates a VP request. At Level 3, all three execute unless vacation is true.
+- Sarah (Level 0): prompt 1 executes; prompts 2 and 3 are blocked without creating requests.
+- Mike (Level 1): prompts 1 and 2 execute; prompt 3 creates one VP request and does not change inventory while pending.
+- Joe (Level 2): all three execute directly.
 
 ## Deployment values
 
-All backends that serve this frontend must use the same `FGA_STORE_ID` and the current `FGA_MODEL_ID`. The approval backends also need the live OIG request type and justification field IDs, plus:
+Every backend serving this frontend must use the same `FGA_STORE_ID` and active `FGA_MODEL_ID`. The approval backend also needs the live OIG request type and justification field IDs, plus:
 
 ```text
 APPROVAL_QUANTITY_THRESHOLD=601
-OKTA_MANAGER_APPROVER_GROUP_NAME=ProGear-Managers
 OKTA_VP_APPROVER_GROUP_NAME=ProGear-VPs
 ```
 
-The policy decision itself uses the fixed 600/601 boundary in `backend/auth/inventory_policy.py`; the threshold environment value remains aligned for compatibility with older approval-service callers.
+The fixed 600/601 boundary is implemented in `backend/auth/inventory_policy.py` and covered by the backend policy test suite.

@@ -12,25 +12,6 @@
         "role_sales": {"this": {}},
         "role_manager": {"this": {}},
         "role_vp": {"this": {}},
-        "on_vacation": {"this": {}},
-        "active_sales": {
-          "difference": {
-            "base": {"computedUserset": {"object": "", "relation": "role_sales"}},
-            "subtract": {"computedUserset": {"object": "", "relation": "on_vacation"}}
-          }
-        },
-        "active_manager": {
-          "difference": {
-            "base": {"computedUserset": {"object": "", "relation": "role_manager"}},
-            "subtract": {"computedUserset": {"object": "", "relation": "on_vacation"}}
-          }
-        },
-        "active_vp": {
-          "difference": {
-            "base": {"computedUserset": {"object": "", "relation": "role_vp"}},
-            "subtract": {"computedUserset": {"object": "", "relation": "on_vacation"}}
-          }
-        },
         "can_read": {
           "union": {
             "child": [
@@ -41,24 +22,18 @@
           }
         },
         "can_request_change": {
-          "union": {
-            "child": [
-              {"computedUserset": {"object": "", "relation": "active_sales"}},
-              {"computedUserset": {"object": "", "relation": "active_manager"}},
-              {"computedUserset": {"object": "", "relation": "active_vp"}}
-            ]
-          }
+          "computedUserset": {"object": "", "relation": "role_manager"}
         },
         "can_update_standard": {
           "union": {
             "child": [
-              {"computedUserset": {"object": "", "relation": "active_manager"}},
-              {"computedUserset": {"object": "", "relation": "active_vp"}}
+              {"computedUserset": {"object": "", "relation": "role_manager"}},
+              {"computedUserset": {"object": "", "relation": "role_vp"}}
             ]
           }
         },
         "can_update_large": {
-          "computedUserset": {"object": "", "relation": "active_vp"}
+          "computedUserset": {"object": "", "relation": "role_vp"}
         }
       },
       "metadata": {
@@ -66,10 +41,6 @@
           "role_sales": {"directly_related_user_types": [{"type": "user"}]},
           "role_manager": {"directly_related_user_types": [{"type": "user"}]},
           "role_vp": {"directly_related_user_types": [{"type": "user"}]},
-          "on_vacation": {"directly_related_user_types": [{"type": "user"}]},
-          "active_sales": {"directly_related_user_types": []},
-          "active_manager": {"directly_related_user_types": []},
-          "active_vp": {"directly_related_user_types": []},
           "can_read": {"directly_related_user_types": []},
           "can_request_change": {"directly_related_user_types": []},
           "can_update_standard": {"directly_related_user_types": []},

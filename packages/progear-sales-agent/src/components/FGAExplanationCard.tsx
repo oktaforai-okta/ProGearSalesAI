@@ -12,7 +12,6 @@ interface FGACheck {
   relation: string;
   reason: string;
   user_claims?: {
-    is_on_vacation: boolean;
     clearance_level: number;
     role_name?: string;
   };
@@ -34,9 +33,9 @@ interface Props {
 }
 
 const ROLE_ROWS = [
-  { level: '1 — Sales', read: 'Yes', standard: 'Manager approval', large: 'VP approval' },
-  { level: '2 — Manager', read: 'Yes', standard: 'Execute', large: 'VP approval' },
-  { level: '3 — VP', read: 'Yes', standard: 'Execute', large: 'Execute' },
+  { level: '0 — Sales', read: 'Yes', standard: 'Contact manager', large: 'Contact manager' },
+  { level: '1 — Manager', read: 'Yes', standard: 'Execute', large: 'VP approval' },
+  { level: '2 — VP', read: 'Yes', standard: 'Execute', large: 'Execute' },
 ] as const;
 
 export default function FGAExplanationCard({ checks, isLoading = false }: Props) {
@@ -94,19 +93,19 @@ export default function FGAExplanationCard({ checks, isLoading = false }: Props)
             <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-900 dark:bg-blue-950/40">
               <div className="text-xs font-bold uppercase tracking-wide text-blue-700">1. Okta</div>
               <p className="mt-1 text-xs leading-relaxed text-blue-900 dark:text-blue-100">
-                Signs the user’s role level and vacation status into the inventory token.
+                Signs the user’s role level into the inventory token.
               </p>
             </div>
             <div className="rounded-lg border border-purple-200 bg-purple-50 p-3 dark:border-purple-900 dark:bg-purple-950/40">
               <div className="text-xs font-bold uppercase tracking-wide text-purple-700">2. FGA</div>
               <p className="mt-1 text-xs leading-relaxed text-purple-900 dark:text-purple-100">
-                Combines those live values with the action and quantity on every request.
+                Combines the signed role with the action and quantity on every request.
               </p>
             </div>
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/40">
               <div className="text-xs font-bold uppercase tracking-wide text-amber-700">3. Okta OIG</div>
               <p className="mt-1 text-xs leading-relaxed text-amber-900 dark:text-amber-100">
-                Collects Manager or VP approval when the requester’s level is too low.
+                Collects VP approval when a Manager requests more than 600 units.
               </p>
             </div>
           </div>
@@ -139,7 +138,7 @@ export default function FGAExplanationCard({ checks, isLoading = false }: Props)
               </table>
             </div>
             <p className="mt-2 text-[11px] text-gray-500 dark:text-slate-400">
-              Vacation does not block reads. It blocks every write, including creating an approval request.
+              Sales is always read-only. Only a Manager crossing 600 units creates an approval request.
             </p>
           </div>
 
@@ -150,7 +149,7 @@ export default function FGAExplanationCard({ checks, isLoading = false }: Props)
             </div>
             {latest && claims ? (
               <p className="mt-1 text-xs">
-                Okta sent Level {claims.clearance_level} — {claims.role_name ?? 'Unknown'} · Vacation {claims.is_on_vacation ? 'True' : 'False'} · FGA checked <code>{latest.relation}</code>
+                Okta sent Level {claims.clearance_level} — {claims.role_name ?? 'Unknown'} · FGA checked <code>{latest.relation}</code>
                 {policy?.quantity ? ` for ${policy.quantity.toLocaleString()} units` : ''}.
               </p>
             ) : null}

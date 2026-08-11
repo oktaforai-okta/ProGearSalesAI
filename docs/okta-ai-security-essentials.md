@@ -667,7 +667,7 @@ Reason:            User not in required group (needs ProGear-Sales)
 - Clear reasons for each denial
 - Pattern is visible if Mike repeatedly tries to access unauthorized data
 
-**One more thing worth knowing about that "Update basketball count to 9,000" row:** Mike's job role clearing him to make inventory updates at all is only the first of three checks. Before a change of that size actually happens, two more things get verified automatically: is Mike specifically responsible for *this* warehouse right now (not currently out on vacation, for instance), and is a change this large sent to a human to sign off on first? See "A Closer Look" below for why those extra checks exist.
+**One more thing worth knowing about that "Update basketball count to 9,000" row:** Mike's job role clearing him to make inventory updates at all is only the first check. Before a change of that size happens, FGA compares his signed role with the requested quantity, and a change above 600 is sent to a VP for approval. See "A Closer Look" below for why those extra checks exist.
 
 ### Scenario 3: The Finance Analyst (Specialized Access)
 
@@ -771,29 +771,28 @@ But for the highest-stakes actions - the ones with real business consequences if
 
 ### Check #2: Does the situation actually hold right now?
 
-Think about it this way: Okta holds one role level for the inventory story: **1 = Sales, 2 = Manager, 3 = VP**. Mike's Level 2 role is real and current, but the decision also depends on the quantity he asked to change and whether he is on vacation now.
+Think about it this way: Okta holds one role level for the inventory story: **0 = Sales, 1 = Manager, 2 = VP**. Mike's Level 1 role is real and current, and the final decision also depends on the quantity he asked to change.
 
 So this demo adds a second, automatic check that uses the live Okta facts for each request:
 - Is the request a read, a standard write of 1–600, or a large write of 601 or more?
-- Is the person's role high enough to execute it directly, or should it create a Manager/VP request?
-- Is the person on vacation? Vacation blocks every write, including approval submission, while reads continue to work.
+- Is the person's role high enough to execute it directly, should a Manager create a VP request, or must the write stop?
 
-**Why use both Okta and FGA?** Okta remains the source of truth for identity, role level, and vacation status, and issues the narrow Inventory token. FGA is purpose-built to combine those facts with the requested quantity for one action. The backend passes the role and vacation as contextual relationships, so FGA does not keep a second mutable copy that could drift from Okta.
+**Why use both Okta and FGA?** Okta remains the source of truth for identity and role level and issues the narrow Inventory token. The Inventory boundary validates that signed token. FGA is purpose-built to combine the role with the requested quantity for one action, without keeping a second mutable role copy that could drift from Okta.
 
-**In plain terms:** Sarah (Level 1) can read, but her write creates an approval request. Mike (Level 2) can write through 600 units, but 601 needs a VP. A Level 3 VP can execute any quantity. Any of them is blocked from writing while on vacation.
+**In plain terms:** Sarah (Level 0) can read, but every write is blocked and she contacts her manager. Mike (Level 1) can write through 600 units, but 601 needs a VP. A Level 2 VP can execute any quantity.
 
 ### Check #3: Should a human still look at this one?
 
 Even after both of the above say yes, one more question remains: is this action, at this size, something a computer should be allowed to finish on its own?
 
-In this demo, a Sales write of 1–600 becomes a Manager request. Any write of 601 or more by someone below VP becomes a VP request. Nothing changes in Inventory while the request is pending. When OIG reports approval, the backend checks the approver's current Okta role level before it executes.
+In this demo, Sales writes never become access requests. A Manager write of 601 or more becomes a VP request. Nothing changes in Inventory while that request is pending. When OIG reports approval, the backend checks that the approver still holds Level 2 in Okta, mints and validates a real service token, and executes once.
 
 **Why require a person to sign off on something that's already fully authorized?** Because "is this allowed" and "is this a good idea right now" are genuinely different questions:
 
 - "May this role execute this quantity?" is the FGA decision: Manager for normal changes, VP for 601+.
 - "Did a qualified person approve it?" is the governance decision. The request and decision are recorded in Okta Identity Governance, and the approver still has to hold the required role when execution occurs.
 
-Put the checks together and the picture is crisp: Okta establishes identity and the role claim; FGA decides direct execution versus Manager/VP escalation using role, quantity, and vacation; OIG records the required human decision. None can be skipped by getting past another.
+Put the checks together and the picture is crisp: Okta establishes identity and the role claim; FGA decides direct execution, Sales denial, or Manager-to-VP escalation using role and quantity; OIG records the required VP decision. None can be skipped by getting past another.
 
 ---
 

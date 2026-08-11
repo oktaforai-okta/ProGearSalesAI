@@ -6,10 +6,10 @@ Uses raw Anthropic SDK for LLM calls.
 Uses demo_store for actual data operations.
 
 IMPORTANT: This agent has FGA (Fine-Grained Authorization) integration.
-- Role level and vacation are supplied to FGA as contextual tuples
-- Sales writes route to Manager or VP approval
+- Role level is supplied to FGA as a contextual tuple
+- Sales is read-only and never creates an approval request
 - Managers execute 1-600; VPs execute any quantity
-- Vacation blocks writes but not reads
+- Manager writes above 600 route to VP approval
 """
 
 from typing import Dict, Any, Optional
@@ -32,7 +32,7 @@ class InventoryAgent(BaseAgent):
     - Registered as Okta AI Agent
     - Uses ID-JAG token exchange for MCP access
     - Scopes: inventory:read, inventory:write
-    - FGA action check using role, quantity, and contextual vacation status
+    - FGA action check using role and quantity
     """
 
     def __init__(self, user_token: str):
@@ -60,10 +60,10 @@ IMPORTANT SECURITY CONTEXT:
 You are operating with Okta AI Agent governance:
 - Your identity is registered in Okta's AI Agent Directory
 - Your access is controlled by scopes: inventory:read, inventory:write
-- WRITE operations are additionally protected by Auth0 FGA (Fine-Grained Authorization)
-- FGA maps Okta clearance_level to Sales (1), Manager (2), or VP (3)
-- Sales writes require approval; 601+ requires VP unless the requester is a VP
-- Vacation blocks every write, including approval submission, but does not block reads
+- WRITE operations are additionally protected by FGA (Fine-Grained Authorization)
+- FGA maps Okta clearance_level to Sales (0), Manager (1), or VP (2)
+- Sales is read-only; Managers may write 1-600 units
+- Manager writes of 601+ require VP approval; VPs may write any quantity
 - All your actions are audited through Okta
 
 When processing inventory updates, confirm the action clearly."""
@@ -72,9 +72,50 @@ When processing inventory updates, confirm the action clearly."""
         """Process an inventory-related task with real data from demo_store."""
         context = context or {}
         scopes = context.get("scopes", self.scopes)
+        task_lower = task.lower()
+        is_write_request = "inventory:write" in scopes and any(
+            keyword in task_lower
+            for keyword in ("add", "update", "increase", "set", "put", "remove", "decrease")
+        )
+
+        if is_write_request:
+            decision = context.get("authorization_decision") or {}
+            if not context.get("resource_token_validated"):
+                return {
+                    "agent": self.agent_type,
+                    "agent_name": self.agent_name,
+                    "color": self.color,
+                    "result": "Inventory write blocked: the resource token was not validated.",
+                    "success": False,
+                    "error": "The inventory resource requires a validated access token.",
+                    "scopes": scopes,
+                }
+            if decision.get("decision") != "allow":
+                return {
+                    "agent": self.agent_type,
+                    "agent_name": self.agent_name,
+                    "color": self.color,
+                    "result": "Inventory write blocked: the final business policy did not allow execution.",
+                    "success": False,
+                    "error": "The final authorization decision did not allow this write.",
+                    "scopes": scopes,
+                }
 
         # Get data from demo_store based on task and scopes
         data = self._get_data(task, scopes)
+
+        # Writes are deterministic resource operations. Return the exact store
+        # result instead of asking an LLM to paraphrase success after mutation.
+        if is_write_request:
+            return {
+                "agent": self.agent_type,
+                "agent_name": self.agent_name,
+                "color": self.color,
+                "result": data,
+                "success": not data.startswith("INVENTORY UPDATE FAILED") and data != "Product not found for update",
+                "error": None if data.startswith("INVENTORY UPDATE SUCCESSFUL") else data,
+                "scopes": scopes,
+            }
 
         # Augment the task with data
         augmented_task = f"""{task}

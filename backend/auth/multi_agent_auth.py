@@ -157,7 +157,6 @@ class MultiAgentTokenExchange:
                 logger.info(f"Audience (aud): {id_jag_claims.get('aud')}")
                 logger.info(f"Issuer (iss): {id_jag_claims.get('iss')}")
                 logger.info(f"Scopes: {id_jag_claims.get('scp', id_jag_claims.get('scope', []))}")
-                logger.info(f"Vacation claim: {id_jag_claims.get('Vacation', id_jag_claims.get('is_on_vacation', 'NOT PRESENT'))}")
                 logger.info(f"Claim keys present: {list(id_jag_claims.keys())}")
             except Exception as decode_err:
                 logger.warning(f"[{agent_type}] Could not decode ID-JAG token: {decode_err}")
@@ -187,7 +186,7 @@ class MultiAgentTokenExchange:
                 logger.info(f"Subject (sub): {auth_token_claims.get('sub')}")
                 logger.info(f"Audience (aud): {auth_token_claims.get('aud')}")
                 logger.info(f"Scopes: {auth_token_claims.get('scp', auth_token_claims.get('scope', []))}")
-                logger.info(f"Vacation claim: {auth_token_claims.get('Vacation', 'not present')}")
+                logger.info(f"Clearance claim: {auth_token_claims.get('Clearance', 'not present')}")
                 logger.info(f"Claim keys present: {list(auth_token_claims.keys())}")
             except Exception as decode_err:
                 logger.warning(f"[{agent_type}] Could not decode Auth Server token: {decode_err}")

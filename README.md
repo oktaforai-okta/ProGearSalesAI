@@ -2,10 +2,10 @@
 
 > **AI agents are identities. Every delegated action stays attributable.** CourtEdge ProGear registers its customer-owned sales agent in Okta as a [Workload Principal](https://developer.okta.com/docs/api/secures-ai/ai-agents)—a first-class identity with its own owners, credentials, lifecycle, resource connections, and audit trail. When the agent acts for Sarah, Mike, or Joe, **Cross App Access (XAA)** uses the [IETF Identity Assertion JWT Authorization Grant (ID-JAG)](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-identity-assertion-authz-grant) to carry the user's identity across trust domains while identifying the agent client acting on that user's behalf. The result is a traceable delegation chain: **user → agent → resource → scope → action**. [Explore XAA.dev](https://xaa.dev/).
 
-**Auth0 FGA** then evaluates role, quantity, and live vacation context, while **Okta Identity Governance** routes Manager and VP approvals for changes that require a higher role.
+**FGA** then evaluates the signed clearance level and requested quantity. **Okta Identity Governance** is used for one deliberate escalation: a Manager requesting more than 600 units needs VP approval.
 
 ![Okta AI Agent Governance](https://img.shields.io/badge/Okta-AI%20Agent%20Governance-blue)
-![Auth0 FGA](https://img.shields.io/badge/Auth0-FGA-orange)
+![FGA](https://img.shields.io/badge/Fine--Grained-Authorization-orange)
 ![Next.js](https://img.shields.io/badge/Next.js-14-black)
 ![FastAPI](https://img.shields.io/badge/FastAPI-Python-green)
 ![LangGraph](https://img.shields.io/badge/LangGraph-Orchestration-purple)
@@ -31,11 +31,11 @@ Pages in the running app:
 | Route | What it shows |
 |---|---|
 | `/` | The chat UI ("CourtEdge ProGear"), talk to the sales assistant |
-| `/tokens` | Raw token exchanges, FGA checks, and pending approvals as they happen |
+| `/tokens` | The signed token chain, independent resource-token validation, final business decision, and pending approval status |
 | `/architecture` | Identity-centered architecture and sequence diagrams for Workload Principal governance, ID-JAG delegation, scoped access, auditability, and the agent deactivation control; the advanced FGA layer appears only when its simulation is enabled |
 | `/fga` | Opt-in live Okta role controls and a simple D3 view of the FGA decision |
 
-The application starts with **Simulate FGA** off and shows two everyday prompts: an inventory read and a normal 50-unit write. Enabling the simulation on `/fga` reveals the live role/vacation controls, replaces those examples with the Read, 1–600, and 601+ VP prompt tiers, and opts chat requests into hosted FGA checks plus OIG approval routing. Simple mode still enforces the Okta-signed role and context, but denies requests that need a higher role instead of creating approval requests. It is never a bypass. Color preferences are independent: Light is the first-visit default, with Dark and System available from the persistent theme control.
+The application starts with **Simulate FGA** off and shows two everyday prompts: an inventory read and a normal 50-unit write. Enabling the simulation on `/fga` reveals the live role control, replaces those examples with the Read, 1–600, and 601+ VP prompt tiers, and opts chat requests into hosted FGA checks plus OIG approval routing. Simple mode still enforces the validated Okta-signed role, but denies requests that need a higher role instead of creating approval requests. It is never a bypass. Color preferences are independent: Light is the first-visit default, with Dark and System available from the persistent theme control.
 
 ### Demo personas at a glance
 
@@ -43,11 +43,9 @@ With **Simulate FGA** enabled, the three default Okta role levels tell one compl
 
 | Persona | Okta role level | Inventory behavior |
 |---|---:|---|
-| Sarah Sales | 1 — Sales | Reads directly; writes of 1–600 units request Manager approval; writes of 601+ units request VP approval |
-| Mike Manager | 2 — Manager | Reads and writes 1–600 units directly; writes of 601+ units request VP approval |
-| Joe VP | 3 — VP | Reads and writes any quantity directly |
-
-For every role, `is_on_vacation=true` blocks inventory writes while leaving reads available.
+| Sarah Sales | 0 — Sales | Reads directly; every inventory write is denied, with guidance to contact her manager. No access request is created. |
+| Mike Manager | 1 — Manager | Reads and writes 1–600 units directly; writes of 601+ units request VP approval when FGA is enabled. |
+| Joe VP | 2 — VP | Reads and writes any quantity directly. |
 
 ## What This Demo Shows
 
@@ -55,7 +53,7 @@ An AI sales agent needs to read and write real business data (inventory, pricing
 
 - **WHO** requested this access, and **WHAT** agent acted on their behalf?
 - **WHICH** scopes were actually granted, per resource domain, per user?
-- **CAN** a second, contextual check (role level, quantity, vacation status) still block or route an otherwise-authenticated action?
+- **CAN** a second decision (clearance level + quantity) still block or route an otherwise-authenticated action?
 - **WHEN** does a human need to approve before an action executes?
 - **CAN** access be revoked instantly?
 
@@ -63,8 +61,8 @@ An AI sales agent needs to read and write real business data (inventory, pricing
 |---|---|---|
 | Identity for the agent | Okta AI Agent Governance | The AI has its own Workload Principal (`wlp`) identity, distinct from any human user |
 | Token exchange | ID-JAG (Identity Assertion JWT Authorization Grant) | Two-step exchange: ID token → ID-JAG assertion (Org Authorization Server) → scoped access token (per-domain Custom Authorization Server). RSA keypair auth, no shared secret. No down-scoping: an ungrantable scope fails the whole exchange. |
-| Fine-grained authorization | Auth0 FGA | Maps Okta's role level (1 Sales, 2 Manager, 3 VP), the requested quantity, and live vacation context to a direct-execution or approval decision |
-| Human-in-the-loop | Okta Identity Governance (OIG) | Sales writes route to Manager approval; writes of 601+ route to VP approval unless the requester is already a VP |
+| Fine-grained authorization | FGA | Maps Okta's role level (0 Sales, 1 Manager, 2 VP) and requested quantity to allow, block, or VP approval |
+| Human-in-the-loop | Okta Identity Governance (OIG) | A Manager write of 601+ units routes to VP approval; Sales writes never create requests |
 | Orchestration | LangGraph | Routes each user query to the right internal domain component and coordinates the response |
 | LLM calls | Anthropic Claude, via the raw Anthropic SDK | Internal domain components call Claude directly (not through LangChain's LLM wrapper) for routing and response generation |
 
@@ -93,12 +91,12 @@ Okta governs one **ProGear Sales Agent** workload identity. The application cont
 | Backend | Python, FastAPI (`backend/api/main.py`) |
 | Orchestration | LangGraph (`langgraph>=0.2.0`, a real dependency, not just a label), `backend/orchestrator/orchestrator.py` |
 | LLM integration | Anthropic Python SDK, called directly by internal domain components (no LangChain LLM wrapper) |
-| AuthN/AuthZ | Okta AI Agent Governance (ID-JAG), Auth0 FGA (`openfga-sdk`), Okta Identity Governance |
+| AuthN/AuthZ | Okta AI Agent Governance (ID-JAG), FGA (`openfga-sdk`), Okta Identity Governance |
 | Deployment | Vercel (frontend), Render (backend) |
 
 ### A known, honest limitation
 
-There's a real, working MCP server in this repo (`packages/progear-sales-mcp-server`), a JWT-validating Express server that verifies tokens against Okta's JWKS endpoint and is deployed separately. **It is not currently in the live request path.** The backend's internal domain components call `demo_store` in-process rather than calling that MCP server over HTTP. The MCP server exists and works, but wiring it into the chat flow is future work, not something already happening in production today.
+There's a real, working MCP server in this repo (`packages/progear-sales-mcp-server`), a JWT-validating Express server that is deployed separately. **It is not currently in the live request path.** The backend's internal resource boundary independently validates every Okta token's signature, issuer, audience, expiry, agent identity, delegated user, and required scope before data access. Inventory writes additionally require the final simple/FGA decision to be `allow`; the old simulated-success fallback has been removed. The internal domain component then calls `demo_store` in-process rather than calling the standalone MCP server over HTTP.
 
 ## Quickstart
 
@@ -115,9 +113,9 @@ pip install -r requirements.txt
 uvicorn api.main:app --reload
 ```
 
-Copy `.env.example` to `.env` and fill in real values before running anything. See it for every variable name used across the frontend, backend, and MCP server (Okta org/app/agent config, Anthropic key, Auth0 FGA store, etc.).
+Copy `.env.example` to `.env` and fill in real values before running anything. See it for every variable name used across the frontend, backend, and MCP server (Okta org/app/agent config, Anthropic key, FGA store, etc.).
 
-For a full walkthrough of Okta org setup (AI Agent, Custom Authorization Servers, groups), Auth0 FGA store setup, and deploying to Vercel + Render, see **[docs/implementation-guide.md](docs/implementation-guide.md)** (it also covers recovering from an accidentally deleted AI Agent).
+For a full walkthrough of Okta org setup (AI Agent, Custom Authorization Servers, groups), FGA store setup, and deploying to Vercel + Render, see **[docs/implementation-guide.md](docs/implementation-guide.md)** (it also covers recovering from an accidentally deleted AI Agent).
 
 > **Client-to-agent binding compatibility:** This repository currently implements the delegation-link flow that works during Okta's temporary rollback of the newer binding model. The newer model is expected to return. Before changing the binding flow, read **[docs/agent-client-binding-compatibility.md](docs/agent-client-binding-compatibility.md)**. It records the rationale, stable restore points, migration boundary, and verification checklist so the work can be resumed from GitHub in a new session.
 
@@ -148,7 +146,8 @@ ProGearSalesAI/
 │   ├── auth/
 │   │   ├── agent_config.py         # Per-domain auth server, scope, and optional identity overrides
 │   │   ├── multi_agent_auth.py     # ID-JAG token exchange
-│   │   └── fga_client.py           # Auth0 FGA checks (relationship, clearance, vacation)
+│   │   ├── fga_client.py           # FGA checks (clearance + quantity)
+│   │   └── resource_token.py       # Resource JWT validation before data access
 │   ├── orchestrator/
 │   │   └── orchestrator.py         # LangGraph workflow + direct Anthropic SDK calls
 │   ├── services/                   # OIG approval client and other services

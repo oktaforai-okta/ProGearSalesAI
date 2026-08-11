@@ -132,6 +132,15 @@ async def _approval_poller_loop():
 @app.on_event("startup")
 async def _start_approval_poller():
     global _approval_poll_task
+    if os.getenv("OKTA_OIG_INVENTORY_REQUEST_TYPE_ID"):
+        try:
+            await _get_approval_service().preflight_execution()
+            logger.info("Approval execution-token preflight passed")
+        except Exception as exc:
+            # The app remains available for reads and direct writes, but every
+            # approval request also repeats this preflight and therefore fails
+            # before creating an OIG request until configuration is repaired.
+            logger.error("Approval execution-token preflight failed: %s", exc)
     _approval_poll_task = _approval_asyncio.create_task(_approval_poller_loop())
     logger.info("Approval poller started")
 
@@ -197,6 +206,11 @@ class TokenExchange(BaseModel):
     access_token: Optional[str] = None  # Raw access token JWT
     id_jag_token: Optional[str] = None  # Raw ID-JAG token (intermediate)
     id_jag_claims: Optional[Dict[str, Any]] = None  # Decoded ID-JAG claims
+    resource_token_validated: bool = False
+    resource_token_kid: Optional[str] = None
+    resource_validation_error: Optional[str] = None
+    business_decision: Optional[str] = None
+    business_reason: Optional[str] = None
 
 
 class AgentFlowStep(BaseModel):
@@ -215,8 +229,9 @@ class ChatResponse(BaseModel):
     agent_flow: List[AgentFlowStep]
     token_exchanges: List[TokenExchange]
     fga_checks: List[Dict[str, Any]]
+    authorization_decisions: List[Dict[str, Any]]
     user_info: Optional[Dict[str, Any]] = None
-    # Populated when an inventory write awaits Manager or VP approval.
+    # Populated when a Manager's 601+ inventory write awaits VP approval.
     # Null for direct execution and hard denials.
     pending_approval: Optional[Dict[str, Any]] = None
 
@@ -279,12 +294,11 @@ async def chat(
         try:
             user_claims = await okta_auth.validate_token(user_token)
 
-            # Extract any fallback role/context claims from the Okta ID token.
+            # Extract the fallback role claim from the Okta ID token.
             # The Inventory Custom Authorization Server token is authoritative
             # during the FGA check; clearance_level is the sole role source.
             # ID token is used for initial authentication only
-            is_on_vacation = user_claims.get("Vacation", user_claims.get("is_on_vacation", False))
-            clearance_level = 0
+            clearance_level = -1
             clearance_claim = user_claims.get("Clearance", user_claims.get("clearance_level"))
             if clearance_claim is not None:
                 try:
@@ -297,7 +311,6 @@ async def chat(
                 "email": user_claims.get("email"),
                 "name": user_claims.get("name"),
                 "groups": user_claims.get("groups", []),
-                "is_on_vacation": is_on_vacation,  # Fallback from ID token
                 "clearance_level": clearance_level,  # Fallback from ID token
             }
 
@@ -308,16 +321,14 @@ async def chat(
             logger.info(f"User: {user_info.get('email')}")
             logger.info(f"Subject (sub): {user_claims.get('sub')}")
             logger.info(f"Groups: {user_claims.get('groups', [])}")
-            logger.info(f"Vacation claim (raw): {user_claims.get('Vacation')} | is_on_vacation: {user_claims.get('is_on_vacation')}")
-            logger.info(f"Resolved is_on_vacation: {is_on_vacation}")
             logger.info(f"Clearance claim (raw): {user_claims.get('Clearance')} | clearance_level: {user_claims.get('clearance_level')}")
             logger.info(f"Resolved clearance_level: {clearance_level}")
             logger.info(f"Claim keys present: {list(user_claims.keys())}")
         except Exception as e:
             logger.warning(f"Token validation failed: {e}")
-            user_info = {"email": "anonymous", "groups": [], "is_on_vacation": False, "clearance_level": 0}
+            raise HTTPException(status_code=401, detail="Invalid or expired Okta token") from e
     else:
-        user_info = {"email": "anonymous", "groups": [], "is_on_vacation": False, "clearance_level": 0}
+        raise HTTPException(status_code=401, detail="Missing Okta bearer token")
 
     # Create orchestrator and process request
     try:
@@ -337,6 +348,7 @@ async def chat(
             agent_flow=[AgentFlowStep(**step) for step in result["agent_flow"]],
             token_exchanges=[TokenExchange(**ex) for ex in result["token_exchanges"]],
             fga_checks=result.get("fga_checks", []),
+            authorization_decisions=result.get("authorization_decisions", []),
             user_info=user_info,
             pending_approval=result.get("pending_approval"),
         )
@@ -353,6 +365,7 @@ async def chat(
             ],
             token_exchanges=[],
             fga_checks=[],
+            authorization_decisions=[],
             user_info=user_info
         )
 
@@ -635,9 +648,8 @@ async def _resolve_caller_user_id(authorization: Optional[str]) -> str:
 @app.get("/api/admin/demo-status")
 async def demo_status(authorization: Optional[str] = Header(None, alias="Authorization")):
     """
-    Demo-only, read-only: the signed-in user's current is_on_vacation /
-    role level / vacation values, so the UI can show which state is
-    actually active instead of a static button style.
+    Demo-only, read-only: the signed-in user's current role level so the UI
+    can show which state is actually active.
     """
     user_id = await _resolve_caller_user_id(authorization)
 
@@ -656,10 +668,9 @@ async def demo_toggle(
     authorization: Optional[str] = Header(None, alias="Authorization")
 ):
     """
-    Demo-only: toggle the SIGNED-IN user's own is_on_vacation /
-    clearance_level Okta attribute for real, so the FGA role and vacation
-    scenarios can be shown live without an Okta Admin
-    Console detour mid-demo. See auth/demo_admin.py for the scoping rules.
+    Demo-only: change the SIGNED-IN user's own clearance_level Okta attribute
+    so the FGA role tiers can be shown live without an Okta Admin Console
+    detour. See auth/demo_admin.py for the scoping rules.
     """
     user_id = await _resolve_caller_user_id(authorization)
 
@@ -679,7 +690,7 @@ async def demo_toggle(
 
 @app.post("/api/admin/demo-reset")
 async def demo_reset(authorization: Optional[str] = Header(None, alias="Authorization")):
-    """Restore persona values and set the signed-in user's vacation status to False."""
+    """Restore the signed-in persona's original role level."""
     user_id = await _resolve_caller_user_id(authorization)
 
     try:

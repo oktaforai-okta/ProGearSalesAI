@@ -18,6 +18,7 @@ import re
 from typing import Dict, Any, List, Optional, TypedDict
 from langgraph.graph import StateGraph, END
 import anthropic
+import httpx
 import logging
 import json
 
@@ -31,7 +32,13 @@ from auth.multi_agent_auth import (
 )
 from auth.agent_config import get_agent_config, DEMO_AGENTS
 from auth.fga_client import check_agent_access, is_fga_configured, FGACheckResult
-from auth.inventory_policy import decide_inventory_policy, role_name, simple_authorization_message
+from auth.inventory_policy import (
+    decide_inventory_policy,
+    normalize_role_level,
+    role_name,
+    simple_authorization_message,
+)
+from auth.resource_token import ResourceTokenError, get_resource_token_validator
 
 # Import agent classes
 from agents import SalesAgent, InventoryAgent, PricingAgent, CustomerAgent
@@ -60,6 +67,9 @@ class WorkflowState(TypedDict):
     # FGA (Fine-Grained Authorization) checks
     fga_checks: List[Dict[str, Any]]
     simulate_fga: bool
+
+    # Final business decisions are separate from coarse token issuance.
+    authorization_decisions: List[Dict[str, Any]]
 
     # Final response
     final_response: Optional[str]
@@ -200,9 +210,9 @@ class Orchestrator:
         workflow.add_node("generate_response", self._generate_response_node)
 
         # Linear flow: router -> exchange -> fga_check -> approval_gate -> process/response
-        # Token exchange runs FIRST so we can extract Vacation claim from Auth Server token
-        # (Org Auth Server doesn't support custom claims, but custom Auth Servers do)
-        # FGA check uses Vacation claim from Auth Server token to build contextual tuples
+        # Token exchange runs first because the resource token carries the live
+        # Clearance claim. The resource validates that token before policy or
+        # data access, then FGA optionally evaluates role + quantity.
         workflow.set_entry_point("router")
         workflow.add_edge("router", "exchange_tokens")
         workflow.add_edge("exchange_tokens", "fga_check")
@@ -349,9 +359,9 @@ Return ONLY the JSON object, no other text."""
     async def _fga_check_node(self, state: WorkflowState) -> WorkflowState:
         """Apply the live Okta role claim to the three-tier FGA model.
 
-        The role and vacation facts are contextual tuples, not stored copies.
-        That makes a role change in Okta effective on the next token exchange
-        and avoids a stale Manager boolean drifting away from clearance_level.
+        The role is a contextual tuple, not a stored copy. That makes a role
+        change in Okta effective on the next token exchange and avoids stale
+        authorization data drifting away from ``clearance_level``.
         """
         agents = state["agents_to_invoke"]
         agent_results = state.get("agent_results", {})
@@ -365,54 +375,29 @@ Return ONLY the JSON object, no other text."""
 
         state["agent_flow"].append({
             "step": "fga_check",
-            "action": "Checking fine-grained permissions (Auth0 FGA API)",
+            "action": "Checking fine-grained permissions (FGA API)",
             "status": "processing"
         })
 
-        is_on_vacation = False
-        clearance_level = 0
+        clearance_level = -1
 
         inventory_result = agent_results.get(AGENT_INVENTORY, {})
-        if inventory_result.get("success") and inventory_result.get("access_token"):
-            try:
-                from jose import jwt as jose_jwt
-                auth_token_claims = jose_jwt.get_unverified_claims(inventory_result["access_token"])
+        if inventory_result.get("resource_token_validated"):
+            claims = inventory_result.get("token_claims") or {}
+            clearance_level = normalize_role_level(
+                claims.get("Clearance", claims.get("clearance_level"))
+            )
 
-                vacation_claim = auth_token_claims.get("Vacation", auth_token_claims.get("is_on_vacation"))
-                if vacation_claim is not None:
-                    is_on_vacation = (
-                        vacation_claim.lower() == "true"
-                        if isinstance(vacation_claim, str)
-                        else bool(vacation_claim)
-                    )
-                    logger.info(f"Extracted Vacation claim from Auth Server token: {vacation_claim}")
-
-                clearance_claim = auth_token_claims.get("Clearance", auth_token_claims.get("clearance_level"))
-                if clearance_claim is not None:
-                    try:
-                        clearance_level = int(clearance_claim)
-                        logger.info(f"Extracted Clearance claim from Auth Server token: {clearance_claim}")
-                    except (ValueError, TypeError):
-                        logger.warning(f"Invalid Clearance claim value: {clearance_claim}")
-
-                logger.info(f"Auth Server token claims for FGA: {list(auth_token_claims.keys())}")
-            except Exception as e:
-                logger.warning(f"Could not extract claims from Auth Server token: {e}")
-
-        if not is_on_vacation:
-            is_on_vacation = self.user_info.get("is_on_vacation", self.user_info.get("Vacation", False))
-        if clearance_level == 0:
-            try:
-                clearance_level = int(self.user_info.get("clearance_level", self.user_info.get("Clearance", 0)))
-            except (TypeError, ValueError):
-                clearance_level = 0
+        if clearance_level == -1:
+            clearance_level = normalize_role_level(
+                self.user_info.get("clearance_level", self.user_info.get("Clearance"))
+            )
 
         logger.info(
-            "FGA check for %s: role_level=%s (%s), is_on_vacation=%s",
+            "FGA check for %s: role_level=%s (%s)",
             user_email,
             clearance_level,
             role_name(clearance_level),
-            is_on_vacation,
         )
 
         allowed_agents = []
@@ -420,17 +405,32 @@ Return ONLY the JSON object, no other text."""
 
         for agent_type in agents:
             scopes = state["agent_scopes"].get(agent_type, [])
+            exchange_result = agent_results.get(agent_type, {})
+            if not exchange_result.get("success") or exchange_result.get("access_denied"):
+                state["authorization_decisions"].append({
+                    "agent": agent_type,
+                    "mode": "fga",
+                    "engine": "Resource server",
+                    "operation": "write" if any(scope.endswith(":write") for scope in scopes) else "read",
+                    "quantity": None,
+                    "role_level": clearance_level,
+                    "role_name": role_name(clearance_level),
+                    "decision": "deny",
+                    "outcome": "blocked",
+                    "reason": exchange_result.get("error", "The resource token was not accepted."),
+                    "token_issued": bool(exchange_result.get("token_issued")),
+                    "token_validated": bool(exchange_result.get("resource_token_validated")),
+                })
+                continue
             policy = decide_inventory_policy(
                 scopes,
                 state["user_message"],
                 clearance_level,
-                is_on_vacation,
             )
             result: FGACheckResult = await check_agent_access(
                 user_email=user_email,
                 agent_type=agent_type,
                 scopes=scopes,
-                is_on_vacation=is_on_vacation,
                 role_level=clearance_level,
                 relation=policy.relation if agent_type == AGENT_INVENTORY else None,
             )
@@ -442,7 +442,6 @@ Return ONLY the JSON object, no other text."""
                     user_email=user_email,
                     agent_type=agent_type,
                     scopes=scopes,
-                    is_on_vacation=is_on_vacation,
                     role_level=clearance_level,
                     relation="can_request_change",
                 )
@@ -470,7 +469,6 @@ Return ONLY the JSON object, no other text."""
                 "requested_scopes": scopes,
                 "contextual_tuples": result.contextual_tuples or [],
                 "user_claims": {
-                    "is_on_vacation": is_on_vacation,
                     "clearance_level": clearance_level,
                     "role_name": role_name(clearance_level),
                 },
@@ -503,16 +501,11 @@ Return ONLY the JSON object, no other text."""
                 )
                 for tx in state["token_exchanges"]:
                     if tx.get("agent") == agent_type:
-                        tx["success"] = False
-                        tx["access_denied"] = True
-                        tx["status"] = "denied"
-                        tx["error"] = f"FGA: {denial_reason}"
-                        tx["fga_denied"] = True
-                        tx["access_token"] = None
-                        tx["id_jag_token"] = None
-                        tx["token_claims"] = None
-                        tx["id_jag_claims"] = None
-                        tx["demo_mode"] = False
+                        # The signed token was genuinely issued and validated.
+                        # Preserve it as evidence; FGA is a later business-action
+                        # decision, not a retroactive token-exchange failure.
+                        tx["business_decision"] = "blocked"
+                        tx["business_reason"] = denial_reason
                         break
                 else:
                     config = get_agent_config(agent_type)
@@ -534,6 +527,31 @@ Return ONLY the JSON object, no other text."""
                 if agent_type in agent_results:
                     agent_results[agent_type]["access_denied"] = True
                     agent_results[agent_type]["success"] = False
+
+            decision = "allow" if effective_allowed else "approval_required" if approval_route else "deny"
+            state["authorization_decisions"].append({
+                "agent": agent_type,
+                "mode": "fga",
+                "engine": "FGA",
+                "operation": policy.operation,
+                "quantity": policy.quantity,
+                "role_level": clearance_level,
+                "role_name": role_name(clearance_level),
+                "required_level": policy.required_level,
+                "required_role": policy.required_role,
+                "relation": policy.relation,
+                "decision": decision,
+                "outcome": "authorized" if effective_allowed else "awaiting_approval" if approval_route else "blocked",
+                "reason": result.reason if effective_allowed else (
+                    f"{policy.approval_role} approval is required."
+                    if approval_route
+                    else denial_reason
+                ),
+                "token_issued": bool(inventory_result.get("access_token")) if agent_type == AGENT_INVENTORY else True,
+                "token_validated": bool(inventory_result.get("resource_token_validated")) if agent_type == AGENT_INVENTORY else True,
+                "approval_role": policy.approval_role,
+                "approval_level": policy.approval_level,
+            })
 
             # An approval route is not a failed Okta token exchange and not a
             # hard FGA denial. Keep the real tokens as evidence that the
@@ -561,7 +579,6 @@ Return ONLY the JSON object, no other text."""
             ),
             "status": "completed",
             "details": {
-                "vacation_status": is_on_vacation,
                 "role_level": clearance_level,
                 "role_name": role_name(clearance_level),
                 "user_email": user_email,
@@ -574,51 +591,26 @@ Return ONLY the JSON object, no other text."""
     async def _simple_authorization_node(self, state: WorkflowState) -> WorkflowState:
         """Apply the safe Sarah/Mike policy without calling FGA or OIG.
 
-        Simple mode is intentionally at least as restrictive as FGA mode:
-        a role that cannot execute directly is denied instead of being routed
-        to approval. The decision still comes from Okta-signed role/context
-        claims, so a browser flag can never grant extra write permission.
+        Simple mode is intentionally at least as restrictive as FGA mode: a
+        role that cannot execute directly is denied instead of being routed
+        to approval. The decision comes from the validated Okta-signed role
+        claim, so a browser flag can never grant extra write permission.
         """
         agents = state["agents_to_invoke"]
         agent_results = state.get("agent_results", {})
-        is_on_vacation = False
-        clearance_level = 0
+        clearance_level = -1
 
         inventory_result = agent_results.get(AGENT_INVENTORY, {})
-        if inventory_result.get("success") and inventory_result.get("access_token"):
-            try:
-                from jose import jwt as jose_jwt
-                claims = jose_jwt.get_unverified_claims(inventory_result["access_token"])
-                vacation_claim = claims.get("Vacation", claims.get("is_on_vacation"))
-                if vacation_claim is not None:
-                    is_on_vacation = (
-                        vacation_claim.lower() == "true"
-                        if isinstance(vacation_claim, str)
-                        else bool(vacation_claim)
-                    )
-                clearance_claim = claims.get("Clearance", claims.get("clearance_level"))
-                if clearance_claim is not None:
-                    clearance_level = int(clearance_claim)
-            except (TypeError, ValueError) as exc:
-                logger.warning("Invalid simple-mode inventory claims: %s", exc)
-            except Exception as exc:
-                logger.warning("Could not read simple-mode inventory claims: %s", exc)
-
-        if not is_on_vacation:
-            is_on_vacation = self.user_info.get(
-                "is_on_vacation",
-                self.user_info.get("Vacation", False),
+        if inventory_result.get("resource_token_validated"):
+            claims = inventory_result.get("token_claims") or {}
+            clearance_level = normalize_role_level(
+                claims.get("Clearance", claims.get("clearance_level"))
             )
-        if clearance_level == 0:
-            try:
-                clearance_level = int(
-                    self.user_info.get(
-                        "clearance_level",
-                        self.user_info.get("Clearance", 0),
-                    )
-                )
-            except (TypeError, ValueError):
-                clearance_level = 0
+
+        if clearance_level == -1:
+            clearance_level = normalize_role_level(
+                self.user_info.get("clearance_level", self.user_info.get("Clearance"))
+            )
 
         state["agent_flow"].append({
             "step": "simple_authorization",
@@ -641,22 +633,45 @@ Return ONLY the JSON object, no other text."""
                 scopes,
                 state["user_message"],
                 clearance_level,
-                is_on_vacation,
             )
             if policy.direct_allowed:
                 allowed_agents.append(agent_type)
-                continue
+                message = None
+            else:
+                denied_count += 1
+                message = simple_authorization_message(policy)
+                if message is None:
+                    # direct_allowed above makes this unreachable; keep the guard
+                    # so a future policy change cannot accidentally grant access.
+                    message = "I can’t complete that request with your current permissions."
+                result["success"] = False
+                result["access_denied"] = True
+                result["authorization_reason"] = message
+                result["requested_scopes"] = scopes
 
-            denied_count += 1
-            message = simple_authorization_message(policy)
-            if message is None:
-                # direct_allowed above makes this unreachable; keep the guard
-                # so a future policy change cannot accidentally grant access.
-                message = "I can’t complete that request with your current permissions."
-            result["success"] = False
-            result["access_denied"] = True
-            result["authorization_reason"] = message
-            result["requested_scopes"] = scopes
+            state["authorization_decisions"].append({
+                "agent": agent_type,
+                "mode": "simple",
+                "engine": "Okta role policy",
+                "operation": policy.operation,
+                "quantity": policy.quantity,
+                "role_level": clearance_level,
+                "role_name": role_name(clearance_level),
+                "required_level": policy.required_level,
+                "required_role": policy.required_role,
+                "relation": policy.relation,
+                "decision": "allow" if policy.direct_allowed else "deny",
+                "outcome": "authorized" if policy.direct_allowed else "blocked",
+                "reason": (
+                    f"{role_name(clearance_level)} satisfies the direct-execution rule."
+                    if policy.direct_allowed
+                    else message
+                ),
+                "token_issued": bool(inventory_result.get("access_token")),
+                "token_validated": bool(inventory_result.get("resource_token_validated")),
+                "approval_role": None,
+                "approval_level": None,
+            })
 
         state["agents_to_invoke"] = allowed_agents
         state["agent_results"] = agent_results
@@ -671,17 +686,15 @@ Return ONLY the JSON object, no other text."""
             "details": {
                 "role_level": clearance_level,
                 "role_name": role_name(clearance_level),
-                "vacation_status": is_on_vacation,
             },
         })
         return state
 
     async def _approval_gate_node(self, state: WorkflowState) -> WorkflowState:
-        """Create the Manager or VP OIG request selected by the FGA policy.
+        """Create the VP OIG request selected by the FGA policy.
 
-        Sales writes of 1-600 route to a Manager. Any non-VP write of 601+
-        routes to a VP. Vacation and malformed requests are hard denials and
-        never turn into approval requests.
+        Only a Manager write of 601+ routes to a VP. Sales and malformed
+        requests are hard denials and never turn into approval requests.
         """
         from services.intent import parse_inventory_intent  # local import — same style as existing backend modules
 
@@ -746,13 +759,9 @@ Return ONLY the JSON object, no other text."""
             })
             return state
 
-        approval_role = str(policy.get("approval_role") or "Manager")
+        approval_role = str(policy.get("approval_role") or "VP")
         approval_level = int(policy.get("approval_level") or 2)
-        approver_group = (
-            os.getenv("OKTA_VP_APPROVER_GROUP_NAME", "ProGear-VPs")
-            if approval_level == 3
-            else os.getenv("OKTA_MANAGER_APPROVER_GROUP_NAME", "ProGear-Managers")
-        )
+        approver_group = os.getenv("OKTA_VP_APPROVER_GROUP_NAME", "ProGear-VPs")
         try:
             fga_check_id = None
             if state.get("fga_checks"):
@@ -800,6 +809,12 @@ Return ONLY the JSON object, no other text."""
                 "original_task": intent.original_task,
             },
         }
+        for decision in reversed(state.get("authorization_decisions", [])):
+            if decision.get("agent") == AGENT_INVENTORY:
+                decision["outcome"] = "awaiting_approval"
+                decision["request_id"] = request_id
+                decision["approver_group"] = approver_group
+                break
         return state
 
     def _detect_scopes_from_keywords(self, message: str, agents: List[str]) -> Dict[str, List[str]]:
@@ -858,6 +873,44 @@ Return ONLY the JSON object, no other text."""
             agent_scopes  # Pass the intent-based scopes
         )
 
+        # A successful exchange means Okta issued a coarse resource token. The
+        # resource still validates that JWT independently before policy or data
+        # access. This makes the write path enforceable rather than a UI-only
+        # simulation.
+        validator = get_resource_token_validator()
+        expected_subjects = [
+            self.user_info.get("email"),
+            self.user_info.get("sub"),
+        ]
+        for agent_type, result in exchange_results.items():
+            requested_scopes = result.get("requested_scopes", agent_scopes.get(agent_type, []))
+            result["token_issued"] = bool(result.get("success") and result.get("access_token"))
+            result["resource_token_validated"] = False
+            if not result["token_issued"]:
+                continue
+            if result.get("demo_mode"):
+                if any(scope.endswith(":write") for scope in requested_scopes):
+                    result["success"] = False
+                    result["error"] = "A real signed resource token is required for writes."
+                    result["error_code"] = "resource_token_required"
+                continue
+            try:
+                validated = await validator.validate(
+                    result["access_token"],
+                    agent_type=agent_type,
+                    required_scopes=requested_scopes,
+                    expected_subjects=expected_subjects,
+                )
+                result["resource_token_validated"] = True
+                result["token_claims"] = validated.claims
+                result["resource_token_kid"] = validated.key_id
+            except (ResourceTokenError, httpx.HTTPError) as exc:
+                logger.warning("[%s] Resource token rejected: %s", agent_type, exc)
+                result["success"] = False
+                result["access_denied"] = False
+                result["error"] = str(exc)
+                result["error_code"] = "invalid_resource_token"
+
         # Record token exchanges - use "name" for Token Exchange card (MCP name)
         for agent_type, result in exchange_results.items():
             requested_scopes = result.get("requested_scopes", agent_scopes.get(agent_type, []))
@@ -866,7 +919,9 @@ Return ONLY the JSON object, no other text."""
                 "agent": agent_type,
                 "agent_name": result["agent_info"]["name"],  # MCP name for Token Exchange card
                 "color": result["agent_info"]["color"],
-                "success": result["success"],
+                # Keep token issuance truthful even if the resource rejects the
+                # token in the next stage.
+                "success": result.get("token_issued", result["success"]),
                 "access_denied": result.get("access_denied", False),
                 "scopes": result.get("scopes", []),
                 "requested_scopes": requested_scopes,  # What was requested
@@ -875,12 +930,19 @@ Return ONLY the JSON object, no other text."""
                 "access_token": result.get("access_token"),  # Raw access token JWT
                 "id_jag_token": result.get("id_jag_token"),  # Raw ID-JAG token (intermediate)
                 "id_jag_claims": result.get("id_jag_claims"),  # Decoded ID-JAG claims
+                "resource_token_validated": result.get("resource_token_validated", False),
+                "resource_token_kid": result.get("resource_token_kid"),
+                "resource_validation_error": (
+                    result.get("error")
+                    if result.get("token_issued") and not result.get("resource_token_validated")
+                    else None
+                ),
             }
 
             if result.get("access_denied"):
                 exchange_record["error"] = result.get("error", f"Access denied for scope(s): {', '.join(requested_scopes)}")
                 exchange_record["status"] = "denied"
-            elif result["success"]:
+            elif result.get("token_issued"):
                 exchange_record["status"] = "granted"
                 exchange_record["audience"] = result.get("audience")
             else:
@@ -893,7 +955,7 @@ Return ONLY the JSON object, no other text."""
         state["agent_results"] = exchange_results
 
         # Summary for flow
-        granted = sum(1 for r in exchange_results.values() if r["success"] and not r.get("access_denied"))
+        granted = sum(1 for r in exchange_results.values() if r.get("token_issued") and not r.get("access_denied"))
         denied = sum(1 for r in exchange_results.values() if r.get("access_denied"))
 
         state["agent_flow"].append({
@@ -930,14 +992,57 @@ Return ONLY the JSON object, no other text."""
             display_name = exchange_result["agent_info"].get("display_name", exchange_result["agent_info"]["name"])
             requested_scopes = exchange_result.get("requested_scopes", [])
 
-            if exchange_result["success"] and not exchange_result.get("access_denied"):
-                # Agent has access - process the request
-                agent_response = await self._invoke_agent(
+            is_authorized = agent_type in state.get("agents_to_invoke", [])
+            decision = next(
+                (
+                    item
+                    for item in reversed(state.get("authorization_decisions", []))
+                    if item.get("agent") == agent_type
+                ),
+                None,
+            )
+
+            if (
+                exchange_result["success"]
+                and not exchange_result.get("access_denied")
+                and is_authorized
+            ):
+                if not exchange_result.get("resource_token_validated") and not exchange_result.get("demo_mode"):
+                    exchange_result["success"] = False
+                    exchange_result["error"] = "The resource token was not validated."
+                    if decision:
+                        decision["decision"] = "deny"
+                        decision["outcome"] = "blocked"
+                        decision["reason"] = exchange_result["error"]
+                    continue
+
+                # The token and final business decision have both passed.
+                agent_outcome = await self._invoke_agent(
                     agent_type,
                     state["user_message"],
-                    exchange_result
+                    exchange_result,
+                    decision,
                 )
-                agent_results[agent_type]["response"] = agent_response
+                if not agent_outcome["success"]:
+                    exchange_result["success"] = False
+                    exchange_result["error"] = agent_outcome.get("error") or "Resource operation failed"
+                    if decision:
+                        decision["decision"] = "deny"
+                        decision["outcome"] = "blocked"
+                        decision["reason"] = exchange_result["error"]
+                    state["agent_flow"].append({
+                        "step": f"{agent_type}_agent",
+                        "action": f"{display_name}",
+                        "detail": f"RESOURCE BLOCKED: {exchange_result['error']}",
+                        "status": "error",
+                        "color": exchange_result["agent_info"]["color"],
+                        "requested_scopes": requested_scopes,
+                    })
+                    continue
+
+                agent_results[agent_type]["response"] = agent_outcome["response"]
+                if decision:
+                    decision["outcome"] = "executed"
 
                 state["agent_flow"].append({
                     "step": f"{agent_type}_agent",
@@ -980,8 +1085,9 @@ Return ONLY the JSON object, no other text."""
         self,
         agent_type: str,
         message: str,
-        exchange_result: Dict[str, Any]
-    ) -> str:
+        exchange_result: Dict[str, Any],
+        authorization_decision: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         """
         Invoke a specific agent to process the request.
 
@@ -1003,26 +1109,52 @@ Return ONLY the JSON object, no other text."""
         if not agent_class:
             # Fallback to demo data if agent class not found
             data = self._get_demo_data(agent_type, message, scopes)
-            return f"[{agent_name}]\n{data}\n(Scopes: {', '.join(scopes)})"
+            return {
+                "success": True,
+                "response": f"[{agent_name}]\n{data}\n(Scopes: {', '.join(scopes)})",
+            }
 
         try:
             # Instantiate and invoke the agent
             agent = agent_class(user_token=self.user_token)
-            result = await agent.process(message, context={"scopes": scopes})
+            result = await agent.process(
+                message,
+                context={
+                    "scopes": scopes,
+                    "resource_token_validated": exchange_result.get("resource_token_validated", False),
+                    "authorization_decision": authorization_decision,
+                },
+            )
 
             if result.get("success"):
-                return f"[{agent_name}]\n{result['result']}\n(Scopes: {', '.join(scopes)})"
+                return {
+                    "success": True,
+                    "response": f"[{agent_name}]\n{result['result']}\n(Scopes: {', '.join(scopes)})",
+                }
             else:
+                if agent_type == AGENT_INVENTORY and "inventory:write" in scopes:
+                    return {
+                        "success": False,
+                        "error": result.get("error") or result.get("result") or "Inventory write failed",
+                    }
                 # Agent LLM call failed, use demo data as fallback
                 logger.warning(f"Agent {agent_type} LLM call failed: {result.get('error')}")
                 data = self._get_demo_data(agent_type, message, scopes)
-                return f"[{agent_name}]\n{data}\n(Scopes: {', '.join(scopes)})"
+                return {
+                    "success": True,
+                    "response": f"[{agent_name}]\n{data}\n(Scopes: {', '.join(scopes)})",
+                }
 
         except Exception as e:
             logger.error(f"Error invoking agent {agent_type}: {e}")
+            if agent_type == AGENT_INVENTORY and "inventory:write" in scopes:
+                return {"success": False, "error": str(e)}
             # Fallback to demo data
             data = self._get_demo_data(agent_type, message, scopes)
-            return f"[{agent_name}]\n{data}\n(Scopes: {', '.join(scopes)})"
+            return {
+                "success": True,
+                "response": f"[{agent_name}]\n{data}\n(Scopes: {', '.join(scopes)})",
+            }
 
     def _get_demo_data(self, agent_type: str, message: str, scopes: List[str] = None) -> str:
         """Get demo data for an agent based on message context and scopes."""
@@ -1052,19 +1184,9 @@ Return ONLY the JSON object, no other text."""
             is_write_request = any(kw in message_lower for kw in ["add", "update", "increase", "set", "put", "remove", "decrease"])
 
             if has_write_scope and is_write_request:
-                # Extract quantity from message (simple pattern matching)
-                qty_match = re.search(r'(\d+)\s*(basket|ball|unit)', message_lower)
-                quantity = qty_match.group(1) if qty_match else "30"
-
                 return (
-                    f"INVENTORY UPDATE SUCCESSFUL:\n"
-                    f"- Action: Added {quantity} basketballs to inventory\n"
-                    f"- Product: Pro Game Basketball (default SKU)\n"
-                    f"- Previous count: 2,847 units\n"
-                    f"- New count: {int(quantity) + 2847} units\n"
-                    f"- Status: CONFIRMED\n"
-                    f"- Transaction ID: INV-2026-{hash(message) % 10000:04d}\n"
-                    f"Total basketballs now: {12219 + int(quantity)} units"
+                    "Inventory writes are never simulated. A validated resource token "
+                    "and an allow decision are required before the data store can change."
                 )
 
             # Read-only inventory data
@@ -1152,7 +1274,7 @@ Return ONLY the JSON object, no other text."""
         if state.get("pending_approval") is not None:
             pa = state["pending_approval"]
             intent = pa.get("intent") or {}
-            approval_role = pa.get("approver_role") or "Manager"
+            approval_role = pa.get("approver_role") or "VP"
             state["final_response"] = (
                 "I didn’t change the inventory. "
                 f"This request requires {approval_role} approval, so I created Okta request "
@@ -1222,7 +1344,7 @@ Return ONLY the JSON object, no other text."""
         elif inventory_write_denied:
             permission_message = (
                 "I didn’t change the inventory because the live FGA check denied direct execution. "
-                "Review the role level and vacation setting on the FGA page."
+                "Review the role level and requested quantity on the FGA page."
             )
         else:
             permission_message = "I can’t complete that request with your current permissions."
@@ -1317,6 +1439,7 @@ internal agents, MCP servers, policy names, or permission errors; permission gui
             "agent_flow": [],
             "token_exchanges": [],
             "fga_checks": [],  # FGA fine-grained authorization checks
+            "authorization_decisions": [],
             "simulate_fga": simulate_fga,
             "final_response": None,
             "pending_approval": None,
@@ -1331,5 +1454,6 @@ internal agents, MCP servers, policy names, or permission errors; permission gui
             "agent_flow": final_state["agent_flow"],
             "token_exchanges": final_state["token_exchanges"],
             "fga_checks": final_state["fga_checks"],
+            "authorization_decisions": final_state["authorization_decisions"],
             "pending_approval": final_state.get("pending_approval"),
         }

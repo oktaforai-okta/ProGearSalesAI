@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
-import { BadgeCheck, Loader2, Palmtree, PauseCircle, PlayCircle, RotateCcw, ShieldAlert } from 'lucide-react';
+import { BadgeCheck, Loader2, PauseCircle, PlayCircle, RotateCcw, ShieldAlert } from 'lucide-react';
 import { API_BASE_URL } from '@/lib/config';
 import { useFGASimulation } from '@/hooks/useFGASimulation';
 
@@ -11,21 +11,22 @@ interface Props {
 }
 
 interface DemoStatus {
-  is_on_vacation: boolean;
   clearance_level: number;
 }
 
 const ROLES = [
-  { level: 1, name: 'Sales', summary: 'Read inventory and submit change requests.' },
-  { level: 2, name: 'Manager', summary: 'Make inventory changes up to 600 units.' },
-  { level: 3, name: 'VP', summary: 'Make inventory changes of any size.' },
+  { level: 0, name: 'Sales', summary: 'Read inventory. Ask a manager to make changes.' },
+  { level: 1, name: 'Manager', summary: 'Make inventory changes up to 600 units.' },
+  { level: 2, name: 'VP', summary: 'Make inventory changes of any size.' },
 ] as const;
+
+const roleForLevel = (level: number) => ROLES.find((role) => role.level === level);
 
 export default function FGAControlsPanel({ onApplied }: Props) {
   const { data: session } = useSession();
   const { isEnabled, setIsEnabled } = useFGASimulation();
   const [status, setStatus] = useState<DemoStatus | null>(null);
-  const [roleLevel, setRoleLevel] = useState(1);
+  const [roleLevel, setRoleLevel] = useState(0);
   const [busy, setBusy] = useState<string | null>(null);
   const [lastResult, setLastResult] = useState<string | null>(null);
   const idToken = session?.idToken;
@@ -39,7 +40,7 @@ export default function FGAControlsPanel({ onApplied }: Props) {
       if (!response.ok) return;
       const data: DemoStatus = await response.json();
       setStatus(data);
-      setRoleLevel(data.clearance_level ?? 1);
+      setRoleLevel(data.clearance_level ?? 0);
     } catch {
       // The controls remain usable after the next successful status refresh.
     }
@@ -54,7 +55,7 @@ export default function FGAControlsPanel({ onApplied }: Props) {
     }
   }, [isEnabled, loadStatus]);
 
-  async function callToggle(attribute: 'is_on_vacation' | 'clearance_level', value: boolean | number) {
+  async function callToggle(attribute: 'clearance_level', value: number) {
     if (!idToken) return;
     setBusy(attribute);
     setLastResult(null);
@@ -67,10 +68,7 @@ export default function FGAControlsPanel({ onApplied }: Props) {
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || 'Update failed');
       setStatus((previous) => (previous ? { ...previous, [attribute]: data.value } : previous));
-      const message =
-        attribute === 'clearance_level'
-          ? `Role changed to Level ${data.value} — ${ROLES[data.value - 1]?.name ?? 'Unknown'}.`
-          : `On vacation is now ${data.value ? 'True' : 'False'}.`;
+      const message = `Role changed to Level ${data.value} — ${roleForLevel(data.value)?.name ?? 'Unknown'}.`;
       setLastResult(`${message} The next prompt uses the new Okta value.`);
       onApplied?.();
     } catch (error) {
@@ -92,7 +90,7 @@ export default function FGAControlsPanel({ onApplied }: Props) {
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || 'Reset failed');
       await loadStatus();
-      setLastResult('Restored this persona’s starting role and set On vacation to False.');
+      setLastResult('Restored this persona’s starting role.');
       onApplied?.();
     } catch (error) {
       setLastResult(`Error: ${error instanceof Error ? error.message : 'Reset failed'}`);
@@ -100,15 +98,6 @@ export default function FGAControlsPanel({ onApplied }: Props) {
       setBusy(null);
     }
   }
-
-  const vacationButtonClass = (active: boolean, trueButton: boolean) => {
-    if (active) {
-      return trueButton
-        ? 'rounded-lg border-2 border-orange-500 bg-orange-500 px-3 py-1.5 text-xs font-semibold text-white shadow-sm disabled:opacity-50'
-        : 'rounded-lg border-2 border-emerald-600 bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm disabled:opacity-50';
-    }
-    return 'rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700';
-  };
 
   return (
     <section className="overflow-hidden rounded-xl border-2 border-purple-200 bg-white shadow-sm dark:border-purple-900 dark:bg-slate-900">
@@ -138,7 +127,7 @@ export default function FGAControlsPanel({ onApplied }: Props) {
                 </span>
               </div>
               <p className="mt-1 max-w-xl text-xs leading-relaxed text-slate-600 dark:text-slate-300">
-                Turn this on only for the advanced role, vacation, threshold, and approval demo. It also reveals the guided FGA prompts on the chat page.
+                Turn this on for the role, quantity threshold, and VP approval demo. It also reveals the guided FGA prompts on the chat page.
               </p>
             </div>
             <button
@@ -164,7 +153,7 @@ export default function FGAControlsPanel({ onApplied }: Props) {
             Role level
             {status ? (
               <span className="text-xs font-normal text-gray-500 dark:text-slate-400">
-                Current: {status.clearance_level} — {ROLES[status.clearance_level - 1]?.name}
+                Current: {status.clearance_level} — {roleForLevel(status.clearance_level)?.name}
               </span>
             ) : null}
           </div>
@@ -203,36 +192,6 @@ export default function FGAControlsPanel({ onApplied }: Props) {
           </button>
         </div>
 
-        <div className="flex items-center justify-between border-t border-gray-100 pt-4 dark:border-slate-800">
-          <div>
-            <div className="flex items-center gap-2 text-sm font-medium text-gray-800 dark:text-slate-100">
-              <Palmtree className="h-4 w-4 text-orange-500" />
-              On vacation
-            </div>
-            <p className="mt-1 text-[11px] text-gray-500 dark:text-slate-400">False is the default. True blocks inventory writes.</p>
-          </div>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              aria-pressed={status?.is_on_vacation === true}
-              onClick={() => callToggle('is_on_vacation', true)}
-              disabled={busy !== null}
-              className={vacationButtonClass(status?.is_on_vacation === true, true)}
-            >
-              True
-            </button>
-            <button
-              type="button"
-              aria-pressed={status?.is_on_vacation === false}
-              onClick={() => callToggle('is_on_vacation', false)}
-              disabled={busy !== null}
-              className={vacationButtonClass(status?.is_on_vacation === false, false)}
-            >
-              False
-            </button>
-          </div>
-        </div>
-
         <button
           type="button"
           onClick={callReset}
@@ -240,7 +199,7 @@ export default function FGAControlsPanel({ onApplied }: Props) {
           className="flex w-full items-center justify-center gap-2 rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
         >
           {busy === 'reset' ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
-          Reset my demo attributes
+          Reset my demo role
         </button>
 
         {lastResult ? (
@@ -258,7 +217,7 @@ export default function FGAControlsPanel({ onApplied }: Props) {
           </>
         ) : (
           <p className="rounded-lg border border-dashed border-slate-300 px-4 py-3 text-center text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
-            Role and vacation controls are hidden until you choose <strong>Simulate FGA</strong>.
+            Role controls are hidden until you choose <strong>Simulate FGA</strong>.
           </p>
         )}
       </div>

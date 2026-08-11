@@ -2,12 +2,12 @@
 
 Okta's ``Clearance`` claim is the single role source of truth:
 
-* 1 = Sales
-* 2 = Manager
-* 3 = VP
+* 0 = Sales
+* 1 = Manager
+* 2 = VP
 
 The helpers in this module deliberately contain no network calls.  The
-orchestrator uses the returned FGA relation for the live Auth0 FGA check and
+orchestrator uses the returned FGA relation for the live FGA check and
 uses ``approval_role`` to decide whether an OIG request should be created.
 """
 
@@ -18,18 +18,18 @@ from dataclasses import dataclass
 from services.intent import parse_inventory_intent
 
 
-ROLE_NAMES = {1: "Sales", 2: "Manager", 3: "VP"}
-ROLE_RELATIONS = {1: "role_sales", 2: "role_manager", 3: "role_vp"}
+ROLE_NAMES = {0: "Sales", 1: "Manager", 2: "VP"}
+ROLE_RELATIONS = {0: "role_sales", 1: "role_manager", 2: "role_vp"}
 STANDARD_WRITE_LIMIT = 600
 
 
 def normalize_role_level(value: object) -> int:
-    """Return a supported role level, or 0 for missing/invalid values."""
+    """Return a supported role level, or -1 for missing/invalid values."""
     try:
         level = int(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
-        return 0
-    return level if level in ROLE_NAMES else 0
+        return -1
+    return level if level in ROLE_NAMES else -1
 
 
 def role_name(level: int) -> str:
@@ -65,11 +65,6 @@ def simple_authorization_message(decision: InventoryPolicyDecision) -> str | Non
         return None
     if decision.hard_denial_reason:
         return f"I didn’t change the inventory. {decision.hard_denial_reason}"
-    if decision.required_level == 2:
-        return (
-            "I can’t increase inventory with your current permissions. "
-            "Please contact your manager for assistance."
-        )
     return (
         "I didn’t change the inventory. This quantity requires VP permission. "
         "Please contact a VP for assistance."
@@ -80,7 +75,6 @@ def decide_inventory_policy(
     scopes: list[str],
     task: str,
     role_level: int,
-    is_on_vacation: bool,
 ) -> InventoryPolicyDecision:
     """Translate a request into the exact FGA relation and approval tier.
 
@@ -99,9 +93,9 @@ def decide_inventory_policy(
             role_level=level,
             role_name=name,
             quantity=None,
-            required_level=1,
+            required_level=0,
             required_role="Sales",
-            hard_denial_reason=None if level >= 1 else "No ProGear role is assigned in Okta.",
+            hard_denial_reason=None if level >= 0 else "No ProGear role is assigned in Okta.",
         )
 
     parsed = parse_inventory_intent(task)
@@ -113,25 +107,31 @@ def decide_inventory_policy(
             role_level=level,
             role_name=name,
             quantity=None,
-            required_level=2,
+            required_level=1,
             required_role="Manager",
             hard_denial_reason="Include a positive quantity so the correct approval tier can be selected.",
         )
 
     is_large = quantity > STANDARD_WRITE_LIMIT
-    required_level = 3 if is_large else 2
+    required_level = 2 if is_large else 1
     required_role = ROLE_NAMES[required_level]
     relation = "can_update_large" if is_large else "can_update_standard"
 
     hard_denial_reason = None
-    if level < 1:
+    if level < 0:
         hard_denial_reason = "No ProGear role is assigned in Okta."
-    elif is_on_vacation:
-        hard_denial_reason = "Inventory writes are blocked while the requester is on vacation."
+    elif level == 0:
+        hard_denial_reason = (
+            "Sales can read inventory but cannot change it. "
+            "Please contact your manager to make the change."
+        )
 
     approval_level = None
     approval_role = None
-    if hard_denial_reason is None and level < required_level:
+    # Only a Manager crossing the 600-unit boundary may request approval.
+    # Sales never creates an OIG request; a manager performs the ordinary
+    # change on Sarah's behalf.
+    if hard_denial_reason is None and level == 1 and required_level == 2:
         approval_level = required_level
         approval_role = required_role
 

@@ -16,7 +16,7 @@
 8. [The Workload Principal: Your AI Agent's Identity](#the-workload-principal-your-ai-agents-identity)
 9. [Proof: What You See in Audit Logs](#proof-what-you-see-in-audit-logs)
 10. [The Governance Model](#the-governance-model)
-11. [Layer Two: Fine-Grained Authorization with Auth0 FGA](#layer-two-fine-grained-authorization-with-auth0-fga)
+11. [Layer Two: Fine-Grained Authorization](#layer-two-fine-grained-authorization)
 12. [Layer Three: Human Approval for High-Risk Actions](#layer-three-human-approval-for-high-risk-actions-okta-identity-governance)
 13. [Real Demo Scenarios with Evidence](#real-demo-scenarios-with-evidence)
 14. [Security and Governance FAQ](#security-and-governance-faq)
@@ -687,17 +687,17 @@ If an AI agent is compromised or behaving unexpectedly:
 
 ---
 
-## Layer Two: Fine-Grained Authorization with Auth0 FGA
+## Layer Two: Fine-Grained Authorization
 
 Everything above - Workload Principals, ID-JAG, four Custom Authorization Servers - answers one question well: **may this governed agent obtain a token for this resource and scope while acting for this user?** For Inventory, both read and write scopes let the request reach the resource. A write scope is not permission to bypass the next decision.
 
-That question is necessary, but it is not sufficient for every access decision. This demo adds a second layer - **Auth0 FGA** (Fine-Grained Authorization) - that runs *after* token exchange to answer: **given this live Okta role, this quantity, and this vacation status, may the request execute or ask for approval?**
+That question is necessary, but it is not sufficient for every access decision. This demo adds a second layer—**FGA** (Fine-Grained Authorization)—that runs *after* token exchange to answer: **given this live Okta role and this quantity, may the request execute, stop, or require VP approval?**
 
 ### Why not just make Okta's policy more granular?
 
-The user has one custom Okta profile value, `clearance_level`, with three intentional meanings: **1 = Sales, 2 = Manager, 3 = VP**. It is a role level, not an item-sensitivity score and not a second value combined with a Manager switch.
+The user has one custom Okta profile value, `clearance_level`, with three intentional meanings: **0 = Sales, 1 = Manager, 2 = VP**. It is a role level, not an item-sensitivity score and not a second value combined with a Manager switch.
 
-Okta remains the source of truth for that role and for `is_on_vacation`. The Inventory access token carries both claims. The backend converts them into contextual FGA tuples for the current check, rather than persisting a second mutable role copy in FGA. That keeps the identity value and the authorization relationship from drifting apart.
+Okta remains the source of truth for that role. The Inventory access token carries the `Clearance` claim. The backend validates the token and converts that value into one contextual FGA tuple for the current check, rather than persisting a second mutable role copy in FGA.
 
 ### What FGA actually checks (the real model behind this demo)
 
@@ -706,17 +706,16 @@ FGA runs on top of the Okta scope check, for the Inventory domain, only after Ok
 | Okta establishes | FGA decides next |
 |---|---|
 | Signed-in user and governed agent identity | Read: all valid role levels may execute |
-| Narrow `inventory:read` or `inventory:write` token | Write 1–600 units: Level 2+ executes; Level 1 requests Manager approval |
-| `Clearance` role claim and `Vacation` context claim | Write 601+ units: Level 3 executes; Level 1 or 2 requests VP approval |
-| - | Vacation true: every write is denied, including approval submission; reads still work |
+| Narrow `inventory:read` or `inventory:write` token | Write 1–600 units: Level 1+ executes; Level 0 is blocked |
+| Validated `Clearance` role claim | Write 601+ units: Level 2 executes; Level 1 may request VP approval; Level 0 is blocked |
 
-`inventory:read` maps to the FGA `can_read` relation. Quantity selects `can_update_standard` for 1–600 or `can_update_large` for 601+. A separate `can_request_change` relation allows an active user whose level is too low to create the correctly tiered OIG request. Low-stock alerts remain reads.
+`inventory:read` maps to `can_read`. Quantity selects `can_update_standard` for 1–600 or `can_update_large` for 601+. `can_request_change` is intentionally Manager-only, so Sales can never manufacture an access request. Low-stock alerts remain reads.
 
-**Concretely:** Sarah (Level 1) may read. If she asks to add 50 basketballs, the inventory is unchanged and a Manager request is created. Mike (Level 2) may add 50 directly, but adding 601 creates a VP request. A Level 3 VP may perform either write directly. Setting vacation true blocks any of them from writing while leaving reads available.
+**Concretely:** Sarah (Level 0) may read, but every write is blocked and no request is created. Mike (Level 1) may add 50 directly, but adding 601 creates a VP request. A Level 2 VP may perform either write directly.
 
 ### Why this is a second layer, not duplicated work
 
-Okta and FGA are not answering the same question twice. Okta authenticates the user and agent, establishes the role/context claims, and issues the resource token. FGA combines those facts with the requested quantity to make the per-action decision. OIG then records and resolves the human decision when a higher role is required.
+Okta and FGA are not answering the same question twice. Okta authenticates the user and agent, establishes the role claim, and issues the resource token. The Inventory boundary validates that token; FGA then combines the role with quantity for the per-action decision. OIG records the one human escalation when a Manager crosses 600 units.
 
 ---
 
@@ -724,16 +723,16 @@ Okta and FGA are not answering the same question twice. Okta authenticates the u
 
 An action can have a valid token but still require a higher role before it executes. That is where Okta Identity Governance supplies the human-in-the-loop step.
 
-In this demo, **Sales writes from 1 through 600 require Manager approval**. **Writes of 601 or more require VP approval unless the requester is already a VP**. The backend creates an **Okta Identity Governance (OIG)** request with the required role and justification, makes no inventory change while it is pending, and verifies the approver's current Okta role level before executing an approved change.
+In this demo, **Sales writes are denied without creating an access request**. **A Manager write of 601 or more requires VP approval**. The backend creates an **Okta Identity Governance (OIG)** request with the required role and justification, makes no inventory change while it is pending, and verifies the approver's current Level 2 Okta role before executing an approved change.
 
 ### Why add a third gate when the first two already said yes?
 
 Because "is this action within policy" and "is this action a good idea right now" are different questions, answered by different mechanisms:
 
 - **Authorization (Okta + FGA) asks:** may this role execute this exact quantity now, or may it submit a request to the next role?
-- **Governance (the approval gate) asks:** did a currently qualified Manager or VP approve the queued change?
+- **Governance (the approval gate) asks:** did a currently qualified VP approve the queued Manager change?
 
-The 600/601 boundary makes the story deterministic. A Manager is trusted to execute normal inventory adjustments through 600 units. A VP must authorize changes at 601 or above. Sales cannot directly execute either class of write, but can request the appropriate human decision.
+The 600/601 boundary makes the story deterministic. A Manager is trusted to execute normal inventory adjustments through 600 units. A VP must authorize a Manager's change at 601 or above. Sales cannot execute either class of write and cannot create an approval request.
 
 Routing this through Okta Identity Governance, rather than a bespoke approval box bolted onto the app, matters for the same reason the rest of this document does: the request, the justification, and the approval decision all land in the same governance system that already owns your access-review and audit story, instead of creating a second, disconnected place your auditors have to go find.
 
@@ -777,7 +776,7 @@ Routing this through Okta Identity Governance, rather than a bespoke approval bo
 
 **Audit Trail:** 1 success, 3 denials - all logged with Mike Manager as the user.
 
-**Note on the `inventory:write` grant above:** the token exchange succeeding is necessary, not sufficient. FGA still applies Mike's Level 2 role, requested quantity, and vacation context. He can execute 1–600 while active; 601+ creates a Level 3 VP request. See [Layer Two](#layer-two-fine-grained-authorization-with-auth0-fga) and [Layer Three](#layer-three-human-approval-for-high-risk-actions-okta-identity-governance) above.
+**Note on the `inventory:write` grant above:** token issuance is necessary, not sufficient. Inventory validates the token and FGA still applies Mike's Level 1 role plus the requested quantity. He can execute 1–600; 601+ creates a Level 2 VP request. See [Layer Two](#layer-two-fine-grained-authorization-with-auth0-fga) and [Layer Three](#layer-three-human-approval-for-high-risk-actions-okta-identity-governance) above.
 
 ---
 
@@ -835,7 +834,7 @@ Routing this through Okta Identity Governance, rather than a bespoke approval bo
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-No single layer above is sufficient by itself. Identity establishes the user, agent, role, and resource boundary. FGA combines role, quantity, and live vacation context for each action. OIG records the qualified Manager or VP decision when escalation is required. The value is the enforced chain, not any one control in isolation.
+No single layer above is sufficient by itself. Identity establishes the user, agent, role, and resource boundary. FGA combines role and quantity for each action. OIG records the qualified VP decision when escalation is required. The value is the enforced chain, not any one control in isolation.
 
 ---
 

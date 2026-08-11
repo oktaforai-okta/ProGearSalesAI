@@ -20,6 +20,7 @@ interface Message {
   agentFlow?: any[];
   tokenExchanges?: any[];
   fgaChecks?: any[];
+  authorizationDecisions?: any[];
 }
 
 type ExampleQuestion = {
@@ -45,6 +46,7 @@ const CHAT_STORAGE_KEY = 'progear-chat-messages';
 const AGENT_FLOW_STORAGE_KEY = 'progear-agent-flow';
 const TOKEN_EXCHANGE_STORAGE_KEY = 'progear-token-exchanges';
 const FGA_CHECKS_STORAGE_KEY = 'progear-fga-checks';
+const AUTHORIZATION_DECISIONS_STORAGE_KEY = 'progear-authorization-decisions';
 const PENDING_APPROVAL_STORAGE_KEY = 'progear-pending-approval';
 const APPROVAL_ANNOUNCED_STORAGE_KEY = 'progear-approval-announced';
 
@@ -105,6 +107,7 @@ export default function Home() {
   const [currentAgentFlow, setCurrentAgentFlow] = useState<any[]>([]);
   const [currentTokenExchanges, setCurrentTokenExchanges] = useState<any[]>([]);
   const [currentFGAChecks, setCurrentFGAChecks] = useState<any[]>([]);
+  const [currentAuthorizationDecisions, setCurrentAuthorizationDecisions] = useState<any[]>([]);
   const [pendingApproval, setPendingApproval] = useState<ApprovalStatus | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -117,6 +120,7 @@ export default function Home() {
       const savedAgentFlow = sessionStorage.getItem(AGENT_FLOW_STORAGE_KEY);
       const savedTokenExchanges = sessionStorage.getItem(TOKEN_EXCHANGE_STORAGE_KEY);
       const savedFGAChecks = sessionStorage.getItem(FGA_CHECKS_STORAGE_KEY);
+      const savedAuthorizationDecisions = sessionStorage.getItem(AUTHORIZATION_DECISIONS_STORAGE_KEY);
 
       if (savedMessages) {
         setChatMessages(JSON.parse(savedMessages));
@@ -129,6 +133,9 @@ export default function Home() {
       }
       if (savedFGAChecks) {
         setCurrentFGAChecks(JSON.parse(savedFGAChecks));
+      }
+      if (savedAuthorizationDecisions) {
+        setCurrentAuthorizationDecisions(JSON.parse(savedAuthorizationDecisions));
       }
       const savedPendingApproval = sessionStorage.getItem(PENDING_APPROVAL_STORAGE_KEY);
       if (savedPendingApproval) {
@@ -161,12 +168,15 @@ export default function Home() {
     if (currentFGAChecks.length > 0) {
       sessionStorage.setItem(FGA_CHECKS_STORAGE_KEY, JSON.stringify(currentFGAChecks));
     }
+    if (currentAuthorizationDecisions.length > 0) {
+      sessionStorage.setItem(AUTHORIZATION_DECISIONS_STORAGE_KEY, JSON.stringify(currentAuthorizationDecisions));
+    }
     if (pendingApproval) {
       sessionStorage.setItem(PENDING_APPROVAL_STORAGE_KEY, JSON.stringify(pendingApproval));
     } else {
       sessionStorage.removeItem(PENDING_APPROVAL_STORAGE_KEY);
     }
-  }, [currentAgentFlow, currentTokenExchanges, currentFGAChecks, pendingApproval]);
+  }, [currentAgentFlow, currentTokenExchanges, currentFGAChecks, currentAuthorizationDecisions, pendingApproval]);
 
   // Debug hook: ?mockApprovalId= populates the ApprovalStatusCard for manual UI testing
   useEffect(() => {
@@ -206,6 +216,7 @@ export default function Home() {
     setCurrentAgentFlow([]);
     setCurrentTokenExchanges([]);
     setCurrentFGAChecks([]);
+    setCurrentAuthorizationDecisions([]);
     setPendingApproval(null);
     setMessage('');
     // Clear session storage
@@ -213,6 +224,7 @@ export default function Home() {
     sessionStorage.removeItem(AGENT_FLOW_STORAGE_KEY);
     sessionStorage.removeItem(TOKEN_EXCHANGE_STORAGE_KEY);
     sessionStorage.removeItem(FGA_CHECKS_STORAGE_KEY);
+    sessionStorage.removeItem(AUTHORIZATION_DECISIONS_STORAGE_KEY);
     sessionStorage.removeItem(PENDING_APPROVAL_STORAGE_KEY);
     sessionStorage.removeItem(APPROVAL_ANNOUNCED_STORAGE_KEY);
   };
@@ -308,6 +320,7 @@ export default function Home() {
     sessionStorage.removeItem(AGENT_FLOW_STORAGE_KEY);
     sessionStorage.removeItem(TOKEN_EXCHANGE_STORAGE_KEY);
     sessionStorage.removeItem(FGA_CHECKS_STORAGE_KEY);
+    sessionStorage.removeItem(AUTHORIZATION_DECISIONS_STORAGE_KEY);
     sessionStorage.removeItem(PENDING_APPROVAL_STORAGE_KEY);
 
     // End Okta session using OIDC logout endpoint
@@ -342,6 +355,7 @@ export default function Home() {
     setCurrentAgentFlow([{ step: 'router', action: 'Processing request...', status: 'processing' }]);
     setCurrentTokenExchanges([]);
     setCurrentFGAChecks([]);
+    setCurrentAuthorizationDecisions([]);
 
     try {
       const idToken = session?.idToken;
@@ -373,6 +387,7 @@ export default function Home() {
       setCurrentAgentFlow(data.agent_flow || []);
       setCurrentTokenExchanges(data.token_exchanges || []);
       setCurrentFGAChecks(data.fga_checks || []);
+      setCurrentAuthorizationDecisions(data.authorization_decisions || []);
       if (data.pending_approval) {
         setPendingApproval(data.pending_approval);
       }
@@ -394,6 +409,7 @@ export default function Home() {
         agentFlow: data.agent_flow,
         tokenExchanges: data.token_exchanges,
         fgaChecks: data.fga_checks,
+        authorizationDecisions: data.authorization_decisions,
       };
       setChatMessages((prev) => [...prev, assistantMessage]);
 

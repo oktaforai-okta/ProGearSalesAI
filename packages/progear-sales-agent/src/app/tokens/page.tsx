@@ -10,6 +10,7 @@ import { ThemeSelector } from '@/components/ThemeProvider';
 
 const AGENT_FLOW_STORAGE_KEY = 'progear-agent-flow';
 const TOKEN_EXCHANGE_STORAGE_KEY = 'progear-token-exchanges';
+const AUTHORIZATION_DECISIONS_STORAGE_KEY = 'progear-authorization-decisions';
 const PENDING_APPROVAL_STORAGE_KEY = 'progear-pending-approval';
 
 // Reads the exact same sessionStorage the chat page (/) already writes on
@@ -18,6 +19,7 @@ export default function TokensPage() {
   const { data: session } = useSession();
   const [agentFlow, setAgentFlow] = useState<any[]>([]);
   const [tokenExchanges, setTokenExchanges] = useState<any[]>([]);
+  const [authorizationDecisions, setAuthorizationDecisions] = useState<any[]>([]);
   const [pendingApproval, setPendingApproval] = useState<ApprovalStatus | null>(null);
 
   const loadFromStorage = () => {
@@ -25,9 +27,11 @@ export default function TokensPage() {
       const flow = sessionStorage.getItem(AGENT_FLOW_STORAGE_KEY);
       const exchanges = sessionStorage.getItem(TOKEN_EXCHANGE_STORAGE_KEY);
       const approval = sessionStorage.getItem(PENDING_APPROVAL_STORAGE_KEY);
+      const decisions = sessionStorage.getItem(AUTHORIZATION_DECISIONS_STORAGE_KEY);
       if (flow) setAgentFlow(JSON.parse(flow));
       if (exchanges) setTokenExchanges(JSON.parse(exchanges));
       if (approval) setPendingApproval(JSON.parse(approval));
+      if (decisions) setAuthorizationDecisions(JSON.parse(decisions));
     } catch (e) {
       console.error('Error loading token data:', e);
     }
@@ -66,6 +70,7 @@ export default function TokensPage() {
       <div className="max-w-4xl mx-auto p-6 space-y-4">
         <RawTokensCard
           exchanges={tokenExchanges}
+          decisions={authorizationDecisions}
           idTokenRaw={session?.idToken}
         />
 
