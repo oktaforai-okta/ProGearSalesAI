@@ -776,7 +776,7 @@ Routing this through Okta Identity Governance, rather than a bespoke approval bo
 
 **Audit Trail:** 1 success, 3 denials - all logged with Mike Manager as the user.
 
-**Note on the `inventory:write` grant above:** token issuance is necessary, not sufficient. Inventory validates the token and FGA still applies Mike's Level 1 role plus the requested quantity. He can execute 1–600; 601+ creates a Level 2 VP request. See [Layer Two](#layer-two-fine-grained-authorization-with-auth0-fga) and [Layer Three](#layer-three-human-approval-for-high-risk-actions-okta-identity-governance) above.
+**Note on the `inventory:write` grant above:** token issuance is necessary, not sufficient. Inventory validates the token and FGA still applies Mike's Level 1 role plus the requested quantity. He can execute 1–600; 601+ creates a Level 2 VP request. See [Layer Two](#layer-two-fine-grained-authorization) and [Layer Three](#layer-three-human-approval-for-high-risk-actions-okta-identity-governance) above.
 
 ---
 
