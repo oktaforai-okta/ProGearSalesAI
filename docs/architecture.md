@@ -109,6 +109,8 @@ The model name comes from `LLM_MODEL_NAME` (default `claude-sonnet-4-6`); the ke
 
 Okta authenticates the human and agent, grants a coarse inventory scope, and signs the user's live `Clearance` and `Vacation` values into the inventory access token. Auth0 FGA, implemented in `backend/auth/fga_client.py`, answers the next question: "given this role, quantity, and current context, may this request execute directly?" It is a separate authorization call against the hosted FGA store.
 
+The presentation UI makes this advanced path opt-in. With **Simulate FGA** off, `POST /api/chat` uses the same signed role/context and the same direct-execution boundary, but denies any request that needs a higher role instead of calling FGA or creating an OIG request. With it on, the request includes `simulate_fga: true`, enabling the hosted decision and approval route. Because simple mode is deny-only for upward routing, this browser preference cannot weaken authorization.
+
 ### The model
 
 `clearance_level` now means role, not item sensitivity: 1 = Sales, 2 = Manager, 3 = VP. The version-controlled FGA model is `backend/auth/fga_role_model.json`:

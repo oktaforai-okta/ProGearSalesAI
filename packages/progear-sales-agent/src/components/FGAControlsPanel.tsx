@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
-import { BadgeCheck, Loader2, Palmtree, RotateCcw, ShieldAlert } from 'lucide-react';
+import { BadgeCheck, Loader2, Palmtree, PauseCircle, PlayCircle, RotateCcw, ShieldAlert } from 'lucide-react';
 import { API_BASE_URL } from '@/lib/config';
+import { useFGASimulation } from '@/hooks/useFGASimulation';
 
 interface Props {
   onApplied?: () => void;
@@ -22,6 +23,7 @@ const ROLES = [
 
 export default function FGAControlsPanel({ onApplied }: Props) {
   const { data: session } = useSession();
+  const { isEnabled, setIsEnabled } = useFGASimulation();
   const [status, setStatus] = useState<DemoStatus | null>(null);
   const [roleLevel, setRoleLevel] = useState(1);
   const [busy, setBusy] = useState<string | null>(null);
@@ -29,7 +31,7 @@ export default function FGAControlsPanel({ onApplied }: Props) {
   const idToken = session?.idToken;
 
   const loadStatus = useCallback(async () => {
-    if (!idToken) return;
+    if (!idToken || !isEnabled) return;
     try {
       const response = await fetch(`${API_BASE_URL}/api/admin/demo-status`, {
         headers: { Authorization: `Bearer ${idToken}` },
@@ -41,11 +43,16 @@ export default function FGAControlsPanel({ onApplied }: Props) {
     } catch {
       // The controls remain usable after the next successful status refresh.
     }
-  }, [idToken]);
+  }, [idToken, isEnabled]);
 
   useEffect(() => {
-    void loadStatus();
-  }, [loadStatus]);
+    if (isEnabled) {
+      void loadStatus();
+    } else {
+      setStatus(null);
+      setLastResult(null);
+    }
+  }, [isEnabled, loadStatus]);
 
   async function callToggle(attribute: 'is_on_vacation' | 'clearance_level', value: boolean | number) {
     if (!idToken) return;
@@ -100,11 +107,11 @@ export default function FGAControlsPanel({ onApplied }: Props) {
         ? 'rounded-lg border-2 border-orange-500 bg-orange-500 px-3 py-1.5 text-xs font-semibold text-white shadow-sm disabled:opacity-50'
         : 'rounded-lg border-2 border-emerald-600 bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm disabled:opacity-50';
     }
-    return 'rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-50 disabled:opacity-50';
+    return 'rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700';
   };
 
   return (
-    <section className="overflow-hidden rounded-xl border-2 border-purple-200 bg-white shadow-sm">
+    <section className="overflow-hidden rounded-xl border-2 border-purple-200 bg-white shadow-sm dark:border-purple-900 dark:bg-slate-900">
       <div className="bg-gradient-to-r from-purple-600 to-indigo-600 px-4 py-3">
         <h2 className="flex items-center gap-2 font-semibold text-white">
           <ShieldAlert className="h-5 w-5" />
@@ -116,12 +123,47 @@ export default function FGAControlsPanel({ onApplied }: Props) {
       </div>
 
       <div className="space-y-5 p-4">
+        <div className="rounded-xl border border-purple-200 bg-purple-50/70 p-4 dark:border-purple-800 dark:bg-purple-950/30">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
+                {isEnabled ? <PauseCircle className="h-5 w-5 text-purple-600 dark:text-purple-300" /> : <PlayCircle className="h-5 w-5 text-purple-600 dark:text-purple-300" />}
+                Simulate FGA
+                <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                  isEnabled
+                    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
+                    : 'bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
+                }`}>
+                  {isEnabled ? 'On' : 'Off by default'}
+                </span>
+              </div>
+              <p className="mt-1 max-w-xl text-xs leading-relaxed text-slate-600 dark:text-slate-300">
+                Turn this on only for the advanced role, vacation, threshold, and approval demo. It also reveals the guided FGA prompts on the chat page.
+              </p>
+            </div>
+            <button
+              type="button"
+              aria-pressed={isEnabled}
+              onClick={() => setIsEnabled(!isEnabled)}
+              className={`shrink-0 rounded-lg px-4 py-2 text-sm font-semibold transition ${
+                isEnabled
+                  ? 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700'
+                  : 'bg-purple-600 text-white shadow-sm hover:bg-purple-700'
+              }`}
+            >
+              {isEnabled ? 'Stop simulation' : 'Simulate FGA'}
+            </button>
+          </div>
+        </div>
+
+        {isEnabled ? (
+          <>
         <div>
-          <div className="mb-2 flex items-center gap-2 text-sm font-medium text-gray-800">
+          <div className="mb-2 flex items-center gap-2 text-sm font-medium text-gray-800 dark:text-slate-100">
             <BadgeCheck className="h-4 w-4 text-blue-600" />
             Role level
             {status ? (
-              <span className="text-xs font-normal text-gray-500">
+              <span className="text-xs font-normal text-gray-500 dark:text-slate-400">
                 Current: {status.clearance_level} — {ROLES[status.clearance_level - 1]?.name}
               </span>
             ) : null}
@@ -138,14 +180,14 @@ export default function FGAControlsPanel({ onApplied }: Props) {
                   disabled={busy !== null}
                   className={`rounded-lg border-2 p-3 text-left transition disabled:opacity-50 ${
                     active
-                      ? 'border-blue-500 bg-blue-50 shadow-sm'
-                      : 'border-gray-200 bg-white hover:border-blue-200 hover:bg-gray-50'
+                      ? 'border-blue-500 bg-blue-50 shadow-sm dark:bg-blue-950/40'
+                      : 'border-gray-200 bg-white hover:border-blue-200 hover:bg-gray-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-blue-700 dark:hover:bg-slate-800'
                   }`}
                 >
-                  <div className="text-sm font-semibold text-gray-900">
+                  <div className="text-sm font-semibold text-gray-900 dark:text-white">
                     {role.level} — {role.name}
                   </div>
-                  <div className="mt-1 text-[11px] leading-relaxed text-gray-600">{role.summary}</div>
+                  <div className="mt-1 text-[11px] leading-relaxed text-gray-600 dark:text-slate-300">{role.summary}</div>
                 </button>
               );
             })}
@@ -154,20 +196,20 @@ export default function FGAControlsPanel({ onApplied }: Props) {
             type="button"
             onClick={() => callToggle('clearance_level', roleLevel)}
             disabled={busy !== null || status?.clearance_level === roleLevel}
-            className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-blue-300 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+            className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-blue-300 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-300 dark:hover:bg-blue-900/60"
           >
             {busy === 'clearance_level' ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
             Apply role level
           </button>
         </div>
 
-        <div className="flex items-center justify-between border-t border-gray-100 pt-4">
+        <div className="flex items-center justify-between border-t border-gray-100 pt-4 dark:border-slate-800">
           <div>
-            <div className="flex items-center gap-2 text-sm font-medium text-gray-800">
+            <div className="flex items-center gap-2 text-sm font-medium text-gray-800 dark:text-slate-100">
               <Palmtree className="h-4 w-4 text-orange-500" />
               On vacation
             </div>
-            <p className="mt-1 text-[11px] text-gray-500">False is the default. True blocks inventory writes.</p>
+            <p className="mt-1 text-[11px] text-gray-500 dark:text-slate-400">False is the default. True blocks inventory writes.</p>
           </div>
           <div className="flex gap-2">
             <button
@@ -195,7 +237,7 @@ export default function FGAControlsPanel({ onApplied }: Props) {
           type="button"
           onClick={callReset}
           disabled={busy !== null}
-          className="flex w-full items-center justify-center gap-2 rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50"
+          className="flex w-full items-center justify-center gap-2 rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
         >
           {busy === 'reset' ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
           Reset my demo attributes
@@ -213,6 +255,12 @@ export default function FGAControlsPanel({ onApplied }: Props) {
             {lastResult}
           </div>
         ) : null}
+          </>
+        ) : (
+          <p className="rounded-lg border border-dashed border-slate-300 px-4 py-3 text-center text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
+            Role and vacation controls are hidden until you choose <strong>Simulate FGA</strong>.
+          </p>
+        )}
       </div>
     </section>
   );

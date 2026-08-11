@@ -6,6 +6,7 @@ import { useSession } from 'next-auth/react';
 import { ArrowLeft } from 'lucide-react';
 import RawTokensCard from '@/components/RawTokensCard';
 import ApprovalStatusCard, { type ApprovalStatus } from '@/components/ApprovalStatusCard';
+import { ThemeSelector } from '@/components/ThemeProvider';
 
 const AGENT_FLOW_STORAGE_KEY = 'progear-agent-flow';
 const TOKEN_EXCHANGE_STORAGE_KEY = 'progear-token-exchanges';
@@ -42,7 +43,7 @@ export default function TokensPage() {
   }, []);
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-gray-50 to-white">
+    <main className="min-h-screen bg-gradient-to-b from-gray-50 to-white dark:from-neutral-bg dark:to-primary">
       <header className="bg-gradient-to-r from-primary via-court-brown to-primary-light border-b-4 border-accent shadow-lg">
         <div className="px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
@@ -58,6 +59,7 @@ export default function TokensPage() {
               <p className="text-gray-300 text-xs">Agent flow and the raw token exchange chain</p>
             </div>
           </div>
+          <ThemeSelector />
         </div>
       </header>
 

@@ -18,25 +18,24 @@ type DiagramNode = {
 type DiagramLink = {
   source: [number, number];
   target: [number, number];
-  label: string;
   color: string;
 };
 
 const NODES: DiagramNode[] = [
-  { id: 'okta', x: 24, y: 80, width: 160, height: 76, title: 'Okta profile', detail: 'Role level + vacation', color: '#2563eb' },
-  { id: 'token', x: 244, y: 80, width: 160, height: 76, title: 'Access token', detail: 'Signed live claims', color: '#0284c7' },
-  { id: 'fga', x: 464, y: 58, width: 184, height: 120, title: 'Auth0 FGA', detail: 'Role + quantity + context', color: '#7c3aed' },
-  { id: 'allow', x: 712, y: 20, width: 164, height: 68, title: 'Execute', detail: 'Role meets the tier', color: '#059669' },
-  { id: 'approve', x: 712, y: 126, width: 164, height: 68, title: 'Request approval', detail: 'Manager or VP', color: '#d97706' },
-  { id: 'deny', x: 464, y: 236, width: 184, height: 58, title: 'Vacation = True', detail: 'Block every write', color: '#dc2626' },
+  { id: 'okta', x: 28, y: 126, width: 170, height: 78, title: 'Okta identity', detail: 'Role + vacation', color: '#2563eb' },
+  { id: 'token', x: 255, y: 126, width: 170, height: 78, title: 'Inventory token', detail: 'Signed live claims', color: '#0284c7' },
+  { id: 'fga', x: 492, y: 105, width: 195, height: 120, title: 'Auth0 FGA', detail: 'Role + action + quantity', color: '#7c3aed' },
+  { id: 'allow', x: 772, y: 30, width: 178, height: 70, title: 'Execute', detail: 'Role is high enough', color: '#059669' },
+  { id: 'approve', x: 772, y: 137, width: 178, height: 70, title: 'Ask for approval', detail: 'Manager or VP', color: '#d97706' },
+  { id: 'deny', x: 772, y: 244, width: 178, height: 70, title: 'Block the write', detail: 'Vacation is True', color: '#dc2626' },
 ];
 
 const LINKS: DiagramLink[] = [
-  { source: [184, 118], target: [244, 118], label: 'profile values', color: '#94a3b8' },
-  { source: [404, 118], target: [464, 118], label: 'contextual tuples', color: '#94a3b8' },
-  { source: [648, 96], target: [712, 54], label: 'allowed', color: '#059669' },
-  { source: [648, 140], target: [712, 160], label: 'needs higher role', color: '#d97706' },
-  { source: [556, 236], target: [556, 178], label: 'write blocker', color: '#dc2626' },
+  { source: [198, 165], target: [255, 165], color: '#94a3b8' },
+  { source: [425, 165], target: [492, 165], color: '#94a3b8' },
+  { source: [687, 133], target: [772, 65], color: '#059669' },
+  { source: [687, 165], target: [772, 172], color: '#d97706' },
+  { source: [687, 197], target: [772, 279], color: '#dc2626' },
 ];
 
 export default function FGAArchitectureDiagram() {
@@ -65,16 +64,6 @@ export default function FGAArchitectureDiagram() {
       .attr('stroke-width', 2.5)
       .attr('stroke-linecap', 'round');
 
-    links
-      .append('text')
-      .attr('x', (link) => (link.source[0] + link.target[0]) / 2)
-      .attr('y', (link) => (link.source[1] + link.target[1]) / 2 - 8)
-      .attr('text-anchor', 'middle')
-      .attr('fill', (link) => link.color)
-      .attr('font-size', 10)
-      .attr('font-weight', 600)
-      .text((link) => link.label);
-
     const nodes = layer
       .append('g')
       .selectAll('g')
@@ -102,7 +91,7 @@ export default function FGAArchitectureDiagram() {
       .append('text')
       .attr('x', 38)
       .attr('y', 29)
-      .attr('fill', '#172033')
+      .attr('class', 'fill-slate-900 dark:fill-slate-100')
       .attr('font-size', 14)
       .attr('font-weight', 700)
       .text((node) => node.title);
@@ -111,17 +100,17 @@ export default function FGAArchitectureDiagram() {
       .append('text')
       .attr('x', 18)
       .attr('y', 52)
-      .attr('fill', '#64748b')
+      .attr('class', 'fill-slate-500 dark:fill-slate-300')
       .attr('font-size', 11)
       .text((node) => node.detail);
   }, []);
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-slate-200 bg-slate-50 p-2">
+    <div className="overflow-x-auto rounded-xl border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-950/60">
       <svg
         ref={svgRef}
-        viewBox="0 0 900 310"
-        className="min-w-[720px] w-full"
+        viewBox="0 0 980 344"
+        className="w-full min-w-[760px]"
         role="img"
         aria-label="Okta sends the user's role and vacation status to Auth0 FGA. FGA either executes the inventory action, creates the required Manager or VP approval, or blocks a write while the user is on vacation."
       />

@@ -53,6 +53,28 @@ class InventoryPolicyDecision:
     def approval_required(self) -> bool:
         return self.approval_level is not None
 
+    @property
+    def direct_allowed(self) -> bool:
+        """Whether the signed role/context can execute without FGA/OIG routing."""
+        return self.hard_denial_reason is None and not self.approval_required
+
+
+def simple_authorization_message(decision: InventoryPolicyDecision) -> str | None:
+    """Return the simple-mode denial, or None when direct execution is safe."""
+    if decision.direct_allowed:
+        return None
+    if decision.hard_denial_reason:
+        return f"I didn’t change the inventory. {decision.hard_denial_reason}"
+    if decision.required_level == 2:
+        return (
+            "I can’t increase inventory with your current permissions. "
+            "Please contact your manager for assistance."
+        )
+    return (
+        "I didn’t change the inventory. This quantity requires VP permission. "
+        "Please contact a VP for assistance."
+    )
+
 
 def decide_inventory_policy(
     scopes: list[str],

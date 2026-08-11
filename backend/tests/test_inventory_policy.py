@@ -11,6 +11,7 @@ class InventoryPolicyTests(unittest.TestCase):
         self.assertEqual(decision.relation, "can_read")
         self.assertFalse(decision.approval_required)
         self.assertIsNone(decision.hard_denial_reason)
+        self.assertTrue(decision.direct_allowed)
 
     def test_sales_standard_write_routes_to_manager(self):
         decision = decide_inventory_policy(
@@ -19,6 +20,7 @@ class InventoryPolicyTests(unittest.TestCase):
         self.assertEqual(decision.relation, "can_update_standard")
         self.assertEqual(decision.approval_role, "Manager")
         self.assertEqual(decision.approval_level, 2)
+        self.assertFalse(decision.direct_allowed)
 
     def test_manager_standard_write_is_direct(self):
         decision = decide_inventory_policy(
@@ -26,6 +28,7 @@ class InventoryPolicyTests(unittest.TestCase):
         )
         self.assertEqual(decision.relation, "can_update_standard")
         self.assertFalse(decision.approval_required)
+        self.assertTrue(decision.direct_allowed)
 
     def test_manager_601_write_routes_to_vp(self):
         decision = decide_inventory_policy(
@@ -34,6 +37,7 @@ class InventoryPolicyTests(unittest.TestCase):
         self.assertEqual(decision.relation, "can_update_large")
         self.assertEqual(decision.approval_role, "VP")
         self.assertEqual(decision.approval_level, 3)
+        self.assertFalse(decision.direct_allowed)
 
     def test_sales_large_write_routes_directly_to_vp(self):
         decision = decide_inventory_policy(
@@ -47,6 +51,7 @@ class InventoryPolicyTests(unittest.TestCase):
         )
         self.assertFalse(decision.approval_required)
         self.assertIsNone(decision.hard_denial_reason)
+        self.assertTrue(decision.direct_allowed)
 
     def test_vacation_is_hard_denial_not_approval(self):
         decision = decide_inventory_policy(
@@ -54,6 +59,7 @@ class InventoryPolicyTests(unittest.TestCase):
         )
         self.assertFalse(decision.approval_required)
         self.assertIn("vacation", decision.hard_denial_reason or "")
+        self.assertFalse(decision.direct_allowed)
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 import FGAExplanationCard from '@/components/FGAExplanationCard';
 import FGAControlsPanel from '@/components/FGAControlsPanel';
+import { ThemeSelector } from '@/components/ThemeProvider';
 
 const FGA_CHECKS_STORAGE_KEY = 'progear-fga-checks';
 
@@ -30,7 +31,7 @@ export default function FGAPage() {
   }, []);
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-gray-50 to-white">
+    <main className="min-h-screen bg-gradient-to-b from-gray-50 to-white dark:from-neutral-bg dark:to-primary">
       <header className="bg-gradient-to-r from-primary via-court-brown to-primary-light border-b-4 border-accent shadow-lg">
         <div className="px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
@@ -46,6 +47,7 @@ export default function FGAPage() {
               <p className="text-gray-300 text-xs">Role levels, live context, and approval routing</p>
             </div>
           </div>
+          <ThemeSelector />
         </div>
       </header>
 
@@ -55,7 +57,7 @@ export default function FGAPage() {
         <FGAExplanationCard checks={fgaChecks} />
 
         {fgaChecks.length === 0 && (
-          <div className="text-center py-12 text-gray-400">
+          <div className="py-12 text-center text-gray-400 dark:text-slate-500">
             <p className="text-sm">
               No FGA checks yet. Send a message on the{' '}
               <Link href="/" className="text-okta-blue underline">

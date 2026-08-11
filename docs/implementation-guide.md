@@ -436,7 +436,7 @@ For Inventory, `clearance_level` is the single role source of truth:
 
 1. Add a user-profile property named `clearance_level` and label it **ProGear role level**. Its description should state `1 = Sales, 2 = Manager, 3 = VP`.
 2. Add the Boolean profile property `is_on_vacation` if it does not already exist. Use false as the normal demo default.
-3. Set Sarah to Level 1 and Mike to Level 2.
+3. Set Sarah to Level 1, Mike to Level 2, and the VP demo persona (Joe) to Level 3.
 4. Create `ProGear-Managers` with a group rule matching Level 2 or 3.
 5. Create `ProGear-VPs` with a group rule matching Level 3.
 
@@ -1205,7 +1205,7 @@ Four key scenarios demonstrate resource RBAC and the three-tier Inventory story:
 
 ### Scenario 3: Inventory authorization and approval tiers
 
-Use the preset prompts in this order:
+Open `/fga` and select **Simulate FGA** first. The application intentionally starts in simple chat mode, so the advanced controls and preset prompts remain hidden until the presenter opts in. Then use the preset prompts in this order:
 
 1. `How many basketballs are in stock?`
 2. `Add 50 basketballs to inventory`

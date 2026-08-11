@@ -3,11 +3,12 @@
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 import D3ArchitectureDiagram from '@/components/D3ArchitectureDiagram';
+import { ThemeSelector } from '@/components/ThemeProvider';
 
 export default function ArchitecturePage() {
   return (
-    <main className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
-      <header className="bg-black/30 backdrop-blur-md border-b border-white/10">
+    <main className="min-h-screen bg-gradient-to-br from-slate-100 via-purple-50 to-white dark:from-slate-900 dark:via-purple-900 dark:to-slate-900">
+      <header className="border-b border-white/10 bg-primary/95 backdrop-blur-md dark:bg-black/30">
         <div className="px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <Link
@@ -24,6 +25,7 @@ export default function ArchitecturePage() {
               </p>
             </div>
           </div>
+          <ThemeSelector />
         </div>
       </header>
 

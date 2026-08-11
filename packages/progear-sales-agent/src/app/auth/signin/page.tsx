@@ -3,6 +3,7 @@
 import { signIn } from 'next-auth/react';
 import { useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
+import { ThemeSelector } from '@/components/ThemeProvider';
 
 function SignInContent() {
   const searchParams = useSearchParams();
@@ -14,7 +15,10 @@ function SignInContent() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary via-primary-light to-court-brown relative overflow-hidden">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-gradient-to-br from-slate-100 via-orange-50 to-amber-100 dark:from-primary dark:via-primary-light dark:to-court-brown">
+      <div className="absolute right-4 top-4 z-20">
+        <ThemeSelector />
+      </div>
       {/* Basketball Court Pattern Background */}
       <div className="absolute inset-0 opacity-5">
         <svg className="w-full h-full" viewBox="0 0 400 400" preserveAspectRatio="xMidYMid slice">

@@ -31,7 +31,7 @@ from auth.multi_agent_auth import (
 )
 from auth.agent_config import get_agent_config, DEMO_AGENTS
 from auth.fga_client import check_agent_access, is_fga_configured, FGACheckResult
-from auth.inventory_policy import decide_inventory_policy, role_name
+from auth.inventory_policy import decide_inventory_policy, role_name, simple_authorization_message
 
 # Import agent classes
 from agents import SalesAgent, InventoryAgent, PricingAgent, CustomerAgent
@@ -59,6 +59,7 @@ class WorkflowState(TypedDict):
 
     # FGA (Fine-Grained Authorization) checks
     fga_checks: List[Dict[str, Any]]
+    simulate_fga: bool
 
     # Final response
     final_response: Optional[str]
@@ -359,6 +360,9 @@ Return ONLY the JSON object, no other text."""
         if not user_email or not agents:
             return state
 
+        if not state.get("simulate_fga", False):
+            return await self._simple_authorization_node(state)
+
         state["agent_flow"].append({
             "step": "fga_check",
             "action": "Checking fine-grained permissions (Auth0 FGA API)",
@@ -567,6 +571,111 @@ Return ONLY the JSON object, no other text."""
 
         return state
 
+    async def _simple_authorization_node(self, state: WorkflowState) -> WorkflowState:
+        """Apply the safe Sarah/Mike policy without calling FGA or OIG.
+
+        Simple mode is intentionally at least as restrictive as FGA mode:
+        a role that cannot execute directly is denied instead of being routed
+        to approval. The decision still comes from Okta-signed role/context
+        claims, so a browser flag can never grant extra write permission.
+        """
+        agents = state["agents_to_invoke"]
+        agent_results = state.get("agent_results", {})
+        is_on_vacation = False
+        clearance_level = 0
+
+        inventory_result = agent_results.get(AGENT_INVENTORY, {})
+        if inventory_result.get("success") and inventory_result.get("access_token"):
+            try:
+                from jose import jwt as jose_jwt
+                claims = jose_jwt.get_unverified_claims(inventory_result["access_token"])
+                vacation_claim = claims.get("Vacation", claims.get("is_on_vacation"))
+                if vacation_claim is not None:
+                    is_on_vacation = (
+                        vacation_claim.lower() == "true"
+                        if isinstance(vacation_claim, str)
+                        else bool(vacation_claim)
+                    )
+                clearance_claim = claims.get("Clearance", claims.get("clearance_level"))
+                if clearance_claim is not None:
+                    clearance_level = int(clearance_claim)
+            except (TypeError, ValueError) as exc:
+                logger.warning("Invalid simple-mode inventory claims: %s", exc)
+            except Exception as exc:
+                logger.warning("Could not read simple-mode inventory claims: %s", exc)
+
+        if not is_on_vacation:
+            is_on_vacation = self.user_info.get(
+                "is_on_vacation",
+                self.user_info.get("Vacation", False),
+            )
+        if clearance_level == 0:
+            try:
+                clearance_level = int(
+                    self.user_info.get(
+                        "clearance_level",
+                        self.user_info.get("Clearance", 0),
+                    )
+                )
+            except (TypeError, ValueError):
+                clearance_level = 0
+
+        state["agent_flow"].append({
+            "step": "simple_authorization",
+            "action": "Applying the simple Okta role policy (FGA simulation is off)",
+            "status": "processing",
+        })
+
+        allowed_agents = []
+        denied_count = 0
+        for agent_type in agents:
+            result = agent_results.get(agent_type, {})
+            if not result.get("success") or result.get("access_denied"):
+                continue
+            if agent_type != AGENT_INVENTORY:
+                allowed_agents.append(agent_type)
+                continue
+
+            scopes = state["agent_scopes"].get(agent_type, [])
+            policy = decide_inventory_policy(
+                scopes,
+                state["user_message"],
+                clearance_level,
+                is_on_vacation,
+            )
+            if policy.direct_allowed:
+                allowed_agents.append(agent_type)
+                continue
+
+            denied_count += 1
+            message = simple_authorization_message(policy)
+            if message is None:
+                # direct_allowed above makes this unreachable; keep the guard
+                # so a future policy change cannot accidentally grant access.
+                message = "I can’t complete that request with your current permissions."
+            result["success"] = False
+            result["access_denied"] = True
+            result["authorization_reason"] = message
+            result["requested_scopes"] = scopes
+
+        state["agents_to_invoke"] = allowed_agents
+        state["agent_results"] = agent_results
+        state["fga_checks"] = []
+        state["agent_flow"].append({
+            "step": "simple_authorization",
+            "action": (
+                f"Simple role policy: {len(allowed_agents)} direct, "
+                f"{denied_count} denied, no approval requests"
+            ),
+            "status": "completed",
+            "details": {
+                "role_level": clearance_level,
+                "role_name": role_name(clearance_level),
+                "vacation_status": is_on_vacation,
+            },
+        })
+        return state
+
     async def _approval_gate_node(self, state: WorkflowState) -> WorkflowState:
         """Create the Manager or VP OIG request selected by the FGA policy.
 
@@ -575,6 +684,14 @@ Return ONLY the JSON object, no other text."""
         never turn into approval requests.
         """
         from services.intent import parse_inventory_intent  # local import — same style as existing backend modules
+
+        if not state.get("simulate_fga", False):
+            state["agent_flow"].append({
+                "step": "approval_gate",
+                "action": "FGA simulation is off; no approval request is created",
+                "status": "skipped",
+            })
+            return state
 
         agent_scopes = state.get("agent_scopes", {}) or {}
         inv_scopes = agent_scopes.get(AGENT_INVENTORY, []) or []
@@ -1091,16 +1208,24 @@ Return ONLY the JSON object, no other text."""
         )
         inventory_policy = inventory_fga.get("policy") or {}
         hard_denial = inventory_policy.get("hard_denial_reason")
-        permission_message = (
-            f"I didn’t change the inventory. {hard_denial}"
-            if inventory_write_denied and hard_denial
-            else (
+        simple_denial_message = (
+            agent_results.get(AGENT_INVENTORY, {}).get("authorization_reason")
+        )
+        if (
+            inventory_write_denied
+            and not state.get("simulate_fga", False)
+            and simple_denial_message
+        ):
+            permission_message = simple_denial_message
+        elif inventory_write_denied and hard_denial:
+            permission_message = f"I didn’t change the inventory. {hard_denial}"
+        elif inventory_write_denied:
+            permission_message = (
                 "I didn’t change the inventory because the live FGA check denied direct execution. "
                 "Review the role level and vacation setting on the FGA page."
-                if inventory_write_denied
-                else "I can’t complete that request with your current permissions."
             )
-        )
+        else:
+            permission_message = "I can’t complete that request with your current permissions."
 
         # Generate combined response
         if responses:
@@ -1167,7 +1292,7 @@ internal agents, MCP servers, policy names, or permission errors; permission gui
 
         return state
 
-    async def process(self, message: str) -> Dict[str, Any]:
+    async def process(self, message: str, simulate_fga: bool = False) -> Dict[str, Any]:
         """
         Process a user message through the orchestrator.
 
@@ -1192,6 +1317,7 @@ internal agents, MCP servers, policy names, or permission errors; permission gui
             "agent_flow": [],
             "token_exchanges": [],
             "fga_checks": [],  # FGA fine-grained authorization checks
+            "simulate_fga": simulate_fga,
             "final_response": None,
             "pending_approval": None,
             "parsed_intent": None,

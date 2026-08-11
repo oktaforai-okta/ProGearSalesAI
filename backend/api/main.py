@@ -167,6 +167,10 @@ class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
     history: Optional[List[ChatMessage]] = []
+    # False is the deliberately simple Sarah/Mike experience. True enables
+    # hosted FGA checks and OIG approval routing; it never weakens a direct
+    # role requirement because simple mode denies instead of routing upward.
+    simulate_fga: bool = False
 
 
 class AgentInfo(BaseModel):
@@ -322,7 +326,10 @@ async def chat(
             user_info=user_info,
             approval_service=_get_approval_service(),
         )
-        result = await orchestrator.process(request.message)
+        result = await orchestrator.process(
+            request.message,
+            simulate_fga=request.simulate_fga,
+        )
 
         return ChatResponse(
             content=result["content"],

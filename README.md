@@ -26,7 +26,9 @@ Pages in the running app:
 | `/` | The chat UI ("CourtEdge ProGear"), talk to the sales assistant |
 | `/tokens` | Raw token exchanges, FGA checks, and pending approvals as they happen |
 | `/architecture` | Interactive D3.js diagrams and a sequence walkthrough of the read, Manager-approval, vacation-block, and VP-approval stories |
-| `/fga` | Live Okta role controls and a simple D3 view of the FGA decision |
+| `/fga` | Opt-in live Okta role controls and a simple D3 view of the FGA decision |
+
+The application starts in simple chat mode. **Simulate FGA** is off by default; enabling it on `/fga` reveals the live role/vacation controls and guided inventory prompts, and opts chat requests into hosted FGA checks plus OIG approval routing. Simple mode still enforces the Okta-signed role and context, but denies requests that need a higher role instead of creating approval requests. It is never a bypass. Color preferences are independent: Light is the first-visit default, with Dark and System available from the persistent theme control.
 
 ## What This Demo Shows
 

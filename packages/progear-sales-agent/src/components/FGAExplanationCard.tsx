@@ -47,31 +47,31 @@ export default function FGAExplanationCard({ checks, isLoading = false }: Props)
 
   let resultLabel = 'No inventory check yet';
   let ResultIcon = Clock3;
-  let resultClass = 'border-slate-200 bg-slate-50 text-slate-700';
+  let resultClass = 'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200';
   if (latest) {
     if (policy?.hard_denial_reason) {
       resultLabel = policy.hard_denial_reason;
       ResultIcon = XCircle;
-      resultClass = 'border-red-200 bg-red-50 text-red-800';
+      resultClass = 'border-red-200 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200';
     } else if (policy?.approval_required) {
       resultLabel = `${policy.approval_role} approval required`;
       ResultIcon = Clock3;
-      resultClass = 'border-amber-200 bg-amber-50 text-amber-800';
+      resultClass = 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200';
     } else if (latest.allowed) {
       resultLabel = 'Allowed to execute';
       ResultIcon = CheckCircle2;
-      resultClass = 'border-emerald-200 bg-emerald-50 text-emerald-800';
+      resultClass = 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200';
     } else {
       resultLabel = latest.reason;
       ResultIcon = XCircle;
-      resultClass = 'border-red-200 bg-red-50 text-red-800';
+      resultClass = 'border-red-200 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200';
     }
   } else if (isLoading) {
     resultLabel = 'Checking FGA…';
   }
 
   return (
-    <section className="overflow-hidden rounded-xl border-2 border-purple-200 bg-white shadow-sm">
+    <section className="overflow-hidden rounded-xl border-2 border-purple-200 bg-white shadow-sm dark:border-purple-900 dark:bg-slate-900">
       <button
         type="button"
         onClick={() => setIsExpanded((value) => !value)}
@@ -91,21 +91,21 @@ export default function FGAExplanationCard({ checks, isLoading = false }: Props)
       {isExpanded ? (
         <div className="space-y-5 p-4">
           <div className="grid gap-3 md:grid-cols-3">
-            <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-900 dark:bg-blue-950/40">
               <div className="text-xs font-bold uppercase tracking-wide text-blue-700">1. Okta</div>
-              <p className="mt-1 text-xs leading-relaxed text-blue-900">
+              <p className="mt-1 text-xs leading-relaxed text-blue-900 dark:text-blue-100">
                 Signs the user’s role level and vacation status into the inventory token.
               </p>
             </div>
-            <div className="rounded-lg border border-purple-200 bg-purple-50 p-3">
+            <div className="rounded-lg border border-purple-200 bg-purple-50 p-3 dark:border-purple-900 dark:bg-purple-950/40">
               <div className="text-xs font-bold uppercase tracking-wide text-purple-700">2. Auth0 FGA</div>
-              <p className="mt-1 text-xs leading-relaxed text-purple-900">
+              <p className="mt-1 text-xs leading-relaxed text-purple-900 dark:text-purple-100">
                 Combines those live values with the action and quantity on every request.
               </p>
             </div>
-            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/40">
               <div className="text-xs font-bold uppercase tracking-wide text-amber-700">3. Okta OIG</div>
-              <p className="mt-1 text-xs leading-relaxed text-amber-900">
+              <p className="mt-1 text-xs leading-relaxed text-amber-900 dark:text-amber-100">
                 Collects Manager or VP approval when the requester’s level is too low.
               </p>
             </div>
@@ -114,11 +114,11 @@ export default function FGAExplanationCard({ checks, isLoading = false }: Props)
           <FGAArchitectureDiagram />
 
           <div>
-            <h3 className="text-sm font-semibold text-gray-900">The whole policy</h3>
-            <p className="mt-1 text-xs text-gray-500">Standard means 1–600 units. Large means 601 or more.</p>
-            <div className="mt-3 overflow-x-auto rounded-lg border border-gray-200">
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-white">The whole policy</h3>
+            <p className="mt-1 text-xs text-gray-500 dark:text-slate-400">Standard means 1–600 units. Large means 601 or more.</p>
+            <div className="mt-3 overflow-x-auto rounded-lg border border-gray-200 dark:border-slate-700">
               <table className="min-w-full text-left text-xs">
-                <thead className="bg-gray-50 text-gray-600">
+                <thead className="bg-gray-50 text-gray-600 dark:bg-slate-800 dark:text-slate-300">
                   <tr>
                     <th className="px-3 py-2 font-semibold">Role level</th>
                     <th className="px-3 py-2 font-semibold">Read</th>
@@ -126,19 +126,19 @@ export default function FGAExplanationCard({ checks, isLoading = false }: Props)
                     <th className="px-3 py-2 font-semibold">Write 601+</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100">
+                <tbody className="divide-y divide-gray-100 dark:divide-slate-800">
                   {ROLE_ROWS.map((row) => (
                     <tr key={row.level}>
-                      <th className="whitespace-nowrap px-3 py-2 font-semibold text-gray-900">{row.level}</th>
-                      <td className="px-3 py-2 text-gray-700">{row.read}</td>
-                      <td className="px-3 py-2 text-gray-700">{row.standard}</td>
-                      <td className="px-3 py-2 text-gray-700">{row.large}</td>
+                      <th className="whitespace-nowrap px-3 py-2 font-semibold text-gray-900 dark:text-white">{row.level}</th>
+                      <td className="px-3 py-2 text-gray-700 dark:text-slate-300">{row.read}</td>
+                      <td className="px-3 py-2 text-gray-700 dark:text-slate-300">{row.standard}</td>
+                      <td className="px-3 py-2 text-gray-700 dark:text-slate-300">{row.large}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-            <p className="mt-2 text-[11px] text-gray-500">
+            <p className="mt-2 text-[11px] text-gray-500 dark:text-slate-400">
               Vacation does not block reads. It blocks every write, including creating an approval request.
             </p>
           </div>

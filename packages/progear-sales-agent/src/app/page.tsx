@@ -8,7 +8,9 @@ import { Key, GitBranch, ShieldCheck } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { type ApprovalStatus } from '@/components/ApprovalStatusCard';
+import { ThemeSelector } from '@/components/ThemeProvider';
 import { API_BASE_URL, OKTA_DOMAIN } from '@/lib/config';
+import { useFGASimulation } from '@/hooks/useFGASimulation';
 
 interface Message {
   id: string;
@@ -86,6 +88,7 @@ const markdownComponents = {
 export default function Home() {
   const { data: session, status } = useSession();
   const router = useRouter();
+  const { isEnabled: isFGASimulationEnabled } = useFGASimulation();
   const [message, setMessage] = useState('');
   const [chatMessages, setChatMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -344,7 +347,10 @@ export default function Home() {
       const response = await fetch(`${API_BASE_URL}/api/chat`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ message: userMessage }),
+        body: JSON.stringify({
+          message: userMessage,
+          simulate_fga: isFGASimulationEnabled,
+        }),
       });
 
       const contentType = response.headers.get('content-type') || '';
@@ -414,7 +420,7 @@ export default function Home() {
   }
 
   return (
-    <main className="h-screen bg-gradient-to-b from-neutral-bg to-primary flex flex-col">
+    <main className="flex h-screen flex-col bg-gradient-to-b from-slate-100 to-white dark:from-neutral-bg dark:to-primary">
       {/* Header */}
       <header className="bg-gradient-to-r from-primary via-court-brown to-primary-light border-b-4 border-accent shadow-lg relative overflow-hidden">
         {/* Court pattern */}
@@ -477,15 +483,21 @@ export default function Home() {
             >
               <ShieldCheck className="w-4 h-4" />
               <span className="hidden sm:inline">FGA</span>
+              {isFGASimulationEnabled ? (
+                <span className="rounded-full bg-emerald-400/20 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-emerald-200">
+                  On
+                </span>
+              ) : null}
             </Link>
           </div>
 
           <div className="flex items-center space-x-3">
+            <ThemeSelector compact />
             <div className="flex items-center gap-3">
               <span className="text-gray-200 text-sm">{session?.user?.email}</span>
               <button
                 onClick={handleSignOut}
-                className="px-5 py-2.5 bg-white/10 hover:bg-accent/30 text-white rounded-lg transition border border-white/20 hover:border-accent/50 flex items-center space-x-2"
+                className="flex items-center space-x-2 whitespace-nowrap rounded-lg border border-white/20 bg-white/10 px-5 py-2.5 text-white transition hover:border-accent/50 hover:bg-accent/30"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
@@ -499,7 +511,7 @@ export default function Home() {
 
       {/* Chat - full width; token/FGA/approval detail lives on /tokens now */}
       <div className="flex-1 flex overflow-hidden">
-        <div className="w-full flex flex-col bg-gradient-to-b from-neutral-bg to-white">
+        <div className="flex w-full flex-col bg-gradient-to-b from-slate-50 to-white dark:from-neutral-bg dark:to-primary-light">
           {/* Messages Area */}
           <div className="flex-1 overflow-y-auto p-6 space-y-4 max-w-3xl mx-auto w-full">
             {chatMessages.length === 0 && (
@@ -508,13 +520,14 @@ export default function Home() {
                   <div className="absolute inset-0 bg-accent/20 rounded-full blur-2xl animate-pulse"></div>
                   <span className="text-6xl relative z-10">🏀</span>
                 </div>
-                <h2 className="text-2xl font-bold text-white mb-2">Welcome, {session?.user?.name || 'Team Member'}!</h2>
-                <p className="text-gray-300 mb-6">
+                <h2 className="mb-2 text-2xl font-bold text-slate-900 dark:text-white">Welcome, {session?.user?.name || 'Team Member'}!</h2>
+                <p className="mb-6 text-slate-600 dark:text-gray-300">
                   Your AI-powered basketball equipment sales assistant is ready. Ask about orders, inventory, pricing, or customers.
                 </p>
 
-                {/* Deterministic prompts for the Level 1 / 2 / 3 authorization story. */}
-                <div className="grid grid-cols-2 gap-3 text-left">
+                {/* Guided role and threshold prompts are intentionally opt-in. */}
+                {isFGASimulationEnabled ? (
+                <div className="grid grid-cols-1 gap-3 text-left sm:grid-cols-2">
                   {exampleQuestions.map((question, idx) => {
                     const isRead = question.action === 'read';
                     const badge = isRead ? 'Read' : question.action === 'large' ? '601+ · VP' : '1–600';
@@ -522,7 +535,7 @@ export default function Home() {
                       <button
                         key={idx}
                         onClick={() => handleSendMessage(question.text)}
-                        className="group p-4 bg-white/95 backdrop-blur-sm border-2 border-accent/20 hover:border-accent hover:shadow-xl rounded-xl transition-all text-left flex items-start space-x-3"
+                        className="group flex items-start space-x-3 rounded-xl border-2 border-accent/20 bg-white/95 p-4 text-left backdrop-blur-sm transition-all hover:border-accent hover:shadow-xl dark:bg-slate-900/95"
                       >
                         <span
                           className={`flex-shrink-0 px-2 py-1 rounded-md text-[10px] font-bold tracking-wide uppercase ${
@@ -535,13 +548,24 @@ export default function Home() {
                         >
                           {badge}
                         </span>
-                        <span className="text-sm text-gray-700 group-hover:text-primary font-medium leading-relaxed">
+                        <span className="text-sm font-medium leading-relaxed text-gray-700 group-hover:text-primary dark:text-slate-200 dark:group-hover:text-white">
                           {question.text}
                         </span>
                       </button>
                     );
                   })}
                 </div>
+                ) : (
+                  <div className="rounded-xl border border-slate-200 bg-white/80 p-4 text-left shadow-sm dark:border-slate-700 dark:bg-slate-900/70">
+                    <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">Simple chat mode</p>
+                    <p className="mt-1 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
+                      Type a question below to demo Sarah or Mike normally. Guided role, vacation, and approval prompts stay hidden until you enable{' '}
+                      <Link href="/fga" className="font-semibold text-purple-700 underline underline-offset-2 dark:text-purple-300">
+                        Simulate FGA
+                      </Link>.
+                    </p>
+                  </div>
+                )}
               </div>
             )}
 
