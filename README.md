@@ -12,12 +12,22 @@
 
 | | |
 |---|---|
-| **Frontend** | [progear-sales-aiagent.vercel.app](https://progear-sales-aiagent.vercel.app) |
-| **Backend API** | [progearsalesai-p2wm.onrender.com](https://progearsalesai-p2wm.onrender.com) |
+| **Primary frontend** | [progear-sales-aiagent.vercel.app](https://progear-sales-aiagent.vercel.app) |
+| **Primary backend API** | [progearsalesai-p2wm.onrender.com](https://progearsalesai-p2wm.onrender.com) |
+| **Extension frontend** | [progearsalesaiext.vercel.app](https://progearsalesaiext.vercel.app) |
+| **Extension backend API** | [progearsalesaiext.onrender.com](https://progearsalesaiext.onrender.com) |
 
-Both are deployed from this single repo. `main` is the single deployment branch: Vercel builds `packages/progear-sales-agent`, and Render builds the `backend/` service. Feature branches may produce temporary previews, but they are not production sources.
+All four are deployed from this single repo. `main` is the single deployment branch: both Vercel projects build `packages/progear-sales-agent`, and both Render services build `backend/`. Feature branches may produce temporary previews, but they are not production sources.
+
+### A customer-owned custom agent in Okta
+
+**ProGear Sales Agent is a customer-owned custom AI agent registered in Okta**, not a generic chatbot identity or a separate identity for each internal tool. Okta represents it as one Workload Principal (`wlp`) under **Directory → AI Agents**, where administrators can assign owners, control resource connections, activate or deactivate the agent, and audit which employee it acted for. The application remains customer-owned; Okta supplies the governed agent identity and delegated access path.
 
 User sign-in uses Okta **direct User access** on the registered ProGear Sales Agent. The agent-bound OIDC app shares the agent's `wlp...` client ID and authenticates token requests with `private_key_jwt`; there is no separate sign-on client secret.
+
+[![CourtEdge ProGear custom agent sign-in page](docs/images/progear-sign-in.png)](https://progear-sales-aiagent.vercel.app/auth/signin)
+
+*The application owns this sign-in experience and delegates authentication to Okta. No application password is collected by ProGear.*
 
 Pages in the running app:
 
@@ -29,6 +39,18 @@ Pages in the running app:
 | `/fga` | Opt-in live Okta role controls and a simple D3 view of the FGA decision |
 
 The application starts with **Simulate FGA** off and shows two everyday prompts: an inventory read and a normal 50-unit write. Enabling the simulation on `/fga` reveals the live role/vacation controls, replaces those examples with the Read, 1–600, and 601+ VP prompt tiers, and opts chat requests into hosted FGA checks plus OIG approval routing. Simple mode still enforces the Okta-signed role and context, but denies requests that need a higher role instead of creating approval requests. It is never a bypass. Color preferences are independent: Light is the first-visit default, with Dark and System available from the persistent theme control.
+
+### Demo personas at a glance
+
+With **Simulate FGA** enabled, the three default Okta role levels tell one complete inventory story:
+
+| Persona | Okta role level | Inventory behavior |
+|---|---:|---|
+| Sarah Sales | 1 — Sales | Reads directly; writes of 1–600 units request Manager approval; writes of 601+ units request VP approval |
+| Mike Manager | 2 — Manager | Reads and writes 1–600 units directly; writes of 601+ units request VP approval |
+| Joe VP | 3 — VP | Reads and writes any quantity directly |
+
+For every role, `is_on_vacation=true` blocks inventory writes while leaving reads available.
 
 ## What This Demo Shows
 
