@@ -122,8 +122,8 @@ export default function FGAExplanationCard({ checks, isLoading = false }: Props)
                   <tr>
                     <th className="px-3 py-2 font-semibold">Role level</th>
                     <th className="px-3 py-2 font-semibold">Read</th>
-                    <th className="px-3 py-2 font-semibold">Write 1–600</th>
-                    <th className="px-3 py-2 font-semibold">Write 601+</th>
+                    <th className="px-3 py-2 font-semibold">Write 1–600 units</th>
+                    <th className="px-3 py-2 font-semibold">Write 601+ units</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 dark:divide-slate-800">
