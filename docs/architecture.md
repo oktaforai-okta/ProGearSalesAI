@@ -1,6 +1,6 @@
 # ProGear AI Agent Architecture
 
-This document explains how the ProGear Sales AI demo actually works, end to end, based on the live code in this repo. It's written for someone who has never seen this codebase but is technically comfortable with OAuth, authorization, and multi-agent systems.
+This document explains how the ProGear Sales AI demo actually works, end to end, based on the live code in this repo. It's written for someone who has never seen this codebase but is technically comfortable with OAuth, authorization, and agent systems.
 
 ProGear ("CourtEdge ProGear") is a fictional basketball-equipment retailer. The demo is an AI sales/shopping assistant secured by three cooperating systems:
 
@@ -161,22 +161,25 @@ The orchestrator's **approval_gate** node fires only when all of the following a
 2. The requester is a Manager.
 3. The parsed quantity is greater than 600 and FGA confirms `can_request_change`.
 
-When triggered, it first mints and validates a short-lived execution token using the same path needed after approval. If that preflight fails, no OIG request is created. It then builds an `Intent` containing the required approver role and level and creates a real OIG request. The signed-in Manager's Okta subject is sent as `requesterUserIds`; the API-token owner remains the request creator, preserving both identities in OIG. The approver sees a concise summary—requester, action, threshold reason, required role, and governed agent—while the machine-readable execution intent stays in the backend's persistent ledger. Existing requests that used the older fenced-JSON justification remain readable for compatibility. After OIG approval, `OktaRoleResolver` retrieves the approver's current profile and the service fails closed unless the approver meets the required level.
+When triggered, it first mints and validates a short-lived execution token using the same path needed after approval. If that preflight fails, no OIG request is created. It then builds an `Intent` containing the required approver role and level and creates a real OIG request. The signed-in Manager's Okta subject is sent as `requesterUserIds`; the API-token owner remains the request creator, preserving both identities in OIG. The approver sees a concise summary—requester, action, threshold reason, required role, and governed agent—while the machine-readable execution intent stays in the backend's file-backed ledger. Existing requests that used the older fenced-JSON justification remain readable for compatibility. After OIG approval, `OktaRoleResolver` retrieves the approver's current profile and the service fails closed unless the approver meets the required level.
 
 **Resolution happens two ways:**
 - **Foreground fast path**: `GET /api/approvals/{request_id}` (polled by the frontend) calls `ApprovalService.execute_if_approved()`, which checks OIG's current decision and executes the write immediately if approved. An eight-second per-request cache collapses duplicate polls from multiple tabs, and OIG 429 responses become a retrying status rather than a customer-facing 502.
-- **Background poller**: `backend/api/main.py` discovers open demo requests once at startup, then polls only request IDs registered in its persistent ledger every `APPROVAL_POLL_INTERVAL_SECONDS` (default 120s, with exponential backoff on errors). It no longer lists and rechecks every historical resolved tenant request on each cycle.
+- **Background poller**: `backend/api/main.py` discovers open demo requests once at startup, then polls only request IDs registered in its file-backed ledger every `APPROVAL_POLL_INTERVAL_SECONDS` (default 120s, with exponential backoff on errors). It no longer lists and rechecks every historical resolved tenant request on each cycle.
 
-Execution is idempotent: a JSON ledger file (`backend/data/approvals_ledger.json`) stores each request's machine-readable intent and tracks which OIG request IDs have already been executed. It also enforces a bounded retry count (3 attempts), so a flaky write doesn't retry forever and an already-executed request never double-applies.
+Execution is idempotent while the ledger is retained: a JSON ledger stores each request's machine-readable intent and tracks which OIG request IDs have already been executed. It also enforces a bounded retry count (3 attempts), so a flaky write doesn't retry forever and an already-executed request never double-applies. Local development defaults to `backend/data/approvals_ledger.json`. A hosted deployment must point `APPROVALS_LEDGER_PATH` at durable storage; on Render, attach a persistent disk at `/var/data` and use `/var/data/approvals_ledger.json`. Without that mount, deploys and restarts can discard pending intent and idempotency state.
 
 When approval completes, `backend/services/service_token.py` performs a real
 Okta `client_credentials` exchange authenticated by the dedicated ProGear
 Approval Executor's `private_key_jwt`. The executor has only
 `inventory:write`, and its token lasts five minutes. The Inventory boundary
 validates that signed token before the idempotent store mutation. The AI Agent
-workload principal remains the identity for delegated user requests, while the
-OIG record preserves the requester, agent, FGA decision, approver, and action.
-A placeholder token is never accepted.
+workload principal remains the identity for delegated user requests. OIG
+preserves the requester, human-readable action, governed-agent label, and
+approval decision; the backend ledger preserves the exact FGA check and
+execution intent. Together they retain the full approval chain without putting
+internal JSON in the approver's request card. A placeholder token is never
+accepted.
 
 ---
 
@@ -188,7 +191,7 @@ A placeholder token is never accepted.
 
 ## 7. Known, honest limitation: the MCP server isn't in the live path yet
 
-`packages/progear-sales-mcp-server` is a real, separately deployed Express server. **However, the internal domain components in this backend do not call it.** `_invoke_agent()` instantiates the domain classes directly, and they read/write `demo_store` in-process. There is no network round-trip to the MCP server today. The live in-process resource boundary is still real: it validates the Okta JWT cryptographically and requires the final business decision before data access. Describing the call as a live MCP round-trip would remain inaccurate.
+`packages/progear-sales-mcp-server` is a separately deployable Express sample. **The internal domain components in this backend do not call it.** `_invoke_agent()` instantiates the domain classes directly, and they read/write `demo_store` in-process. There is no network round-trip to the MCP server today. The sample also contains explicit local-demo authentication bypasses, so it must be hardened before protecting real data. The live in-process resource boundary is the customer-demo security boundary: it fails closed, validates the Okta JWT cryptographically, and requires the final business decision before data access. Describing the current call as a live MCP round-trip—or the standalone sample as production-ready—would be inaccurate.
 
 ---
 

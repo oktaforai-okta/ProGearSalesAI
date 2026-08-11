@@ -44,7 +44,7 @@ If you want to clone this repository, deploy it to Vercel and Render, and config
 
 A basketball equipment sales AI assistant with:
 - **1 governed AI Agent**: ProGear Sales Agent, with four internal domain components for Sales, Inventory, Customer, and Pricing
-- **3 Demo Users**: Each with different access levels
+- **4 Demo Users**: Sarah Sales, Mike Manager, Joe VP, and Frank Finance
 - **Role-Based Access Control**: Users only see data they're authorized to access
 - **Visual Token Exchange**: See exactly which scopes are granted/denied in real-time
 - **Sample Data Included**: The repository includes realistic demo data for customers, products, inventory, and pricing - no database setup required
@@ -214,9 +214,8 @@ packages/progear-sales-agent/src/
 
 ### Vercel Pricing
 
-- **Free tier**: Perfect for demos, includes custom domains
-- **Pro**: $20/month for teams, more bandwidth
-- This demo works fine on the free tier
+- Vercel's Hobby plan is sufficient for this frontend demo.
+- Team and production needs may require a paid plan. Check [current Vercel pricing](https://vercel.com/pricing) rather than relying on a hard-coded amount.
 
 ---
 
@@ -231,7 +230,7 @@ packages/progear-sales-agent/src/
 | Feature | Benefit for This Demo |
 |---------|----------------------|
 | **Native Python support** | Runs FastAPI directly |
-| **Persistent services** | Backend stays running (vs serverless) |
+| **Long-running web service** | Supports the FastAPI process and approval poller |
 | **Environment groups** | Share env vars across services |
 | **Private networking** | Secure service-to-service communication |
 | **Automatic HTTPS** | Required for API calls from Vercel |
@@ -266,13 +265,13 @@ backend/
 └── requirements.txt         # Python dependencies
 ```
 
-There's also a real, separately-deployed MCP server (`packages/progear-sales-mcp-server`) that validates JWTs against Okta's JWKS endpoint, but the backend agents above don't call it over the network today; see [architecture.md](./architecture.md#7-known-honest-limitation-the-mcp-server-isnt-in-the-live-path-yet) for the full explanation.
+There's also a separately deployable MCP sample (`packages/progear-sales-mcp-server`), but the backend components above don't call it over the network today and its local-demo authentication bypasses must be removed before production use. See [architecture.md](./architecture.md#7-known-honest-limitation-the-mcp-server-isnt-in-the-live-path-yet) for the full explanation.
 
 ### Render Pricing
 
-- **Free tier**: Services spin down after inactivity (15-minute cold starts)
-- **Starter ($7/month)**: Always-on services, recommended for demos
-- **Standard ($25/month)**: More resources for production
+- **Free web service**: Suitable for initial testing, but it spins down after inactivity and cannot attach a persistent disk.
+- **Paid web service**: Always on and required for the persistent approval ledger.
+- Check [current Render pricing](https://render.com/pricing) before choosing an instance type.
 
 ---
 
@@ -347,20 +346,22 @@ For Vercel and Render to communicate:
 |---------|---------|---------|
 | **Okta** | Identity & AI Agent Governance | [developer.okta.com](https://developer.okta.com) |
 | **Anthropic** | Claude AI for LLM | [console.anthropic.com](https://console.anthropic.com) |
+| **FGA** | Hosted fine-grained authorization | [dashboard.fga.dev](https://dashboard.fga.dev) |
 | **Vercel** | Frontend hosting | [vercel.com](https://vercel.com) |
 | **Render** | Backend hosting | [render.com](https://render.com) |
 | **GitHub** | Repository hosting | [github.com](https://github.com) |
 
 > **Important Account Setup Notes:**
 > - **Sign up for Vercel and Render using your GitHub account** - this makes connecting your repository seamless
-> - **Okta Developer accounts are free** and include all features needed for this demo
-> - **Anthropic requires a credit card** - Claude API calls have a small cost (~$0.01-0.10 per demo session)
+> - Your **Okta org must have the features listed below**; an Integrator Free Plan org alone does not guarantee AI Agent Governance or OIG access
+> - Anthropic API usage is billed according to your account and selected model; check the provider's current pricing before running a public demo
 
 ### Okta Requirements
 
 Your Okta org must have:
 - **AI Agent feature enabled** (contact Okta support if not visible in admin console)
-- **Custom Authorization Servers** enabled (Okta Developer accounts have this by default)
+- **Custom Authorization Servers** enabled
+- **[Okta Identity Governance subscription](https://developer.okta.com/docs/api/iga)** for the OIG Access Requests API and 601+ approval flow
 - Admin access to create applications and authorization servers
 
 ### Render Tier Consideration
@@ -372,9 +373,9 @@ Your Okta org must have:
 > | Tier | Cost | Behavior |
 > |------|------|----------|
 > | **Free** | $0/month | Cold starts after 15 min inactivity |
-> | **Starter** | $7/month | Always on - recommended for demos |
+> | **Paid** | See current pricing | Always on; supports the persistent approval disk |
 >
-> For the best demo experience, consider the $7/month Starter tier. You can start with Free and upgrade later.
+> You can start with Free for the base chat and upgrade later. The 601+ approval flow needs a Render persistent disk for its private intent and idempotency ledger. Persistent disks require a paid service; see [Render's persistent disk documentation](https://render.com/docs/disks).
 
 ---
 
@@ -384,7 +385,7 @@ This is the most critical section. Follow each step carefully using your own Okt
 
 ### Step 1: Create Demo Users
 
-Create three demo users to showcase different access levels:
+Create four demo users to showcase resource access and the Inventory role levels:
 
 1. Navigate to **Directory** → **People** → **Add Person**
 2. Create these users:
@@ -393,6 +394,7 @@ Create three demo users to showcase different access levels:
    |----------|------------|-----------|-------|----------|
    | `sarah.sales` | Sarah | Sales | sarah.sales@`<your-domain>` | `<your-secure-password>` |
    | `mike.manager` | Mike | Manager | mike.manager@`<your-domain>` | `<your-secure-password>` |
+   | `joe.vp` | Joe | VP | joe.vp@`<your-domain>` | `<your-secure-password>` |
    | `frank.finance` | Frank | Finance | frank.finance@`<your-domain>` | `<your-secure-password>` |
 
 3. **Important**: Uncheck "User must change password on first login" for demo purposes
@@ -454,7 +456,7 @@ This is where the AI Agent identity and user-facing sign-in app are connected. D
 
    ```
    Name: ProGear Sales Agent
-   Description: Multi-agent sales assistant for ProGear sporting goods
+   Description: AI sales assistant with four internal resource-domain components
    ```
 
    When prompted to assign Owners, select the currently logged in Okta admin or any other user you have as the owner, and save. Owners are admins responsible for the agent; they are not the end users the agent acts on behalf of (see the callout below).
@@ -530,7 +532,7 @@ In this repository's current compatibility deployment, `OKTA_CLIENT_ID` is the O
 > | Concept | What it is | Where configured | Who to add |
 > |---------|------------|------------------|------------|
 > | **Owners** | Admins responsible for the agent | AI Agent → Owners tab | Admin users (yourself, your team) |
-> | **User Assignments** | Users the agent acts on behalf of | Direct User access app → Assignments tab | End users (Sarah, Mike, Frank) |
+> | **User Assignments** | Users the agent acts on behalf of | Direct User access app → Assignments tab | End users (Sarah, Mike, Joe, Frank) |
 >
 > Users are assigned to the agent-linked **direct User access OIDC app**, and the agent can then act on behalf of any user who:
 > 1. Is assigned to the direct User access app
@@ -659,9 +661,11 @@ backend authenticates the dedicated executor with `private_key_jwt`, validates
 the five-minute token at the Inventory boundary, and executes idempotently.
 The OIG request presents the requester, action, threshold reason, required
 approver role, and governed agent in a concise human summary. The backend's
-persistent approval ledger retains the exact scope, quantity, agent identity,
-and FGA check needed for one idempotent execution after approval. Legacy open
-requests with embedded intent JSON remain supported.
+file-backed approval ledger retains the exact scope, quantity, agent identity,
+and FGA check needed for one idempotent execution after approval. In a hosted
+deployment, that ledger is durable only when `APPROVALS_LEDGER_PATH` points to
+persistent storage. Legacy open requests with embedded intent JSON remain
+supported.
 
 **Rule 2: Warehouse Full Access** (Priority 2)
 ```
@@ -785,7 +789,7 @@ Once you have create authorization servers per MCP API, Use managed connections 
 5. Assign the **Okta Access Requests** app to `ProGear-Managers` and `ProGear-VPs`. This provisions current and future group members into the approval experience.
 6. In the Okta Access Requests app's **Push Groups** configuration, push `ProGear-VPs`, then confirm the mapping is active under **Access Requests Console → Settings → Pushed Groups**.
 7. Edit the Inventory request type and set its approval task assignee to the pushed `ProGear-VPs` group. Publish the request type. Writing `ProGear-VPs` in the justification does not route a task; the request-type step owns routing.
-8. Route only Manager changes above 600 units to that request type. Sales changes never create access requests. The backend sends the authenticated Manager's Okta subject in `requesterUserIds`, records the required VP role and Level 2 in the intent, and verifies the approver's live Okta profile before execution.
+8. Route only Manager changes above 600 units to that request type. Sales changes never create access requests. The backend sends the authenticated Manager's Okta subject in `requesterUserIds`. The OIG card shows a concise summary of the requester, action, threshold reason, required VP level, and governed agent; the machine-readable intent stays in the backend approval ledger. The backend verifies the approver's live Okta profile before execution, and legacy open requests with embedded intent remain supported.
 9. On the Inventory Authorization Server, allow only the dedicated `ProGear Approval Executor` service client's `client_credentials` grant for `inventory:write`, with a five-minute access-token lifetime. The backend mints and validates this token before creating an OIG request and again before executing an approval.
 
 The VP opens **Okta Access Requests → Inbox → Open** from the End-User Dashboard. A request that appears as `Task ... was not assigned` in the System Log indicates that step 7 is incomplete, even if the requester and VP group memberships are correct.
@@ -832,7 +836,7 @@ Use this checklist to track what you've collected:
 │  □ OKTA_AI_AGENT_ID                                                   │
 │    AI Agent Entity ID                                                 │
 │    Example: wlpXXXXXXXXXXXXXX                                         │
-│    Where: Applications → AI Agents → ProGear Sales Agent              │
+│    Where: Directory → AI Agents → ProGear Sales Agent                 │
 │    Your value: ___________________________________________            │
 │                                                                       │
 │  □ OKTA_AI_AGENT_PRIVATE_KEY                                          │
@@ -1059,7 +1063,10 @@ Now that you have your real Vercel URL, go back to Okta and replace the placehol
 
 5. Choose your plan:
    - **Free**: Works but has cold starts (service sleeps after 15 min inactivity)
-   - **Starter ($7/mo)**: Recommended for demos - always on
+   - **Paid**: Recommended for demos; always on and supports a persistent disk
+6. If you will demo OIG approvals, attach a persistent disk at `/var/data`.
+   This keeps pending approval intent and idempotency state across deploys and
+   restarts. Render persistent disks require a paid service.
 
 ### Step 3: Configure Environment Variables
 
@@ -1068,6 +1075,7 @@ In Render, go to **Environment** and add these variables:
 | Variable | Value |
 |----------|-------|
 | `ANTHROPIC_API_KEY` | Your Anthropic API key |
+| `LLM_MODEL_NAME` | `claude-sonnet-4-6` (optional override) |
 | `OKTA_DOMAIN` | `https://your-org.okta.com` |
 | `OKTA_CLIENT_ID` | Employee sign-in OIDC client ID (`0oa...` in this deployment) |
 | `OKTA_AI_AGENT_ID` | Your AI Agent ID (`wlp...`) |
@@ -1094,6 +1102,8 @@ In Render, go to **Environment** and add these variables:
 | `OKTA_OIG_INVENTORY_REQUEST_TYPE_ID` | Inventory request type ID |
 | `OKTA_OIG_JUSTIFICATION_FIELD_ID` | Required justification field ID |
 | `APPROVAL_QUANTITY_THRESHOLD` | `601` |
+| `APPROVALS_LEDGER_PATH` | `/var/data/approvals_ledger.json` (requires the persistent disk above) |
+| `APPROVAL_POLL_INTERVAL_SECONDS` | `120` |
 | `OKTA_VP_APPROVER_GROUP_NAME` | `ProGear-VPs` |
 | `APPROVAL_STATUS_CACHE_TTL_SECONDS` | `8` (collapses duplicate browser polls) |
 | `CORS_ORIGINS` | Your Vercel URL: `https://your-project-name.vercel.app` |
@@ -1149,7 +1159,7 @@ Expected response:
 4. Try a test query: "What basketballs do we have in stock?"
 5. Verify:
    - You get a response from the AI
-   - Token exchanges are shown in the security panel
+   - Token exchanges are shown on the **Token Flow** page
    - Scopes are granted based on user's group membership
 
 ---
@@ -1161,6 +1171,7 @@ Expected response:
 | Variable | Platform | Required | Description |
 |----------|----------|----------|-------------|
 | `ANTHROPIC_API_KEY` | Render | Yes | Anthropic Claude API key |
+| `LLM_MODEL_NAME` | Render | No | Anthropic model; defaults to `claude-sonnet-4-6` |
 | `OKTA_DOMAIN` | Both | Yes | Your Okta org URL |
 | `OKTA_CLIENT_ID` | Both | Yes | Employee sign-in OIDC client ID; distinct from the Workload Principal in this deployment |
 | `OKTA_OIDC_PRIVATE_KEY` | Vercel | Yes | Server-only private JWK for private_key_jwt |
@@ -1188,6 +1199,9 @@ Expected response:
 | `OKTA_OIG_INVENTORY_REQUEST_TYPE_ID` | Render | Yes | Inventory request type ID |
 | `OKTA_OIG_JUSTIFICATION_FIELD_ID` | Render | Yes | OIG justification field ID |
 | `APPROVAL_QUANTITY_THRESHOLD` | Render | Yes | `601` (kept aligned with the fixed 600/601 policy boundary) |
+| `APPROVALS_LEDGER_PATH` | Render | Yes for hosted OIG demo | Path on durable storage; use `/var/data/approvals_ledger.json` with a Render persistent disk |
+| `APPROVAL_POLL_INTERVAL_SECONDS` | Render | No | OIG background polling interval; defaults to 120 seconds |
+| `APPROVAL_STATUS_CACHE_TTL_SECONDS` | Render | No | Per-request status cache; defaults to 8 seconds |
 | `OKTA_VP_APPROVER_GROUP_NAME` | Render | Yes | `ProGear-VPs` |
 | `NEXTAUTH_URL` | Vercel | Yes | Your Vercel URL |
 | `NEXTAUTH_SECRET` | Vercel | Yes | Generate: `openssl rand -base64 32` |
@@ -1221,7 +1235,7 @@ Four key scenarios demonstrate resource RBAC and the three-tier Inventory story:
 **Expected Result**:
 - Successful scoped token exchanges for the required resource domains
 - Full combined answer with customer, inventory, pricing, and quote
-- All required scopes granted in the security panel
+- All required scopes granted on the **Token Flow** page
 
 ### Scenario 2: Limited resource access (Mike Manager)
 
@@ -1379,7 +1393,7 @@ Use these talking points when presenting:
 
 **Solution**:
 1. Wait 15-30 seconds for the service to wake up
-2. Upgrade to Starter tier ($7/mo) for always-on service
+2. Upgrade to a paid instance type for an always-on service
 3. First request after sleep will be slow, subsequent requests fast
 
 ### Issuer mismatch / ID-JAG exchange failed
@@ -1405,9 +1419,9 @@ Use these talking points when presenting:
 Use this checklist to verify your deployment is complete:
 
 ### Okta Configuration
-- [ ] Direct User access app created from the AI Agent and Token Exchange enabled
-- [ ] 3 demo users created and can log in
-- [ ] 3 groups created with correct user assignments
+- [ ] A supported direct User access app or delegation-link sign-on app is configured and Token Exchange is enabled
+- [ ] 4 demo users created and can log in
+- [ ] 3 resource-access groups created with correct user assignments
 - [ ] `clearance_level` configured as 0 Sales, 1 Manager, or 2 VP
 - [ ] `ProGear-Managers` rule includes Levels 1 and 2
 - [ ] `ProGear-VPs` rule includes Level 2
@@ -1415,7 +1429,7 @@ Use this checklist to verify your deployment is complete:
 - [ ] `ProGear-VPs` group push mapping is active in Access Requests
 - [ ] Inventory request type approval task is assigned to `ProGear-VPs` and published
 - [ ] AI Agent registered with JWK credentials
-- [ ] AI Agent configured for direct User access
+- [ ] AI Agent configured with the target org's supported user sign-on binding
 - [ ] 4 authorization servers with scopes configured
 - [ ] Inventory token carries the `Clearance` claim
 - [ ] **Access policies include the ProGear Sales Agent client**
@@ -1435,16 +1449,17 @@ Use this checklist to verify your deployment is complete:
 - [ ] `CORS_ORIGINS` includes Vercel URL
 - [ ] `/health` endpoint returns 200
 - [ ] FGA store/model and OIG request variables are configured
+- [ ] Persistent disk mounted at `/var/data` and `APPROVALS_LEDGER_PATH` points to it for the OIG approval demo
 
 ### Integration
 - [ ] `NEXT_PUBLIC_API_URL` in Vercel points to Render
 - [ ] Okta login works from frontend
 - [ ] Chat messages get responses
-- [ ] Token exchanges visible in security panel
+- [ ] Token exchanges visible on the **Token Flow** page
 - [ ] A Mike 601+ request lists Mike as requester and appears in Joe's **Access Requests → Inbox → Open**
 
 ### Demo Verification
-- [ ] The same ProGear Sales Agent is shown for Sarah, Mike, and Frank
+- [ ] The same ProGear Sales Agent is shown for Sarah, Mike, Joe, and Frank
 - [ ] Sarah's request can obtain the required scopes across all four resource domains
 - [ ] Mike's request can obtain Inventory scopes only
 - [ ] Frank's request can obtain Pricing scopes only

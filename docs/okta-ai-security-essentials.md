@@ -87,7 +87,7 @@ With Okta, every AI agent has a visible ID badge, and there's a security guard (
 
 **What the security system records:**
 - **Visitor:** ProGear Sales AI Agent (Badge #WLP-8X5Q7)
-- **Sent by:** Sarah Johnson, Sales Representative
+- **Sent by:** Sarah Sales, Sales Representative
 - **Destination:** Floor 2 (Inventory Data)
 - **Purpose:** Check basketball stock levels
 - **Authorization:** Approved - Sarah has inventory access
@@ -161,7 +161,7 @@ When your compliance team, security officer, or board asks about AI security, yo
 - The AI agent has a unique ID: `wlpuoor63yK6LYFEh1d7`
 - It has a name: "ProGear Sales Agent"
 - It has an owner: The person responsible for it
-- Every action is tied to this specific identity
+- Every delegated exchange is tied to this specific identity
 
 ### Question 3: WHEN did it happen?
 
@@ -170,7 +170,7 @@ When your compliance team, security officer, or board asks about AI security, yo
 | Without Governance | With Okta |
 |-------------------|-----------|
 | "Sometime last week" | "Tuesday, December 15, 2024, at 14:23:47.123 UTC" |
-| "Our logs aren't that detailed" | "Millisecond-precision timestamps on every action" |
+| "Our logs aren't that detailed" | "Exact timestamps on each delegated token event" |
 | "We'd need to correlate multiple systems" | "One unified log with all the details" |
 
 **Example from the demo:**
@@ -206,7 +206,7 @@ When your compliance team, security officer, or board asks about AI security, yo
 | "It might take hours or days" | "New authentication and token exchanges stop at the identity control point" |
 
 **Example from the demo:**
-- Go to Okta Admin Console → Applications → AI Agents
+- Go to Okta Admin Console → Directory → AI Agents
 - Find the agent
 - Click "Deactivate"
 - The agent can no longer authenticate or obtain new delegated tokens; any previously issued short-lived token follows resource policy
@@ -221,11 +221,11 @@ Let's follow a real scenario step by step to see how AI agent governance works i
 
 **8:30 AM - Sarah logs in**
 
-Sarah Johnson is a sales representative at ProGear Sports. She opens her browser and goes to the company portal.
+Sarah Sales is a sales representative at ProGear Sports. She opens her browser and goes to the company portal.
 
 1. She clicks "Sign in with Okta"
 2. She enters her email and password (or uses her phone for passwordless login)
-3. Okta verifies: "Yes, this is Sarah Johnson. She's in the Sales team."
+3. Okta verifies: "Yes, this is Sarah Sales. She's in the Sales team."
 4. Sarah is now logged in
 
 **What happened behind the scenes:**
@@ -354,17 +354,17 @@ Many AI systems work like this:
 
 ### How "On Behalf Of" Changes Everything
 
-With Okta AI Agent Governance, the AI doesn't have its own standing access to anything. Instead:
+With Okta AI Agent Governance, the user and agent remain two distinct identities. The agent has its own governed Workload Principal, owners, credentials, lifecycle, and resource connections; it does not receive an unbounded service-account pass. For each delegated request:
 
-- **The AI borrows the user's permissions**
-- **Sarah asks a question → The AI can only access what Sarah can access**
-- **Mike asks the same question → The AI can only access what Mike can access**
+- **Okta evaluates the user and the registered agent together**
+- **Sarah asks a question → policy evaluates Sarah + ProGear Agent + resource + scope**
+- **Mike asks the same question → the same agent is evaluated with Mike's identity instead**
 
-Think of it like a personal assistant:
-- Your assistant doesn't have their own security clearance
-- They can only go where you're allowed to go
-- They act *on your behalf*, with *your* permissions
-- Everything they do is logged under your name
+Think of it like a credentialed representative:
+- The representative has a badge of its own
+- The badge shows which person the representative is acting for
+- The destination still applies its policy to both identities and the requested permission
+- The audit trail keeps the employee and agent visible instead of merging them
 
 ### What This Looks Like in Practice
 
@@ -378,18 +378,18 @@ Think of it like a personal assistant:
 - Mike does NOT have customer access → Request denied
 - The AI politely declines
 
-**Same AI. Same question. Different results.** The difference is whose permissions the AI is borrowing.
+**Same governed agent. Same question. Different results.** The employee context changes while the agent identity remains attributable.
 
 ### The Technical Term (Optional)
 
-In Okta and industry standards, this is called an **Identity Assertion** - the AI asserts that it's acting on behalf of a specific user. The formal name is "ID-JAG" (Identity JWT Authorization Grant), but you don't need to remember that. Just remember: **the AI borrows the user's access, it doesn't have its own.**
+In Okta and industry standards, this uses an **Identity Assertion**: the registered agent proves that it is acting on behalf of a specific user for a specific target. The formal name is **ID-JAG** (Identity Assertion JWT Authorization Grant). The important point is that the user's identity is delegated without erasing the agent's own identity.
 
 ### Why This Matters for Security
 
 | Without "On Behalf Of" | With "On Behalf Of" |
 |------------------------|---------------------|
-| AI has broad access | AI has no standing access |
-| Anyone can trigger that access | Only authorized users get results |
+| AI has broad shared access | Agent has a governed identity and explicit resource connections |
+| Anyone can trigger that access | User, agent, resource, and scope policy are evaluated together |
 | Logs show "AI did something" | Logs show "AI did something for Sarah" |
 | Can't enforce per-user rules | Same rules as if Sarah did it herself |
 | Revoking access is complex | Disable the user or the AI instantly |
@@ -562,7 +562,7 @@ In Okta, AI agents aren't just applications with passwords. They're first-class 
 - It's now 8:00 PM
 
 **With Okta:**
-- Go to Applications → AI Agents
+- Go to Directory → AI Agents
 - Find the agent
 - Click "Deactivate"
 - New authentication and delegated token exchanges for that agent stop
@@ -573,7 +573,7 @@ In Okta, AI agents aren't just applications with passwords. They're first-class 
 
 ### Complete Audit Trail
 
-Every interaction is logged with full context. Here's what a real log entry looks like (in plain English):
+Every delegated token exchange is logged with both identities and its authorization context. A request denied before exchange is recorded by the application as a stopped business decision instead of pretending that a token event occurred. Here is what the exchange evidence looks like in plain English:
 
 **Successful Access:**
 ```
@@ -736,7 +736,7 @@ Mike Manager (ProGear-Warehouse):
 
 2. **9:02 PM - Security officer investigates**
    - Logs into Okta Admin Console from phone
-   - Goes to Applications → AI Agents → ProGear Sales Agent
+   - Goes to Directory → AI Agents → ProGear Sales Agent
    - Sees the unusual activity
 
 3. **9:03 PM - Agent deactivated**
@@ -769,11 +769,11 @@ Everything above - the badge system, the "on behalf of" model, the four separate
 
 But for the highest-stakes actions - the ones with real business consequences if they go wrong - "the role is allowed to do this" isn't the whole story. Two more checks run underneath it, and they answer questions that a role-based badge system was never designed to answer.
 
-### Check #2: Does the situation actually hold right now?
+### Check #2: Is this role enough for this quantity?
 
 Think about it this way: Okta holds one role level for the inventory story: **0 = Sales, 1 = Manager, 2 = VP**. Mike's Level 1 role is real and current, and the final decision also depends on the quantity he asked to change.
 
-So this demo adds a second, automatic check that uses the live Okta facts for each request:
+So this demo adds a second, automatic check that combines the live Okta role with the requested quantity:
 - Is the request a read, a standard write of 1–600, or a large write of 601 or more?
 - Is the person's role high enough to execute it directly, should a Manager create a VP request, or must the write stop?
 
@@ -785,7 +785,7 @@ So this demo adds a second, automatic check that uses the live Okta facts for ea
 
 Even after both of the above say yes, one more question remains: is this action, at this size, something a computer should be allowed to finish on its own?
 
-In this demo, Sales writes never become access requests. A Manager write of 601 or more becomes a VP request. Nothing changes in Inventory while that request is pending. When OIG reports approval, the backend checks that the approver still holds Level 2 in Okta, mints and validates a real service token, and executes once.
+In this demo, Sales writes never become access requests. A Manager write of 601 or more becomes a VP request. Nothing changes in Inventory while that request is pending. The VP sees a short summary of who requested what and why approval is needed—not internal JSON. When OIG reports approval, the backend loads the exact action from its approval ledger, checks that the approver still holds Level 2 in Okta, mints and validates a real service token, and executes once.
 
 **Why require a person to sign off on something that's already fully authorized?** Because "is this allowed" and "is this a good idea right now" are genuinely different questions:
 
@@ -824,7 +824,7 @@ Put the checks together and the picture is crisp: Okta establishes identity and 
 |--------------|-------------------|
 | **Least Privilege** | AI agents get temporary, limited access - just enough to answer the user's question |
 | **No Shared Secrets** | AI agents use cryptographic keys, not passwords that can be stolen or shared |
-| **Complete Visibility** | Every access attempt is logged with full context |
+| **Complete Visibility** | Delegated exchanges keep user, agent, target, scopes, and outcome; the app records pre-exchange business denials |
 | **Rapid Response** | One-click deactivation stops new authentication and token exchanges |
 | **Pattern Detection** | Logs enable detection of unusual behavior |
 
@@ -858,7 +858,7 @@ Put the checks together and the picture is crisp: Okta establishes identity and 
 
 | Executive Question | Your Answer |
 |-------------------|-------------|
-| "Are our AI systems secure?" | "Yes. They're governed by the same identity system as our employees, with complete audit trails." |
+| "Are our AI systems secure?" | "They're governed by the same identity system as our employees, with attributable exchange evidence and business decisions." |
 | "What's our risk exposure?" | "Each AI action is tied to a specific user and logged. We can deactivate an agent identity to stop new access, while short token lifetimes bound existing exposure." |
 | "Are we compliant?" | "Yes. We can demonstrate who accessed what, when, and why for any time period." |
 | "What if something goes wrong?" | "We have complete logs for investigation and can immediately stop an AI agent from obtaining new access." |
@@ -895,7 +895,7 @@ MCP is the system that allows AI assistants like Claude to connect to external t
 - Claude asks Okta: "Can this user access Salesforce?"
 - Okta checks policies and grants or denies access
 - IT maintains central control
-- Complete audit trail in Okta
+- Attributable delegated-exchange trail in Okta
 
 ### What This Means for You
 
@@ -979,10 +979,10 @@ The ecosystem is growing, and MCP's adoption of this approach is accelerating it
 ### "Can we try this before committing?"
 
 Yes! The ProGear demo lets you:
-- Log in as different users (Sarah, Mike, Frank)
+- Log in as different users (Sarah, Mike, Joe, Frank)
 - Ask questions and see what's allowed or denied
-- Watch the security panel show the decisions in real-time
-- View the audit log entries being created
+- Watch the **Token Flow** page show issued tokens and business decisions in real time
+- Use the Okta System Log for the delegated exchanges that were actually attempted
 
 It's a working demonstration, not just slides.
 
@@ -1001,12 +1001,12 @@ AI agents are powerful tools. They can access customer data, financial informati
 **With Okta AI Agent Governance, you have:**
 - Complete visibility into every AI agent and what it accesses
 - The same access controls for AI as for human employees
-- Every action tied to a specific user with complete audit trail
+- Delegated actions tied to both a specific user and a specific agent
 - One-click ability to deactivate an AI agent and stop new delegated access
-- A live check that the actual situation (not just the job title) supports the request
+- A per-action check that combines the live Okta role with the requested quantity
 - Human sign-off automatically required before the highest-stakes actions complete
 
-No single one of these is enough on its own. Identity without the live-situation check would let a valid role push through a change the current facts don't support. The live-situation check without identity would have nothing to verify a person against. And none of it matters if the biggest, hardest-to-reverse actions can still complete without anyone reviewing them. It's the combination - and each layer being unable to override the others - that makes the whole thing trustworthy.
+No single one of these is enough on its own. Identity without the role-and-quantity check would treat every inventory change alike. The quantity check without identity would have no trustworthy role to evaluate. And none of it matters if the largest changes can still complete without qualified review. The combination—and each layer being unable to override the others—is what makes the whole system trustworthy.
 
 **The simple principle:** Your AI agents should be as governed as your employees.
 
@@ -1021,6 +1021,7 @@ The ProGear demo shows this working in real-time:
 1. **Log in as different users**
    - Sarah Sales: Full access to all four data domains
    - Mike Manager: Inventory only
+   - Joe VP: Inventory, including direct large writes
    - Frank Finance: Pricing only
 
 2. **Ask questions and watch the results**
@@ -1028,15 +1029,15 @@ The ProGear demo shows this working in real-time:
    - See what gets denied and why
    - Watch the AI handle boundaries gracefully
 
-3. **View the security panel**
+3. **View the Token Flow page**
    - See the AI agent's identity
    - Watch token exchanges happen in real-time
    - See granted vs. denied access
 
-4. **Check the audit log**
-   - Every interaction is recorded
-   - Complete details for each access attempt
-   - Exactly what auditors want to see
+4. **Check the Okta System Log**
+   - Delegated exchange attempts are recorded independently of the app
+   - User, agent, target authorization server, scopes, and outcome remain attributable
+   - Pre-exchange role denials remain visible as application business decisions
 
 Reading about security is one thing. Watching it work is another.
 

@@ -2,7 +2,7 @@
 
 > **AI agents are identities. Every delegated action stays attributable.** CourtEdge ProGear registers its customer-owned sales agent in Okta as a [Workload Principal](https://developer.okta.com/docs/api/secures-ai/ai-agents)—a first-class identity with its own owners, credentials, lifecycle, resource connections, and audit trail. When the agent acts for Sarah, Mike, or Joe, **Cross App Access (XAA)** uses the [IETF Identity Assertion JWT Authorization Grant (ID-JAG)](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-identity-assertion-authz-grant) to carry the user's identity across trust domains while identifying the agent client acting on that user's behalf. The result is a traceable delegation chain: **user → agent → resource → scope → action**. [Explore XAA.dev](https://xaa.dev/).
 
-**FGA** then evaluates the signed clearance level and requested quantity. **Okta Identity Governance** is used for one deliberate escalation: a Manager requesting more than 600 units needs VP approval.
+**FGA** then evaluates the signed clearance level and requested quantity. [**Okta Identity Governance**](https://developer.okta.com/docs/api/iga) is used for one deliberate escalation: a Manager requesting more than 600 units needs VP approval.
 
 ![Okta AI Agent Governance](https://img.shields.io/badge/Okta-AI%20Agent%20Governance-blue)
 ![FGA](https://img.shields.io/badge/Fine--Grained-Authorization-orange)
@@ -49,7 +49,7 @@ With **Simulate FGA** enabled, the three default Okta role levels tell one compl
 
 Sarah, Mike, and Joe are example personas, not hard-coded identities. The backend resolves the authenticated employee's current Okta profile by subject on every request, so any user assigned `clearance_level` 0, 1, or 2 follows the same Sales, Manager, or VP policy. Use your Okta identity-lifecycle or profile-mapping process to assign that value when onboarding additional users.
 
-For the approval demo, assign the **Okta Access Requests** app to the Manager and VP groups, push `ProGear-VPs` into Access Requests, and assign the request type's approval task to that pushed group. The backend sends Mike's Okta user ID in `requesterUserIds`, so OIG shows the signed-in Manager as the requester and the service credential owner separately as the request creator. Joe opens **Okta Access Requests → Inbox → Open** to approve or deny the task.
+For the approval demo, assign the **Okta Access Requests** app to the Manager and VP groups, push `ProGear-VPs` into Access Requests, and assign the request type's approval task to that pushed group. The backend sends Mike's Okta user ID in `requesterUserIds`, so OIG shows the signed-in Manager as the requester and the service credential owner separately as the request creator. Joe opens **Okta Access Requests → Inbox → Open** to approve or deny the task. The approval card contains only a concise human summary; the exact machine-readable execution intent stays in the backend approval ledger.
 
 ## What This Demo Shows
 
@@ -100,7 +100,7 @@ Okta governs one **ProGear Sales Agent** workload identity. The application cont
 
 ### A known, honest limitation
 
-There's a real, working MCP server in this repo (`packages/progear-sales-mcp-server`), a JWT-validating Express server that is deployed separately. **It is not currently in the live request path.** The backend's internal resource boundary independently validates every Okta token's signature, issuer, audience, expiry, agent identity, delegated user, and required scope before data access. Inventory writes additionally require the final simple/FGA decision to be `allow`; the old simulated-success fallback has been removed. The internal domain component then calls `demo_store` in-process rather than calling the standalone MCP server over HTTP.
+There's a separately deployable MCP sample in this repo (`packages/progear-sales-mcp-server`). **It is not currently in the live request path and is not production-hardened.** Its explicit local-demo bypasses must be removed before it protects real data. The live backend's in-process resource boundary fails closed and independently validates every Okta token's signature, issuer, audience, expiry, agent identity, delegated user, and required scope before data access. Inventory writes additionally require the final simple/FGA decision to be `allow`; the old simulated-success fallback has been removed.
 
 ## Quickstart
 
@@ -117,7 +117,7 @@ pip install -r requirements.txt
 uvicorn api.main:app --reload
 ```
 
-Copy `.env.example` to `.env` and fill in real values before running anything. See it for every variable name used across the frontend, backend, and MCP server (Okta org/app/agent config, Anthropic key, FGA store, etc.).
+Copy `.env.example` to `.env` and fill in real values before running anything. It lists the primary frontend, backend, and MCP sample settings, plus comments for advanced optional overrides.
 
 For a full walkthrough of Okta org setup (AI Agent, Custom Authorization Servers, groups), FGA store setup, and deploying to Vercel + Render, see **[docs/implementation-guide.md](docs/implementation-guide.md)** (it also covers recovering from an accidentally deleted AI Agent).
 
@@ -127,7 +127,7 @@ For a full walkthrough of Okta org setup (AI Agent, Custom Authorization Servers
 
 <a href="https://colab.research.google.com/github/oktaforai-okta/ProGearSalesAI/blob/main/notebooks/progear-inventory-authorization-story.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open ProGear Inventory Authorization Story in Colab"/></a>
 
-**[Secure your custom AI agent with Okta](notebooks/progear-inventory-authorization-story.ipynb)** is a layered business-to-implementation guide. New readers can follow the Sarah-versus-Mike story without code; architects and developers can map the pattern to a customer-owned agent, configure Okta for AI Agents, inspect the two-step ID-JAG exchange, use the platform-neutral Python reference module, validate resource tokens, and work through production and troubleshooting checklists. Default labs use only local examples or read-only checks and contain no credentials.
+**[Secure your custom AI agent with Okta](notebooks/progear-inventory-authorization-story.ipynb)** is a layered business-to-implementation guide. New readers can follow the Sarah-versus-Mike story without code; architects and developers can map the pattern to a customer-owned agent, configure Okta for AI Agents, inspect the two-step ID-JAG exchange, use the platform-neutral Python reference module, validate resource tokens, and work through production and troubleshooting checklists. It intentionally stops at the introductory Okta identity, scope, and exchange story—FGA and OIG remain in the application documentation. Default labs use only local examples or read-only checks and contain no credentials.
 
 ## Documentation
 
@@ -158,7 +158,7 @@ ProGearSalesAI/
 │   └── data/                       # demo_store.py, initial_data.json (seed data)
 ├── packages/
 │   ├── progear-sales-agent/        # Next.js frontend (chat, /tokens, /architecture)
-│   └── progear-sales-mcp-server/   # Standalone JWT-validating MCP server (not yet wired into the chat flow)
+│   └── progear-sales-mcp-server/   # Standalone MCP sample (not in the live path; harden before production)
 ├── docs/                           # architecture.md, implementation-guide.md, etc.
 ├── notebooks/                      # Layered customer Colab integration guide
 ├── examples/                       # Platform-neutral token exchange reference

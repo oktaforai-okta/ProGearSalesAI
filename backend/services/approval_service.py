@@ -5,7 +5,7 @@ Depends on:
 - A demo_store-like object supporting update_inventory_quantity(sku, qty, op, idempotency_key)
 - A service-token minter: callable(scope: str) -> str returning an access token
 - A clock:  callable() -> datetime.datetime (UTC)
-- A file path for the idempotency ledger (survives restarts; see ledger_path)
+- A file path for the idempotency ledger (durable only on persistent storage)
 
 All external I/O lives in those dependencies; the service itself is pure orchestration.
 """
@@ -102,9 +102,10 @@ class _LedgerEntry:
 class _Ledger:
     """File-backed idempotency ledger keyed by OIG request_id.
 
-    Lives next to backend/data/live_data.json so it survives FastAPI restarts
-    on Render's persistent disk. Not multi-replica-safe; the demo runs on a
-    single process.
+    The default path lives next to backend/data/live_data.json. Hosted
+    deployments must set APPROVALS_LEDGER_PATH to a persistent mount if this
+    state must survive deploys or instance replacement. Not multi-replica-safe;
+    the demo runs on a single process.
     """
 
     def __init__(self, path: str | os.PathLike[str]):
@@ -278,7 +279,7 @@ class ApprovalService:
         if not request_id:
             raise RuntimeError(f"OIG response missing request id: {created!r}")
         # Keep execution data out of OIG's requester-visible Justification field.
-        # The persistent ledger supplies the exact action after approval while
+        # The file-backed ledger supplies the exact action after approval while
         # OIG presents only the concise decision context to the approver.
         self._ledger.put(
             request_id,

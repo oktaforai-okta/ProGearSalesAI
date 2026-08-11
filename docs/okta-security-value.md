@@ -285,7 +285,7 @@ This is also why the "no down-scoping" behavior you saw in the denied audit log 
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│  Applications → AI Agents                                           │
+│  Directory → AI Agents                                              │
 ├─────────────────────────────────────────────────────────────────────┤
 │                                                                     │
 │  ProGear Sales Agent                                                │
@@ -669,8 +669,8 @@ When Mike Manager (warehouse team) tries to access customer data:
 │  4. POLICY            Access controlled by group membership     │
 │     ────────────────  (same policies that govern human access)  │
 │                                                                 │
-│  5. AUDITABILITY      Every action logged with full context     │
-│     ────────────────  (who, what, when, why, outcome)           │
+│  5. AUDITABILITY      Exchanges show user + agent               │
+│     ────────────────  (target, scopes, policy, outcome)          │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -679,7 +679,7 @@ When Mike Manager (warehouse team) tries to access customer data:
 
 If an AI agent is compromised or behaving unexpectedly:
 
-1. Go to **Applications** → **AI Agents**
+1. Go to **Directory** → **AI Agents**
 2. Find the agent
 3. Click **Deactivate**
 
@@ -723,7 +723,7 @@ Okta and FGA are not answering the same question twice. Okta authenticates the e
 
 An action can have a valid token but still require a higher role before it executes. That is where Okta Identity Governance supplies the human-in-the-loop step.
 
-In this demo, **Sales writes are denied without creating an access request**. **A Manager write of 601 or more requires VP approval**. The backend creates an **Okta Identity Governance (OIG)** request with the required role and justification, makes no inventory change while it is pending, and verifies the approver's current Level 2 Okta role before executing an approved change.
+In this demo, **Sales writes are denied without creating an access request**. **A Manager write of 601 or more requires VP approval**. The backend creates an **Okta Identity Governance (OIG)** request with a concise human summary, keeps the exact execution intent in its approval ledger, makes no inventory change while the request is pending, and verifies the approver's current Level 2 Okta role before executing an approved change.
 
 ### Why add a third gate when the first two already said yes?
 
@@ -784,7 +784,7 @@ Routing this through Okta Identity Governance, rather than a bespoke approval bo
 
 ### "Which AI systems can access our data?"
 
-**Answer:** Go to **Applications** → **AI Agents** in Okta Admin Console. You'll see every registered AI agent, its owner, its status, and what it can access.
+**Answer:** Go to **Directory** → **AI Agents** in Okta Admin Console. You'll see every registered AI agent, its owner, its status, and what it can access.
 
 ### "Who is responsible for this AI agent?"
 
@@ -826,7 +826,7 @@ Routing this through Okta Identity Governance, rather than a bespoke approval bo
 │   ✓ Same pattern extends to external SaaS (Scenario 4)          │
 │   ✓ Validated by MCP adoption of Cross App Access               │
 │                                                                 │
-│   ✓ Layer 2: FGA for live, relationship-based context           │
+│   ✓ Layer 2: FGA for role-and-quantity decisions                │
 │   ✓ Layer 3: Human approval for high-magnitude actions          │
 │                                                                 │
 │   Your AI agents should be as governed as your employees.       │
@@ -842,7 +842,7 @@ No single layer above is sufficient by itself. Identity establishes the user, ag
 
 1. **Run the Demo** - See Scenario 2 in action with real token exchanges
 2. **Check the Logs** - Verify the audit trail in your Okta System Log
-3. **Try Different Users** - Log in as Sarah, Mike, and Frank to see different access levels
+3. **Try Different Users** - Log in as Sarah, Mike, Joe, and Frank to see different access levels
 4. **Plan for Scenarios 3 & 4** - Same infrastructure, expanding scope
 
 ---
