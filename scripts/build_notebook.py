@@ -71,14 +71,18 @@ cells = [
     code(
         r'''
         # @title Name your first integration
+        OKTA_DOMAIN = "https://your-org.oktapreview.com" # @param {type:"string"}
         AGENT_NAME = "My Custom Agent" # @param {type:"string"}
         RESOURCE_NAME = "My Protected API" # @param {type:"string"}
+        RESOURCE_URL = "" # @param {type:"string"}
         RESOURCE_AUDIENCE = "api://my-protected-api" # @param {type:"string"}
         RESOURCE_SCOPE = "resource.read" # @param {type:"string"}
         REDIRECT_URI = "http://localhost:8080/authorization-code/callback" # @param {type:"string"}
 
+        print(f"Okta org:  {OKTA_DOMAIN}")
         print(f"Agent:     {AGENT_NAME}")
         print(f"Resource:  {RESOURCE_NAME}")
+        print(f"API URL:   {RESOURCE_URL or '(add later)'}")
         print(f"Audience:  {RESOURCE_AUDIENCE}")
         print(f"Scope:     {RESOURCE_SCOPE}")
         print(f"Callback:  {REDIRECT_URI}")
@@ -215,26 +219,22 @@ cells = [
         | Authorization Server ID | Custom Authorization Server |
         | Audience + scope | Resource server configuration |
 
-        Choose **Load existing Colab Secrets** to reuse a saved environment, or enter the generated IDs once below. The runtime cells reuse this receipt automatically.
+        You already entered your Okta domain, audience, scope, redirect URI, agent, and resource. Enter only the identifiers Okta generated while you completed Steps 1–3. The runtime cells reuse this receipt automatically.
         '''
     ),
     code(
         r'''
-        # @title Save or load your configuration once
+        # @title Record the Okta-generated IDs once
         MODE = "Guided preview" # @param ["Guided preview", "Live Okta"]
-        CONFIG_SOURCE = "Enter generated IDs once" # @param ["Enter generated IDs once", "Load existing Colab Secrets"]
-        OKTA_DOMAIN_INPUT = "https://your-org.oktapreview.com" # @param {type:"string"}
         SIGN_IN_CLIENT_ID_INPUT = "your-sign-in-client-id" # @param {type:"string"}
         AUTHORIZATION_SERVER_ID_INPUT = "your-authorization-server-id" # @param {type:"string"}
         AGENT_CLIENT_ID_INPUT = "your-workload-principal-id" # @param {type:"string"}
         AGENT_KEY_ID_INPUT = "your-agent-key-id" # @param {type:"string"}
-        RESOURCE_URL_INPUT = "" # @param {type:"string"}
         PREVIEW_USER_EMAIL = "alex@example.com" # @param {type:"string"}
         PREVIEW_POLICY = "Allow requested scope" # @param ["Allow requested scope", "Deny requested scope"]
 
         print(f"Mode:   {MODE}")
-        print(f"Source: {CONFIG_SOURCE}")
-        print("The runtime will reuse this receipt; these values are not entered again.")
+        print("Saved. The runtime will reuse this receipt; these values are not entered again.")
         '''
     ),
     markdown(
@@ -325,18 +325,16 @@ cells = [
         r'''
         ## Load the saved configuration
 
-        This cell reads the receipt above. With **Load existing Colab Secrets**, use the same uppercase names shown in the runtime map plus `AGENT_PRIVATE_JWK` and, when needed, `USER_CLIENT_SECRET`.
+        This cell automatically combines the choices from the planning cell with the Okta-generated identifiers in the receipt. Live mode loads only sensitive values from Colab Secrets: `AGENT_PRIVATE_JWK` and, when needed, `USER_CLIENT_SECRET`.
         '''
     ),
     code(
         r'''
         LIVE = MODE == "Live Okta"
-        OKTA_DOMAIN = OKTA_DOMAIN_INPUT
         SIGN_IN_CLIENT_ID = SIGN_IN_CLIENT_ID_INPUT
         AUTHORIZATION_SERVER_ID = AUTHORIZATION_SERVER_ID_INPUT
         AGENT_CLIENT_ID = AGENT_CLIENT_ID_INPUT
         AGENT_KEY_ID = AGENT_KEY_ID_INPUT
-        RESOURCE_URL = RESOURCE_URL_INPUT
         USER_CLIENT_SECRET = None
         AGENT_PRIVATE_JWK = None
 
@@ -354,20 +352,6 @@ cells = [
                 if not value:
                     raise RuntimeError(f"Add {name} to Colab Secrets.")
                 return value
-
-            if CONFIG_SOURCE == "Load existing Colab Secrets":
-                OKTA_DOMAIN = required_secret("OKTA_DOMAIN")
-                SIGN_IN_CLIENT_ID = required_secret("SIGN_IN_CLIENT_ID")
-                AUTHORIZATION_SERVER_ID = required_secret("AUTHORIZATION_SERVER_ID")
-                AGENT_CLIENT_ID = required_secret("AGENT_CLIENT_ID")
-                AGENT_KEY_ID = required_secret("AGENT_KEY_ID")
-                REDIRECT_URI = required_secret("REDIRECT_URI")
-                RESOURCE_AUDIENCE = required_secret("RESOURCE_AUDIENCE")
-                RESOURCE_SCOPE = required_secret("RESOURCE_SCOPE")
-                try:
-                    RESOURCE_URL = userdata.get("RESOURCE_URL") or ""
-                except Exception:
-                    RESOURCE_URL = ""
 
             try:
                 USER_CLIENT_SECRET = userdata.get("USER_CLIENT_SECRET")
