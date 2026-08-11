@@ -779,7 +779,7 @@ So this demo adds a second, automatic check that combines the live Okta role wit
 
 **Why use both Okta and FGA?** Okta remains the source of truth for identity and role level and issues the narrow Inventory token. The Inventory boundary validates that signed token. FGA is purpose-built to combine the role with the requested quantity for one action, without keeping a second mutable role copy that could drift from Okta.
 
-**In plain terms:** Sarah (Level 0) can read, but every write stops before delegated token exchange and she contacts her manager. Mike (Level 1) can write through 600 units, but 601 needs a VP. A Level 2 VP can execute any quantity.
+**In plain terms:** Sarah (Level 0, Manager False) can read, but every write stops before delegated token exchange and she contacts her manager. Mike (Level 1, Manager True) can write through 600 units, but 601 needs a VP. A Level 2 VP (Manager True) can execute any quantity. If any employee is marked On vacation, the agent stops before ID-JAG for every action; the role remains unchanged, but delegated work is suspended.
 
 ### Check #3: Should a human still look at this one?
 
@@ -792,7 +792,7 @@ In this demo, Sales writes never become access requests. A Manager write of 601 
 - "May this role execute this quantity?" is the FGA decision: Manager for normal changes, VP for 601+.
 - "Did a qualified person approve it?" is the governance decision. The request and decision are recorded in Okta Identity Governance, and the approver still has to hold the required role when execution occurs.
 
-Put the checks together and the picture is crisp: Okta establishes identity and the role claim; FGA decides direct execution, Sales denial, or Manager-to-VP escalation using role and quantity; OIG records the required VP decision. None can be skipped by getting past another.
+Put the checks together and the picture is crisp: Okta establishes identity, checks whether delegation is currently appropriate, and supplies the role claim; FGA decides direct execution, Sales denial, or Manager-to-VP escalation using role and quantity; OIG records the required VP decision. None can be skipped by getting past another.
 
 ---
 

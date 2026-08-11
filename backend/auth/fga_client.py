@@ -274,6 +274,8 @@ def get_fga_model_info() -> Dict[str, Any]:
         },
         "claims_used": [
             {"name": "Clearance", "okta_attribute": "user.clearance_level", "description": "0=Sales, 1=Manager, 2=VP"},
+            {"name": "Manager", "okta_attribute": "user.is_a_manager", "description": "Derived from the role level"},
+            {"name": "Vacation", "okta_attribute": "user.is_on_vacation", "description": "Enforced before ID-JAG"},
         ],
     }
 

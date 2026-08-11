@@ -182,7 +182,9 @@ function DecisionSection({ decision }: { decision: AuthorizationDecision }) {
       : decision.outcome === 'blocked'
         ? {
             Icon: XCircle,
-            label: 'Blocked — no inventory change',
+            label: decision.engine === 'Okta delegation policy'
+              ? 'Blocked — no delegated access'
+              : 'Blocked — no inventory change',
             classes: 'border-red-200 bg-red-50 text-red-800',
           }
         : {
@@ -194,7 +196,7 @@ function DecisionSection({ decision }: { decision: AuthorizationDecision }) {
   const modeLabel = decision.mode === 'fga'
     ? 'FGA'
     : decision.mode === 'okta'
-      ? 'Okta clearance'
+      ? (decision.engine === 'Okta delegation policy' ? 'Okta delegation' : 'Okta clearance')
       : 'Simple role policy';
 
   return (
@@ -236,7 +238,7 @@ function StoppedExchangeSection({
         <ShieldOff className="h-4 w-4 shrink-0" />
         <span className="text-sm font-semibold">Exchange stopped after Step 1</span>
         <span className="ml-auto rounded-full bg-white/70 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide">
-          {decision ? 'Clearance denied' : stopLabel}
+          {decision?.engine === 'Okta delegation policy' ? 'Delegation stopped' : decision ? 'Clearance denied' : stopLabel}
         </span>
       </div>
       <p className="mt-1 text-xs leading-relaxed">{reason}</p>
@@ -281,9 +283,13 @@ export default function RawTokensCard({ exchanges, decisions, idTokenRaw, stopRe
     acc[decision.agent] = decision;
     return acc;
   }, {} as Record<string, AuthorizationDecision>);
-  const stoppedDecisions = Object.values(latestDecisions).filter(
+  const allStoppedDecisions = Object.values(latestDecisions).filter(
     (decision) => decision.outcome === 'blocked' && !latestExchanges[decision.agent]
   );
+  const vacationStop = allStoppedDecisions.find(
+    (decision) => decision.engine === 'Okta delegation policy'
+  );
+  const stoppedDecisions = vacationStop ? [vacationStop] : allStoppedDecisions;
   const hasAnyTokens = !!idTokenRaw || relevantExchanges.length > 0;
   const hasDelegatedExchange = relevantExchanges.length > 0;
   const hasAnyEvidence = hasAnyTokens || stoppedDecisions.length > 0 || !!stopReason;

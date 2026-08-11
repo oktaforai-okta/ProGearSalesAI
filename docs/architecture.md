@@ -59,13 +59,13 @@ Deleting the Workload Principal invalidates the agent identity even if a previou
 
 The core mechanism is the **Identity Assertion JWT Authorization Grant (ID-JAG)**, implemented in `backend/auth/multi_agent_auth.py`. It is a two-step exchange, and both steps run for each resource domain required by the request:
 
-Before Step 1, the backend verifies the employee's OIDC ID token and reads the employee's current `clearance_level` from the Okta profile. A known-ineligible inventory write stops here: Sarah is told to contact her manager, and no delegated token is requested. In simple mode, Mike's 601+ write likewise stops with VP guidance. Reads and eligible writes continue.
+Before Step 1, the backend verifies the employee's OIDC ID token and reads the employee's live `clearance_level`, derived Manager status, and vacation status from Okta. Vacation True stops all delegated work here, regardless of resource or action. Otherwise, a known-ineligible inventory write also stops here: Sarah is told to contact her manager, and no delegated token is requested. In simple mode, Mike's 601+ write likewise stops with VP guidance. Reads and eligible writes continue.
 
 **Step 1: ID token → ID-JAG (at the Org Authorization Server)**
 The user's Okta ID token (from their NextAuth login) is exchanged for an ID-JAG assertion. This assertion names *both* the user and the agent: "Agent X is acting on behalf of User Y." This happens at Okta's Org AS (configured via `OKTA_MAIN_AUTH_SERVER_ID`), using the agent's RSA keypair, not the user's credentials.
 
 **Step 2: ID-JAG → scoped access token (at a per-domain Custom Authorization Server)**
-The ID-JAG assertion is then exchanged for an actual access token at the Custom Authorization Server for the specific business domain the request needs (Sales, Inventory, Customer, or Pricing). This is where Okta's access policies evaluate whether this user and agent may receive the requested resource scope. The resulting access token is scoped, short-lived, and, for Inventory, carries the `Clearance` claim that feeds the FGA layer described below. A compatibility `Manager` claim may still exist in Okta, but application authorization does not read it.
+The ID-JAG assertion is then exchanged for an actual access token at the Custom Authorization Server for the specific business domain the request needs (Sales, Inventory, Customer, or Pricing). This is where Okta's access policies evaluate whether this user and agent may receive the requested resource scope. The resulting access token is scoped, short-lived, and, for Inventory, carries the live `Clearance`, `Manager`, and `Vacation` claims. `Clearance` feeds FGA; `Manager` is the synchronized human-readable role fact; vacation has already been enforced before delegation.
 
 **No down-scoping.** If any one of the requested scopes isn't grantable to this user under this agent's policy, Okta doesn't silently drop that scope and grant the rest: the *entire* exchange fails with `access_denied`. `multi_agent_auth.py` treats `no_matching_policy`, `access_denied`, and Okta's generic "Policy evaluation failed" 401 as the same outcome and returns a clean `access_denied` result rather than a partial grant or a raw error.
 
@@ -95,7 +95,7 @@ router → pre_exchange_guard → exchange_tokens → fga_check → approval_gat
 ```
 
 - **router**: an LLM call (Claude, via the raw Anthropic SDK) decides which internal domain components are relevant to the user's message and, critically, which *specific scope* is needed. For example, "what's our basketball stock?" needs `inventory:read`, while "add 500 basketballs" needs `inventory:write`. If the LLM call or its JSON parsing fails, a keyword-matching fallback (`AGENT_KEYWORDS` / `SCOPE_DEFINITIONS`) selects the domain and scope instead.
-- **pre_exchange_guard**: applies the employee's live Okta clearance to known inventory-write boundaries before asking for delegated credentials. Sales writes stop with manager guidance in both modes; a Manager 601+ write stops in simple mode but continues to the FGA/OIG path when FGA is enabled.
+- **pre_exchange_guard**: first applies the employee's live vacation status globally. Vacation True stops every selected resource before ID-JAG. When vacation is False, the same node applies the Okta clearance to known inventory-write boundaries: Sales writes stop with manager guidance in both modes; a Manager 601+ write stops in simple mode but continues to the FGA/OIG path when FGA is enabled.
 - **exchange_tokens**: runs the two-step ID-JAG exchange for every selected resource domain, then independently verifies the resource token's signature, issuer, audience, expiry, governed-agent identity, delegated user, and requested scopes in `backend/auth/resource_token.py`.
 - **fga_check**: the FGA layer described below. It runs after validation because the Inventory Custom Authorization Server's access token carries the authoritative `Clearance` claim.
 - **approval_gate**: the OIG human-in-the-loop check, described below.
@@ -116,7 +116,7 @@ The presentation UI makes this advanced path opt-in. With **Simulate FGA** off, 
 
 ### The model
 
-`clearance_level` means role, not item sensitivity: 0 = Sales, 1 = Manager, 2 = VP. The version-controlled FGA model is `backend/auth/fga_role_model.json`:
+`clearance_level` means role, not item sensitivity: 0 = Sales, 1 = Manager, 2 = VP. `is_a_manager` is synchronized from that role; `is_on_vacation` is the earlier delegation gate and is not duplicated as an FGA relation. The version-controlled FGA model is `backend/auth/fga_role_model.json`:
 
 ```
 type user
@@ -205,10 +205,11 @@ Every ID-JAG exchange that is actually attempted, whether granted or denied, pro
 
 ## 9. Cutting off access
 
-Two independent mechanisms can stop new agent actions. The distinction between **stopping new token issuance** and **revoking a token already issued** matters operationally.
+Three independent mechanisms can stop or constrain new agent actions. The distinction between **stopping new token issuance** and **revoking a token already issued** matters operationally.
 
 - **Deactivate the Workload Principal.** An admin can deactivate the AI agent's identity in Okta directly. The next ID-JAG exchange attempt for that agent fails outright, so the agent cannot obtain a new resource access token. A resource token issued before deactivation remains governed by its short expiry and the resource server's revocation policy; keep token lifetimes narrow and validation strict.
-- **Change the live role.** The role derived from `clearance_level` is a contextual tuple evaluated at check time, so the next exchanged token drives the next decision without a redeploy or mutable role copy in FGA. `POST /api/admin/demo-toggle` lets the signed-in user change only their own `clearance_level` to 0, 1, or 2; `/api/admin/demo-reset` restores the persona's starting role. The caller identity comes from a cryptographically validated Okta ID token, never from the request body (`backend/auth/demo_admin.py`).
+- **Mark the employee on vacation.** `is_on_vacation=true` stops the agent before it requests an ID-JAG for any resource. This is a user-context containment control, useful when the employee is away or their sign-in credentials may have been exposed. It does not deactivate the agent for everyone.
+- **Change the live role.** The role derived from `clearance_level` is a contextual tuple evaluated at check time, so the next exchanged token drives the next decision without a redeploy or mutable role copy in FGA. `POST /api/admin/demo-toggle` lets the signed-in user change their role or vacation state; a role change synchronizes `is_a_manager`. `/api/admin/demo-reset` restores the persona's starting role and vacation False. The caller identity comes from a cryptographically validated Okta ID token, never from the request body (`backend/auth/demo_admin.py`).
 
 ---
 

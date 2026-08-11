@@ -32,7 +32,7 @@ export default function ArchitecturePage() {
           <div>
             <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-700 dark:text-blue-300">ProGear security model</p>
             <h2 className="mt-1 text-2xl font-black tracking-tight text-slate-950 dark:text-white sm:text-3xl">User → agent → authorized resource</h2>
-            <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">Okta governs identity and token exchange. FGA adds the optional Inventory decision.</p>
+            <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">Okta governs identity, live delegation context, and token exchange. FGA adds the optional Inventory decision.</p>
           </div>
           <div className="flex flex-wrap gap-2 text-[11px] font-semibold text-slate-600 dark:text-slate-300">
             <span className="rounded-full border border-slate-300 px-3 py-1.5 dark:border-slate-700">Workload Principal</span>

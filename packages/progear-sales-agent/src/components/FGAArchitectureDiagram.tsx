@@ -11,7 +11,7 @@ type DiagramNode = {
   width: number;
   height: number;
   title: string;
-  detail: string;
+  detail: string[];
   color: string;
 };
 
@@ -19,23 +19,29 @@ type DiagramLink = {
   source: [number, number];
   target: [number, number];
   color: string;
+  label?: string;
+  labelAt?: [number, number];
 };
 
 const NODES: DiagramNode[] = [
-  { id: 'okta', x: 28, y: 126, width: 170, height: 78, title: 'Okta identity', detail: 'Clearance 0, 1, or 2', color: '#2563eb' },
-  { id: 'token', x: 255, y: 126, width: 170, height: 78, title: 'Inventory token', detail: 'Signed live claims', color: '#0284c7' },
-  { id: 'fga', x: 492, y: 105, width: 195, height: 120, title: 'FGA', detail: 'Role + action + quantity', color: '#7c3aed' },
-  { id: 'allow', x: 772, y: 30, width: 178, height: 70, title: 'Execute', detail: 'Role is high enough', color: '#059669' },
-  { id: 'approve', x: 772, y: 137, width: 178, height: 70, title: 'Ask for approval', detail: 'Manager 601+ → VP', color: '#d97706' },
-  { id: 'deny', x: 772, y: 244, width: 178, height: 70, title: 'Block the write', detail: 'Sales is read-only', color: '#dc2626' },
+  { id: 'okta', x: 20, y: 132, width: 165, height: 86, title: 'Okta profile', detail: ['Clearance 0, 1, or 2', 'Manager + vacation'], color: '#2563eb' },
+  { id: 'delegation', x: 230, y: 112, width: 185, height: 126, title: 'Delegation gate', detail: ['Vacation = False', 'Agent may continue'], color: '#0f766e' },
+  { id: 'token', x: 470, y: 132, width: 165, height: 86, title: 'Inventory token', detail: ['Signed live role', 'Scoped resource access'], color: '#0284c7' },
+  { id: 'fga', x: 690, y: 112, width: 185, height: 126, title: 'FGA', detail: ['Role + action', '+ quantity'], color: '#7c3aed' },
+  { id: 'allow', x: 950, y: 24, width: 180, height: 76, title: 'Execute', detail: ['Role meets the tier'], color: '#059669' },
+  { id: 'approve', x: 950, y: 144, width: 180, height: 76, title: 'Ask for approval', detail: ['Manager 601+ → VP'], color: '#d97706' },
+  { id: 'deny', x: 950, y: 264, width: 180, height: 76, title: 'Block the write', detail: ['Sales is read-only'], color: '#dc2626' },
+  { id: 'away', x: 230, y: 300, width: 185, height: 76, title: 'Stop delegation', detail: ['Vacation = True', 'No ID-JAG requested'], color: '#dc2626' },
 ];
 
 const LINKS: DiagramLink[] = [
-  { source: [198, 165], target: [255, 165], color: '#94a3b8' },
-  { source: [425, 165], target: [492, 165], color: '#94a3b8' },
-  { source: [687, 133], target: [772, 65], color: '#059669' },
-  { source: [687, 165], target: [772, 172], color: '#d97706' },
-  { source: [687, 197], target: [772, 279], color: '#dc2626' },
+  { source: [185, 175], target: [230, 175], color: '#94a3b8' },
+  { source: [415, 175], target: [470, 175], color: '#0f766e', label: 'False', labelAt: [443, 162] },
+  { source: [322, 238], target: [322, 300], color: '#dc2626', label: 'True', labelAt: [340, 273] },
+  { source: [635, 175], target: [690, 175], color: '#94a3b8' },
+  { source: [875, 143], target: [950, 62], color: '#059669' },
+  { source: [875, 175], target: [950, 182], color: '#d97706' },
+  { source: [875, 207], target: [950, 302], color: '#dc2626' },
 ];
 
 export default function FGAArchitectureDiagram() {
@@ -63,6 +69,17 @@ export default function FGAArchitectureDiagram() {
       .attr('stroke', (link) => link.color)
       .attr('stroke-width', 2.5)
       .attr('stroke-linecap', 'round');
+
+    links
+      .filter((link) => Boolean(link.label && link.labelAt))
+      .append('text')
+      .attr('x', (link) => link.labelAt?.[0] ?? 0)
+      .attr('y', (link) => link.labelAt?.[1] ?? 0)
+      .attr('text-anchor', 'middle')
+      .attr('class', 'fill-slate-600 dark:fill-slate-300')
+      .attr('font-size', 10)
+      .attr('font-weight', 700)
+      .text((link) => link.label ?? '');
 
     const nodes = layer
       .append('g')
@@ -102,17 +119,22 @@ export default function FGAArchitectureDiagram() {
       .attr('y', 52)
       .attr('class', 'fill-slate-500 dark:fill-slate-300')
       .attr('font-size', 11)
-      .text((node) => node.detail);
+      .selectAll('tspan')
+      .data((node) => node.detail)
+      .join('tspan')
+      .attr('x', 18)
+      .attr('dy', (_, index) => index === 0 ? 0 : 17)
+      .text((line) => line);
   }, []);
 
   return (
     <div className="overflow-x-auto rounded-xl border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-950/60">
       <svg
         ref={svgRef}
-        viewBox="0 0 980 344"
+        viewBox="0 0 1150 400"
         className="w-full min-w-[760px]"
         role="img"
-        aria-label="Okta sends the user's clearance level to FGA. FGA either executes the inventory action, sends a Manager request above 600 units to a VP, or blocks a Sales write."
+        aria-label="Okta profile context reaches a delegation gate. Vacation true stops before ID-JAG. Vacation false allows a scoped Inventory token, then FGA uses role, action, and quantity to execute, request VP approval, or block the write."
       />
     </div>
   );

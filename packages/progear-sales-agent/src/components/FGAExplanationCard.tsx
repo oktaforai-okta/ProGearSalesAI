@@ -29,25 +29,40 @@ interface FGACheck {
 
 interface Props {
   checks: FGACheck[];
+  decisions?: AuthorizationDecision[];
   isLoading?: boolean;
 }
 
+interface AuthorizationDecision {
+  agent: string;
+  engine: string;
+  outcome: string;
+  reason: string;
+}
+
 const ROLE_ROWS = [
-  { level: '0 — Sales', read: 'Yes', standard: 'Contact manager', large: 'Contact manager' },
-  { level: '1 — Manager', read: 'Yes', standard: 'Execute', large: 'VP approval' },
-  { level: '2 — VP', read: 'Yes', standard: 'Execute', large: 'Execute' },
+  { level: '0 — Sales', manager: 'False', read: 'Yes', standard: 'Contact manager', large: 'Contact manager' },
+  { level: '1 — Manager', manager: 'True', read: 'Yes', standard: 'Execute', large: 'VP approval' },
+  { level: '2 — VP', manager: 'True', read: 'Yes', standard: 'Execute', large: 'Execute' },
 ] as const;
 
-export default function FGAExplanationCard({ checks, isLoading = false }: Props) {
+export default function FGAExplanationCard({ checks, decisions = [], isLoading = false }: Props) {
   const [isExpanded, setIsExpanded] = useState(true);
   const latest = [...checks].reverse().find((check) => check.agent === 'inventory');
+  const latestDelegationStop = [...decisions].reverse().find(
+    (decision) => decision.engine === 'Okta delegation policy' && decision.outcome === 'blocked'
+  );
   const policy = latest?.policy;
   const claims = latest?.user_claims;
 
   let resultLabel = 'No inventory check yet';
   let ResultIcon = Clock3;
   let resultClass = 'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200';
-  if (latest) {
+  if (latestDelegationStop) {
+    resultLabel = 'Delegation stopped before ID-JAG';
+    ResultIcon = XCircle;
+    resultClass = 'border-red-200 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200';
+  } else if (latest) {
     if (policy?.hard_denial_reason) {
       resultLabel = policy.hard_denial_reason;
       ResultIcon = XCircle;
@@ -82,28 +97,34 @@ export default function FGAExplanationCard({ checks, isLoading = false }: Props)
             <Shield className="h-5 w-5" />
             Fine-Grained Authorization (FGA) Architecture
           </h2>
-          <p className="mt-1 text-xs text-white/80">One Okta role level. One live FGA decision.</p>
+          <p className="mt-1 text-xs text-white/80">Okta controls delegation. FGA controls the inventory action.</p>
         </div>
         {isExpanded ? <ChevronUp className="h-5 w-5 text-white" /> : <ChevronDown className="h-5 w-5 text-white" />}
       </button>
 
       {isExpanded ? (
         <div className="space-y-5 p-4">
-          <div className="grid gap-3 md:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-900 dark:bg-blue-950/40">
               <div className="text-xs font-bold uppercase tracking-wide text-blue-700">1. Okta</div>
               <p className="mt-1 text-xs leading-relaxed text-blue-900 dark:text-blue-100">
-                Signs the user’s role level into the inventory token.
+                Holds role, derived Manager status, and vacation status on the employee profile.
+              </p>
+            </div>
+            <div className="rounded-lg border border-teal-200 bg-teal-50 p-3 dark:border-teal-900 dark:bg-teal-950/40">
+              <div className="text-xs font-bold uppercase tracking-wide text-teal-700">2. Delegation</div>
+              <p className="mt-1 text-xs leading-relaxed text-teal-900 dark:text-teal-100">
+                Vacation True stops the agent before ID-JAG. False lets the request continue.
               </p>
             </div>
             <div className="rounded-lg border border-purple-200 bg-purple-50 p-3 dark:border-purple-900 dark:bg-purple-950/40">
-              <div className="text-xs font-bold uppercase tracking-wide text-purple-700">2. FGA</div>
+              <div className="text-xs font-bold uppercase tracking-wide text-purple-700">3. FGA</div>
               <p className="mt-1 text-xs leading-relaxed text-purple-900 dark:text-purple-100">
                 Combines the signed role with the action and quantity on every request.
               </p>
             </div>
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/40">
-              <div className="text-xs font-bold uppercase tracking-wide text-amber-700">3. Okta OIG</div>
+              <div className="text-xs font-bold uppercase tracking-wide text-amber-700">4. Okta OIG</div>
               <p className="mt-1 text-xs leading-relaxed text-amber-900 dark:text-amber-100">
                 Collects VP approval when a Manager requests more than 600 units.
               </p>
@@ -120,6 +141,7 @@ export default function FGAExplanationCard({ checks, isLoading = false }: Props)
                 <thead className="bg-gray-50 text-gray-600 dark:bg-slate-800 dark:text-slate-300">
                   <tr>
                     <th className="px-3 py-2 font-semibold">Role level</th>
+                    <th className="px-3 py-2 font-semibold">Manager</th>
                     <th className="px-3 py-2 font-semibold">Read</th>
                     <th className="px-3 py-2 font-semibold">Write 1–600 units</th>
                     <th className="px-3 py-2 font-semibold">Write 601+ units</th>
@@ -129,6 +151,7 @@ export default function FGAExplanationCard({ checks, isLoading = false }: Props)
                   {ROLE_ROWS.map((row) => (
                     <tr key={row.level}>
                       <th className="whitespace-nowrap px-3 py-2 font-semibold text-gray-900 dark:text-white">{row.level}</th>
+                      <td className="px-3 py-2 text-gray-700 dark:text-slate-300">{row.manager}</td>
                       <td className="px-3 py-2 text-gray-700 dark:text-slate-300">{row.read}</td>
                       <td className="px-3 py-2 text-gray-700 dark:text-slate-300">{row.standard}</td>
                       <td className="px-3 py-2 text-gray-700 dark:text-slate-300">{row.large}</td>
@@ -138,7 +161,7 @@ export default function FGAExplanationCard({ checks, isLoading = false }: Props)
               </table>
             </div>
             <p className="mt-2 text-[11px] text-gray-500 dark:text-slate-400">
-              Sales is always read-only. Only a Manager crossing 600 units creates an approval request.
+              Manager is synchronized from the role level. Vacation True overrides every row and stops all delegated agent work before token exchange.
             </p>
           </div>
 
@@ -152,6 +175,9 @@ export default function FGAExplanationCard({ checks, isLoading = false }: Props)
                 Okta sent Level {claims.clearance_level} — {claims.role_name ?? 'Unknown'} · FGA checked <code>{latest.relation}</code>
                 {policy?.quantity ? ` for ${policy.quantity.toLocaleString()} units` : ''}.
               </p>
+            ) : null}
+            {latestDelegationStop ? (
+              <p className="mt-1 text-xs">{latestDelegationStop.reason}</p>
             ) : null}
           </div>
         </div>

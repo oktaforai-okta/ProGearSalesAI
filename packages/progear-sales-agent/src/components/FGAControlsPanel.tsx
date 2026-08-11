@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
-import { BadgeCheck, Loader2, PauseCircle, PlayCircle, RotateCcw, ShieldAlert } from 'lucide-react';
+import { BadgeCheck, Briefcase, Loader2, PauseCircle, Plane, PlayCircle, RotateCcw, ShieldAlert } from 'lucide-react';
 import { API_BASE_URL } from '@/lib/config';
 import { useFGASimulation } from '@/hooks/useFGASimulation';
 
@@ -12,6 +12,8 @@ interface Props {
 
 interface DemoStatus {
   clearance_level: number;
+  is_a_manager: boolean;
+  is_on_vacation: boolean;
 }
 
 const ROLES = [
@@ -55,7 +57,7 @@ export default function FGAControlsPanel({ onApplied }: Props) {
     }
   }, [isEnabled, loadStatus]);
 
-  async function callToggle(attribute: 'clearance_level', value: number) {
+  async function callToggle(attribute: 'clearance_level' | 'is_on_vacation', value: number | boolean) {
     if (!idToken) return;
     setBusy(attribute);
     setLastResult(null);
@@ -67,8 +69,16 @@ export default function FGAControlsPanel({ onApplied }: Props) {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || 'Update failed');
-      setStatus((previous) => (previous ? { ...previous, [attribute]: data.value } : previous));
-      const message = `Role changed to Level ${data.value} — ${roleForLevel(data.value)?.name ?? 'Unknown'}.`;
+      const values: DemoStatus | undefined = data.values;
+      if (values) {
+        setStatus(values);
+        setRoleLevel(values.clearance_level ?? 0);
+      } else {
+        setStatus((previous) => (previous ? { ...previous, [attribute]: data.value } : previous));
+      }
+      const message = attribute === 'clearance_level'
+        ? `Role changed to Level ${data.value} — ${roleForLevel(data.value)?.name ?? 'Unknown'}. Manager is ${data.values?.is_a_manager ? 'True' : 'False'}.`
+        : `On vacation is now ${data.value ? 'True' : 'False'}.`;
       setLastResult(`${message} The next prompt uses the new Okta value.`);
       onApplied?.();
     } catch (error) {
@@ -90,7 +100,7 @@ export default function FGAControlsPanel({ onApplied }: Props) {
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || 'Reset failed');
       await loadStatus();
-      setLastResult('Restored this persona’s starting role.');
+      setLastResult('Restored this user’s starting role and vacation state. Demo personas return to On vacation False.');
       onApplied?.();
     } catch (error) {
       setLastResult(`Error: ${error instanceof Error ? error.message : 'Reset failed'}`);
@@ -192,6 +202,67 @@ export default function FGAControlsPanel({ onApplied }: Props) {
           </button>
         </div>
 
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70">
+            <div className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
+              <Briefcase className="h-4 w-4 text-emerald-600 dark:text-emerald-300" />
+              Manager
+              <span className={`ml-auto rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                status?.is_a_manager
+                  ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
+                  : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'
+              }`}>
+                {status?.is_a_manager ? 'True' : 'False'}
+              </span>
+            </div>
+            <p className="mt-2 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
+              Derived from role: Sales is False; Manager and VP are True. Changing the role synchronizes this Okta attribute automatically.
+            </p>
+          </div>
+
+          <div className="rounded-lg border border-amber-200 bg-amber-50/70 p-3 dark:border-amber-900 dark:bg-amber-950/25">
+            <div className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
+              <Plane className="h-4 w-4 text-amber-600 dark:text-amber-300" />
+              On vacation
+              <span className={`ml-auto rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                status?.is_on_vacation
+                  ? 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300'
+                  : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
+              }`}>
+                {status?.is_on_vacation ? 'True' : 'False'}
+              </span>
+            </div>
+            <p className="mt-2 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
+              True suspends agent delegation before ID-JAG for every resource. False is the default and allows normal policy checks to continue.
+            </p>
+            <p className="mt-2 text-[11px] font-medium leading-relaxed text-amber-800 dark:text-amber-200">
+              Demo control only. In production, make this an admin or lifecycle-managed attribute—not an employee self-service setting.
+            </p>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              {[true, false].map((value) => (
+                <button
+                  key={String(value)}
+                  type="button"
+                  aria-pressed={status?.is_on_vacation === value}
+                  onClick={() => callToggle('is_on_vacation', value)}
+                  disabled={busy !== null || status?.is_on_vacation === value}
+                  className={`rounded-lg border px-3 py-2 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                    status?.is_on_vacation === value
+                      ? value
+                        ? 'border-red-300 bg-red-100 text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300'
+                        : 'border-emerald-300 bg-emerald-100 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                      : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  {busy === 'is_on_vacation' && status?.is_on_vacation !== value
+                    ? <Loader2 className="mx-auto h-4 w-4 animate-spin" />
+                    : value ? 'True' : 'False'}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
         <button
           type="button"
           onClick={callReset}
@@ -199,7 +270,7 @@ export default function FGAControlsPanel({ onApplied }: Props) {
           className="flex w-full items-center justify-center gap-2 rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
         >
           {busy === 'reset' ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
-          Reset my demo role
+          Reset my demo attributes
         </button>
 
         {lastResult ? (

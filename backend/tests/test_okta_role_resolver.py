@@ -12,7 +12,14 @@ class OktaRoleResolverTests(unittest.IsolatedAsyncioTestCase):
         response = httpx.Response(
             200,
             request=request,
-            json={"id": "00u-new-sales", "profile": {"clearance_level": 0}},
+            json={
+                "id": "00u-new-sales",
+                "profile": {
+                    "clearance_level": 0,
+                    "is_a_manager": False,
+                    "is_on_vacation": False,
+                },
+            },
         )
         mocked_get = AsyncMock(return_value=response)
 
@@ -36,7 +43,14 @@ class OktaRoleResolverTests(unittest.IsolatedAsyncioTestCase):
         response = httpx.Response(
             200,
             request=request,
-            json={"id": "00u-manager", "profile": {"clearance_level": 1}},
+            json={
+                "id": "00u-manager",
+                "profile": {
+                    "clearance_level": 1,
+                    "is_a_manager": True,
+                    "is_on_vacation": True,
+                },
+            },
         )
 
         with patch("httpx.AsyncClient.get", AsyncMock(return_value=response)):
@@ -47,6 +61,32 @@ class OktaRoleResolverTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(identity.user_id, "00u-manager")
         self.assertEqual(identity.clearance_level, 1)
+        self.assertTrue(identity.is_a_manager)
+        self.assertTrue(identity.is_on_vacation)
+
+    async def test_manager_flag_is_derived_from_authoritative_clearance(self):
+        request = httpx.Request("GET", "https://example.okta.com/api/v1/users/00u-vp")
+        response = httpx.Response(
+            200,
+            request=request,
+            json={
+                "id": "00u-vp",
+                "profile": {
+                    "clearance_level": 2,
+                    "is_a_manager": False,
+                    "is_on_vacation": "false",
+                },
+            },
+        )
+
+        with patch("httpx.AsyncClient.get", AsyncMock(return_value=response)):
+            identity = await OktaRoleResolver(
+                "https://example.okta.com",
+                "secret-token",
+            ).resolve_identity("00u-vp")
+
+        self.assertTrue(identity.is_a_manager)
+        self.assertFalse(identity.is_on_vacation)
 
     async def test_any_manager_profile_resolves_to_level_one(self):
         request = httpx.Request("GET", "https://example.okta.com/api/v1/users/00u-new-manager")
@@ -65,11 +105,14 @@ class OktaRoleResolverTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(level, 1)
 
     async def test_missing_identifier_fails_closed(self):
-        level = await OktaRoleResolver(
+        resolver = OktaRoleResolver(
             "https://example.okta.com",
             "secret-token",
-        ).resolve("")
-        self.assertEqual(level, -1)
+        )
+        identity = await resolver.resolve_identity("")
+        self.assertEqual(identity.clearance_level, -1)
+        self.assertFalse(identity.is_a_manager)
+        self.assertFalse(identity.is_on_vacation)
 
 
 if __name__ == "__main__":

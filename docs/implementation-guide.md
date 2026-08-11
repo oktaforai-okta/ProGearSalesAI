@@ -427,24 +427,28 @@ Create three groups to demonstrate RBAC:
 
    > **Verification:** Click on each user in **Directory** → **People** and check the **Groups** tab to confirm they're in the correct group.
 
-#### Configure the Inventory role level
+#### Configure the Inventory role and delegation context
 
-For Inventory, `clearance_level` is the single role source of truth:
+For Inventory, `clearance_level` is the authoritative role source. `is_a_manager` is synchronized from it; `is_on_vacation` is a separate global delegation control:
 
-| Value | Role | Write 1–600 units | Write 601+ units |
-|---:|---|---|---|
-| 0 | Sales | Deny; contact manager | Deny; contact manager |
-| 1 | Manager | Direct | VP approval with FGA enabled |
-| 2 | VP | Direct | Direct |
+| Value | Role | Manager | Write 1–600 units | Write 601+ units |
+|---:|---|---|---|---|
+| 0 | Sales | False | Deny; contact manager | Deny; contact manager |
+| 1 | Manager | True | Direct | VP approval with FGA enabled |
+| 2 | VP | True | Direct | Direct |
 
 1. Add a user-profile property named `clearance_level` and label it **Clearance level**. Its description should state `0 = Sales, 1 = Manager, 2 = VP`.
-2. Set Sarah to Level 0, Mike to Level 1, and the VP demo persona (Joe) to Level 2.
-3. Create `ProGear-Managers` with a group rule matching Level 1 or 2.
-4. Create `ProGear-VPs` with a group rule matching Level 2.
+2. Add `is_a_manager` as a Boolean titled **Manager**. Map or synchronize it to False at Level 0 and True at Levels 1–2; do not let it drift as a second role source.
+3. Add `is_on_vacation` as a Boolean titled **On vacation**, default False. When true, the backend stops all agent delegation before ID-JAG, including reads.
+4. Set Sarah to Level 0 / Manager False, Mike to Level 1 / Manager True, and the VP demo persona (Joe) to Level 2 / Manager True. Set vacation False for all three starting personas.
+5. Create `ProGear-Managers` with a group rule matching Level 1 or 2.
+6. Create `ProGear-VPs` with a group rule matching Level 2.
 
-The three named users are demo fixtures only. ProGear does not match Sarah's, Mike's, or Joe's email address in authorization code; it resolves every authenticated user by Okta subject and applies the current `clearance_level`. For repeatable onboarding, assign the value through your Okta identity-lifecycle or profile-mapping process so any new Sales, Manager, or VP user automatically follows the same policy.
+The three named users are demo fixtures only. ProGear does not match Sarah's, Mike's, or Joe's email address in authorization code; it resolves every authenticated user by Okta subject and applies the current profile values. For repeatable onboarding, assign the role and synchronized Manager value through your Okta identity-lifecycle or profile-mapping process so any new Sales, Manager, or VP user automatically follows the same policy. Maintain vacation separately as live user context.
 
-Do not use a separate Manager Boolean for application authorization. A compatibility `Manager` token claim may evaluate true for Levels 1 and 2, but the backend and FGA policy use only `clearance_level`.
+`clearance_level` remains authoritative for application authorization. The Manager Boolean exists to make role context explicit in Okta, tokens, and demos, and it is updated atomically whenever the demo changes a role.
+
+The `/fga` page exposes self-service profile buttons only to make the customer demo repeatable. Do not copy that mutation pattern into production. Keep these properties read-only to the employee and update them through an administrator, lifecycle workflow, or trusted profile mapping; otherwise stolen employee credentials could clear the vacation containment signal.
 
 ### Step 3: Register the AI Agent and Configure Access
 
@@ -688,8 +692,10 @@ On the Inventory Authorization Server, add these access-token claims:
 | Claim | Value |
 |---|---|
 | `Clearance` | `user.clearance_level` |
+| `Manager` | `user.is_a_manager` |
+| `Vacation` | `user.is_on_vacation` |
 
-If an older integration still reads `Manager`, define it as `user.clearance_level == 1 OR user.clearance_level == 2`; the current application does not depend on it.
+The backend enforces Vacation before requesting ID-JAG from any resource. The token claims preserve the same live context as evidence for exchanges that are allowed to continue.
 
 #### 5.3 Customer MCP Authorization Server
 
@@ -803,7 +809,7 @@ can_update_standard = Manager or VP       # 1–600
 can_update_large    = VP                   # 601+
 ```
 
-The role is a contextual tuple derived from the validated Inventory token for each request. Do not seed or maintain a second persistent role copy in FGA. See [Inventory role levels and approval routing](./inventory-role-levels.md) for the exact business matrix and demo prompts.
+The role is a contextual tuple derived from the validated Inventory token for each request. Do not seed or maintain a second persistent role copy in FGA. Vacation stays outside the FGA model because it decides whether user-to-agent delegation may start at all. See [Inventory role levels and approval routing](./inventory-role-levels.md) for the exact business matrix and demo prompts.
 
 ### Step 8: Record All Your IDs
 
@@ -1091,7 +1097,7 @@ In Render, go to **Environment** and add these variables:
 | `OKTA_CUSTOMER_AUDIENCE` | `api://progear-customer` |
 | `OKTA_PRICING_AUTH_SERVER_ID` | Your Pricing auth server ID |
 | `OKTA_PRICING_AUDIENCE` | `api://progear-pricing` |
-| `OKTA_API_TOKEN` | Admin API token used for scoped profile controls, live clearance lookup, and approver-role verification |
+| `OKTA_API_TOKEN` | Admin API token used for scoped profile controls, live role/vacation lookup, and approver-role verification |
 | `FGA_API_URL` | Your FGA API URL |
 | `FGA_STORE_ID` | Your FGA store ID |
 | `FGA_MODEL_ID` | The published role-model ID |
@@ -1188,7 +1194,7 @@ Expected response:
 | `OKTA_CUSTOMER_AUDIENCE` | Render | Yes | `api://progear-customer` |
 | `OKTA_PRICING_AUTH_SERVER_ID` | Render | Yes | Pricing domain's Custom Authorization Server ID |
 | `OKTA_PRICING_AUDIENCE` | Render | Yes | `api://progear-pricing` |
-| `OKTA_API_TOKEN` | Render | Yes | Scoped demo profile updates, live clearance lookup, and OIG approver-role verification |
+| `OKTA_API_TOKEN` | Render | Yes | Scoped demo profile updates, live role/vacation lookup, and OIG approver-role verification |
 | `FGA_API_URL` | Render | Yes | FGA API base URL |
 | `FGA_STORE_ID` | Render | Yes | FGA store ID |
 | `FGA_MODEL_ID` | Render | Yes | Published three-tier role model ID |
@@ -1303,7 +1309,11 @@ Use these talking points when presenting:
 > "Sarah can read inventory, but every write is blocked and she contacts her manager. Mike can execute through 600 units; at 601, FGA creates a VP request. The same `clearance_level` in Okta drives every outcome."
 > [Show the `/fga` role control, D3 decision diagram, and the pending OIG request]
 
-### Demo 4: Governance evidence
+### Demo 4: Vacation containment
+> "Now set On vacation to True. The employee remains signed in, but the agent stops before ID-JAG for every resource. This is user-context containment if the employee is away or their credentials may have been exposed."
+> [Show the chat denial and token page: ID token present, no ID-JAG or resource token]
+
+### Demo 5: Governance evidence
 > "Notice that the token exchanges and FGA decisions identify the user, agent, requested scope, role level, quantity, and outcome. OIG records the required human decision before a pending write executes."
 
 ### Closing
@@ -1423,6 +1433,8 @@ Use this checklist to verify your deployment is complete:
 - [ ] 4 demo users created and can log in
 - [ ] 3 resource-access groups created with correct user assignments
 - [ ] `clearance_level` configured as 0 Sales, 1 Manager, or 2 VP
+- [ ] `is_a_manager` configured and synchronized: False for Level 0, True for Levels 1–2
+- [ ] `is_on_vacation` configured as a Boolean and False for the default personas
 - [ ] `ProGear-Managers` rule includes Levels 1 and 2
 - [ ] `ProGear-VPs` rule includes Level 2
 - [ ] Okta Access Requests app assigned to `ProGear-Managers` and `ProGear-VPs`
@@ -1431,7 +1443,7 @@ Use this checklist to verify your deployment is complete:
 - [ ] AI Agent registered with JWK credentials
 - [ ] AI Agent configured with the target org's supported user sign-on binding
 - [ ] 4 authorization servers with scopes configured
-- [ ] Inventory token carries the `Clearance` claim
+- [ ] Inventory token carries `Clearance`, `Manager`, and `Vacation` claims
 - [ ] **Access policies include the ProGear Sales Agent client**
 - [ ] All demo users assigned to the direct User access app
 - [ ] **`NEXT_PUBLIC_OKTA_ISSUER` set to Org AS URL (no auth server ID)**

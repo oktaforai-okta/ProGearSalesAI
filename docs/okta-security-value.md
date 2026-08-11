@@ -691,13 +691,13 @@ If an AI agent is compromised or behaving unexpectedly:
 
 Everything above - Workload Principals, ID-JAG, four Custom Authorization Servers - answers one question well: **may this governed agent obtain a token for this resource and scope while acting for this user?** For Inventory, both read and write scopes let the request reach the resource. A write scope is not permission to bypass the next decision.
 
-That question is necessary, but it is not sufficient for every access decision. Known Sales writes stop at the live Okta clearance guard before delegated tokens are requested. For eligible requests, this demo adds a second layer—**FGA** (Fine-Grained Authorization)—after token exchange to answer: **given this live Okta role and this quantity, may the request execute, stop, or require VP approval?**
+That question is necessary, but it is not sufficient for every access decision. Before requesting ID-JAG, ProGear also evaluates the employee's live delegation context: `is_on_vacation=true` stops every agent action, while `is_a_manager` remains synchronized with the authoritative role for clear profile and audit context. Known Sales writes then stop at the live Okta clearance guard. For eligible requests, this demo adds a second layer—**FGA** (Fine-Grained Authorization)—after token exchange to answer: **given this live Okta role and this quantity, may the request execute, stop, or require VP approval?**
 
 ### Why not just make Okta's policy more granular?
 
-The user has one custom Okta profile value, `clearance_level`, with three intentional meanings: **0 = Sales, 1 = Manager, 2 = VP**. It is a role level, not an item-sensitivity score and not a second value combined with a Manager switch.
+The user's authoritative inventory role is `clearance_level`, with three intentional meanings: **0 = Sales, 1 = Manager, 2 = VP**. It is a role level, not an item-sensitivity score. `is_a_manager` is synchronized from that level for profile clarity and audit context; it is not a second authorization switch. `is_on_vacation` is separate and stops delegated agent work before ID-JAG when true.
 
-Okta remains the source of truth for that role. The Inventory access token carries the `Clearance` claim. The backend validates the token and converts that value into one contextual FGA tuple for the current check, rather than persisting a second mutable role copy in FGA.
+Okta remains the source of truth for that role. The Inventory access token carries `Clearance`, `Manager`, and `Vacation`; the backend has already enforced vacation before exchange. It validates the token and converts `Clearance` into one contextual FGA tuple for the current check, rather than persisting a second mutable role copy in FGA.
 
 ### What FGA actually checks (the real model behind this demo)
 

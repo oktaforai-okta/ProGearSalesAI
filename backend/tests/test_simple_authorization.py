@@ -5,11 +5,19 @@ from auth.multi_agent_auth import AGENT_INVENTORY
 from orchestrator.orchestrator import Orchestrator
 
 
-def make_workflow_state(role_level: int, message: str, scope: str) -> tuple[Orchestrator, dict]:
+def make_workflow_state(
+    role_level: int,
+    message: str,
+    scope: str,
+    *,
+    is_on_vacation: bool = False,
+) -> tuple[Orchestrator, dict]:
     orchestrator = Orchestrator.__new__(Orchestrator)
     orchestrator.user_info = {
         "email": "persona@atko.email",
         "clearance_level": role_level,
+        "is_a_manager": role_level in (1, 2),
+        "is_on_vacation": is_on_vacation,
     }
     state = {
         "user_message": message,
@@ -28,6 +36,7 @@ def make_workflow_state(role_level: int, message: str, scope: str) -> tuple[Orch
         "authorization_decisions": [],
         "fga_checks": [{"should": "be cleared"}],
         "simulate_fga": False,
+        "delegation_denial_reason": None,
     }
     return orchestrator, state
 
@@ -63,6 +72,57 @@ class SimpleAuthorizationTests(unittest.TestCase):
 
 
 class SimpleAuthorizationWorkflowTests(unittest.IsolatedAsyncioTestCase):
+    async def test_vacation_stops_inventory_read_before_exchange(self):
+        orchestrator, state = make_workflow_state(
+            1,
+            "How many basketballs are in stock?",
+            "inventory:read",
+            is_on_vacation=True,
+        )
+        state["agent_results"] = {}
+        state = await orchestrator._pre_exchange_guard_node(state)
+
+        self.assertEqual(state["agents_to_invoke"], [])
+        self.assertEqual(state["token_exchanges"], [])
+        self.assertEqual(
+            state["agent_results"][AGENT_INVENTORY]["error_code"],
+            "delegation_suspended",
+        )
+        self.assertFalse(state["authorization_decisions"][0]["token_issued"])
+        self.assertIn("on vacation", state["delegation_denial_reason"])
+
+    async def test_vacation_stops_write_even_with_fga_enabled(self):
+        orchestrator, state = make_workflow_state(
+            1,
+            "Add 601 basketballs to inventory",
+            "inventory:write",
+            is_on_vacation=True,
+        )
+        state["agent_results"] = {}
+        state["fga_checks"] = []
+        state["simulate_fga"] = True
+        state = await orchestrator._pre_exchange_guard_node(state)
+        state = await orchestrator._generate_response_node(state)
+
+        self.assertEqual(state["agents_to_invoke"], [])
+        self.assertEqual(state["fga_checks"], [])
+        self.assertIn("No delegated token was requested", state["final_response"])
+
+    async def test_vacation_is_global_not_inventory_only(self):
+        orchestrator, state = make_workflow_state(
+            2,
+            "Show recent orders",
+            "sales:read",
+            is_on_vacation=True,
+        )
+        state["agents_to_invoke"] = ["sales"]
+        state["agent_scopes"] = {"sales": ["sales:read"]}
+        state["agent_results"] = {}
+        state = await orchestrator._pre_exchange_guard_node(state)
+
+        self.assertEqual(state["agents_to_invoke"], [])
+        self.assertEqual(state["agent_results"]["sales"]["error_code"], "delegation_suspended")
+
     async def test_sales_write_stops_before_exchange_in_simple_mode(self):
         orchestrator, state = make_workflow_state(
             0,

@@ -2,7 +2,7 @@
 
 > **AI agents are identities. Every delegated action stays attributable.** CourtEdge ProGear registers its customer-owned sales agent in Okta as a [Workload Principal](https://developer.okta.com/docs/api/secures-ai/ai-agents)—a first-class identity with its own owners, credentials, lifecycle, resource connections, and audit trail. When the agent acts for Sarah, Mike, or Joe, **Cross App Access (XAA)** uses the [IETF Identity Assertion JWT Authorization Grant (ID-JAG)](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-identity-assertion-authz-grant) to carry the user's identity across trust domains while identifying the agent client acting on that user's behalf. The result is a traceable delegation chain: **user → agent → resource → scope → action**. [Explore XAA.dev](https://xaa.dev/).
 
-**FGA** then evaluates the signed clearance level and requested quantity. [**Okta Identity Governance**](https://developer.okta.com/docs/api/iga) is used for one deliberate escalation: a Manager requesting more than 600 units needs VP approval.
+Before any delegation, ProGear reads the employee's live Okta profile. An **On vacation** value of `true` suspends agent work before ID-JAG, while the synchronized **Manager** value makes the employee's role easy to understand and audit. **FGA** then evaluates the signed clearance level and requested quantity. [**Okta Identity Governance**](https://developer.okta.com/docs/api/iga) is used for one deliberate escalation: a Manager requesting more than 600 units needs VP approval.
 
 ![Okta AI Agent Governance](https://img.shields.io/badge/Okta-AI%20Agent%20Governance-blue)
 ![FGA](https://img.shields.io/badge/Fine--Grained-Authorization-orange)
@@ -33,21 +33,21 @@ Pages in the running app:
 | `/` | The chat UI ("CourtEdge ProGear"), talk to the sales assistant |
 | `/tokens` | The signed token chain, independent resource-token validation, final business decision, and pending approval status |
 | `/architecture` | Identity-centered architecture and sequence diagrams for Workload Principal governance, ID-JAG delegation, scoped access, auditability, and the agent deactivation control; the advanced FGA layer appears only when its simulation is enabled |
-| `/fga` | Opt-in live Okta role controls and a simple D3 view of the FGA decision |
+| `/fga` | Opt-in live Okta role, derived Manager, and vacation controls with a simple D3 view of delegation and FGA decisions |
 
-The application starts with **Simulate FGA** off and shows two everyday prompts: an inventory read and a normal 50-unit write. Enabling the simulation on `/fga` reveals the live role control, replaces those examples with the Read, 1–600, and 601+ VP prompt tiers, and opts chat requests into hosted FGA checks plus OIG approval routing. Simple mode still enforces the validated Okta-signed role, but denies requests that need a higher role instead of creating approval requests. It is never a bypass. Color preferences are independent: Light is the first-visit default, with Dark and System available from the persistent theme control.
+The application starts with **Simulate FGA** off and shows two everyday prompts: an inventory read and a normal 50-unit write. Enabling the simulation on `/fga` reveals the live role, derived Manager, and On vacation controls; replaces those examples with the Read, 1–600, and 601+ VP prompt tiers; and opts chat requests into hosted FGA checks plus OIG approval routing. Simple mode still enforces the validated Okta profile, but denies requests that need a higher role instead of creating approval requests. It is never a bypass. Color preferences are independent: Light is the first-visit default, with Dark and System available from the persistent theme control.
 
 ### Demo personas at a glance
 
 With **Simulate FGA** enabled, the three default Okta role levels tell one complete inventory story:
 
-| Persona | Okta role level | Inventory behavior |
-|---|---:|---|
-| Sarah Sales | 0 — Sales | Reads directly; every inventory write stops before ID-JAG exchange, with guidance to contact her manager. No access request is created. |
-| Mike Manager | 1 — Manager | Reads and writes 1–600 units directly; writes of 601+ units request VP approval when FGA is enabled. |
-| Joe VP | 2 — VP | Reads and writes any quantity directly. |
+| Persona | Okta role level | Manager | Inventory behavior |
+|---|---:|---|---|
+| Sarah Sales | 0 — Sales | False | Reads directly; every inventory write stops before ID-JAG exchange, with guidance to contact her manager. No access request is created. |
+| Mike Manager | 1 — Manager | True | Reads and writes 1–600 units directly; writes of 601+ units request VP approval when FGA is enabled. |
+| Joe VP | 2 — VP | True | Reads and writes any quantity directly. |
 
-Sarah, Mike, and Joe are example personas, not hard-coded identities. The backend resolves the authenticated employee's current Okta profile by subject on every request, so any user assigned `clearance_level` 0, 1, or 2 follows the same Sales, Manager, or VP policy. Use your Okta identity-lifecycle or profile-mapping process to assign that value when onboarding additional users.
+Sarah, Mike, and Joe are example personas, not hard-coded identities. The backend resolves the authenticated employee's current Okta profile by subject on every request, so any user assigned `clearance_level` 0, 1, or 2 follows the same Sales, Manager, or VP policy. `is_a_manager` is synchronized from that level (`false`, `true`, `true`) rather than acting as a second role switch. `is_on_vacation` is separate: all three personas default to `false`, and setting it to `true` stops the agent before ID-JAG for every protected resource and every action. Use your Okta identity-lifecycle or profile-mapping process to assign and maintain these values when onboarding additional users.
 
 For the approval demo, assign the **Okta Access Requests** app to the Manager and VP groups, push `ProGear-VPs` into Access Requests, and assign the request type's approval task to that pushed group. The backend sends Mike's Okta user ID in `requesterUserIds`, so OIG shows the signed-in Manager as the requester and the service credential owner separately as the request creator. Joe opens **Okta Access Requests → Inbox → Open** to approve or deny the task. The approval card contains only a concise human summary; the exact machine-readable execution intent stays in the backend approval ledger.
 
@@ -59,12 +59,14 @@ An AI sales agent needs to read and write real business data (inventory, pricing
 - **WHICH** scopes were actually granted, per resource domain, per user?
 - **CAN** a second decision (clearance level + quantity) still block or route an otherwise-authenticated action?
 - **WHEN** does a human need to approve before an action executes?
+- **SHOULD** the agent be allowed to act for this employee right now, or should vacation status suspend delegation first?
 - **CAN** access be revoked instantly?
 
 | Layer | Technology | What it does |
 |---|---|---|
 | Identity for the agent | Okta AI Agent Governance | The AI has its own Workload Principal (`wlp`) identity, distinct from any human user |
 | Token exchange | ID-JAG (Identity Assertion JWT Authorization Grant) | Two-step exchange: ID token → ID-JAG assertion (Org Authorization Server) → scoped access token (per-domain Custom Authorization Server). RSA keypair auth, no shared secret. No down-scoping: an ungrantable scope fails the whole exchange. |
+| Delegation context | Okta user profile | `is_on_vacation=true` stops before ID-JAG; `is_a_manager` remains synchronized with the authoritative role level |
 | Fine-grained authorization | FGA | Maps Okta's role level (0 Sales, 1 Manager, 2 VP) and requested quantity to allow, block, or VP approval |
 | Human-in-the-loop | Okta Identity Governance (OIG) | A Manager write of 601+ units routes to VP approval; Sales writes never create requests |
 | Orchestration | LangGraph | Routes each user query to the right internal domain component and coordinates the response |
@@ -127,7 +129,7 @@ For a full walkthrough of Okta org setup (AI Agent, Custom Authorization Servers
 
 <a href="https://colab.research.google.com/github/oktaforai-okta/ProGearSalesAI/blob/main/notebooks/progear-inventory-authorization-story.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open ProGear Inventory Authorization Story in Colab"/></a>
 
-**[Secure your custom AI agent with Okta](notebooks/progear-inventory-authorization-story.ipynb)** is a layered business-to-implementation guide. New readers can follow the Sarah-versus-Mike story without code; architects and developers can map the pattern to a customer-owned agent, configure Okta for AI Agents, inspect the two-step ID-JAG exchange, use the platform-neutral Python reference module, validate resource tokens, and work through production and troubleshooting checklists. It intentionally stops at the introductory Okta identity, scope, and exchange story—FGA and OIG remain in the application documentation. Default labs use only local examples or read-only checks and contain no credentials.
+**[Secure your custom AI agent with Okta](notebooks/progear-inventory-authorization-story.ipynb)** is a layered business-to-implementation guide. New readers can follow the Sarah-versus-Mike story without code; architects and developers can map the pattern to a customer-owned agent, configure Okta for AI Agents, understand the simple vacation-based delegation stop, inspect the two-step ID-JAG exchange, use the platform-neutral Python reference module, validate resource tokens, and work through production and troubleshooting checklists. It intentionally stops at the introductory Okta identity, context, scope, and exchange story—FGA and OIG remain in the application documentation. Default labs use only local examples or read-only checks and contain no credentials.
 
 ## Documentation
 

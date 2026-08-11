@@ -77,6 +77,7 @@ class WorkflowState(TypedDict):
     # Approval gate (populated by approval_gate node; None when gate is not triggered)
     pending_approval: Optional[Dict[str, Any]]
     parsed_intent: Optional[Dict[str, Any]]
+    delegation_denial_reason: Optional[str]
 
 
 # Agent type to keywords mapping for fallback routing
@@ -254,15 +255,67 @@ class Orchestrator:
         return workflow.compile()
 
     async def _pre_exchange_guard_node(self, state: WorkflowState) -> WorkflowState:
-        """Stop inventory writes that the live Okta role cannot initiate.
+        """Stop delegation or writes that live Okta context cannot initiate.
 
-        Sales writes are always denied here. In simple mode, Manager writes
+        Vacation is a global delegation stop: no selected domain may request
+        an ID-JAG while the employee is marked away. Otherwise, Sales writes
+        are always denied here. In simple mode, Manager writes
         above 600 units also stop here. In FGA mode those Manager requests are
         allowed to continue because the later FGA/OIG path can request VP
         approval. No ID-JAG or resource token is requested for a stopped
         domain.
         """
         agents = list(state.get("agents_to_invoke", []))
+        if self.user_info.get("is_on_vacation") is True:
+            message = (
+                "I can’t act on your behalf while your Okta profile says you’re on vacation. "
+                "No delegated token was requested. Set On vacation to False or contact your "
+                "Okta administrator."
+            )
+            state["delegation_denial_reason"] = message
+            for agent_type in agents:
+                scopes = state.get("agent_scopes", {}).get(agent_type, [])
+                config = get_agent_config(agent_type)
+                demo = DEMO_AGENTS.get(agent_type, {})
+                agent_info = {
+                    "name": config.name if config else demo.get("name", agent_type.title()),
+                    "display_name": config.display_name if config else demo.get("display_name", agent_type.title()),
+                    "color": config.color if config else demo.get("color", "#888"),
+                }
+                state.setdefault("agent_results", {})[agent_type] = {
+                    "success": False,
+                    "access_denied": True,
+                    "requested_scopes": scopes,
+                    "authorization_reason": message,
+                    "error": message,
+                    "error_code": "delegation_suspended",
+                    "token_issued": False,
+                    "resource_token_validated": False,
+                    "agent_info": agent_info,
+                }
+                state.setdefault("authorization_decisions", []).append({
+                    "agent": agent_type,
+                    "mode": "okta",
+                    "engine": "Okta delegation policy",
+                    "operation": "write" if any(scope.endswith(":write") for scope in scopes) else "read",
+                    "quantity": None,
+                    "role_level": normalize_role_level(self.user_info.get("clearance_level")),
+                    "role_name": role_name(normalize_role_level(self.user_info.get("clearance_level"))),
+                    "decision": "deny",
+                    "outcome": "blocked",
+                    "reason": message,
+                    "token_issued": False,
+                    "token_validated": False,
+                })
+            state["agents_to_invoke"] = []
+            state.setdefault("agent_flow", []).append({
+                "step": "pre_exchange_guard",
+                "action": "Okta vacation policy stopped delegated access before token exchange",
+                "detail": message,
+                "status": "denied",
+            })
+            return state
+
         if AGENT_INVENTORY not in agents:
             return state
 
@@ -1373,6 +1426,15 @@ Return ONLY the JSON object, no other text."""
 
         Returns user-facing permission guidance without exposing internal agent names.
         """
+        if state.get("delegation_denial_reason"):
+            state["final_response"] = state["delegation_denial_reason"]
+            state["agent_flow"].append({
+                "step": "generate_response",
+                "action": "Returned vacation delegation-denial message",
+                "status": "denied",
+            })
+            return state
+
         # Short-circuit when the approval gate queued an OIG request.
         if state.get("pending_approval") is not None:
             pa = state["pending_approval"]
@@ -1543,6 +1605,7 @@ internal agents, MCP servers, policy names, or permission errors; permission gui
             "final_response": None,
             "pending_approval": None,
             "parsed_intent": None,
+            "delegation_denial_reason": None,
         }
 
         # Run the workflow

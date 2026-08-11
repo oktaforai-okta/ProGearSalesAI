@@ -81,8 +81,8 @@ function graphNodes(fgaEnabled: boolean): GraphNode[] {
       x: 225, y: 220, w: 185, h: 104, color: COLORS.agent,
     },
     {
-      id: 'okta', label: 'Okta', sublabel: 'Identity + ID-JAG',
-      detail: 'Issues the delegated grant for user + agent client + target.',
+      id: 'okta', label: 'Okta', sublabel: 'Identity + delegation',
+      detail: 'Checks live user context, governs the agent, and issues ID-JAG.',
       x: 490, y: 45, w: 180, h: 82, color: COLORS.okta,
     },
     {
@@ -143,7 +143,7 @@ function graphEdges(fgaEnabled: boolean, agentActive: boolean): GraphEdge[] {
     {
       id: 'agent-okta', from: 'agent', to: 'okta',
       path: 'M318 220 C318 158 402 86 490 86',
-      label: agentActive ? 'authenticate' : 'exchange stopped', labelX: 410, labelY: 148,
+      label: agentActive ? 'profile + auth' : 'exchange stopped', labelX: 410, labelY: 148,
       blocked: !agentActive,
     },
     {

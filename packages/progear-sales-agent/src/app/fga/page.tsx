@@ -8,16 +8,20 @@ import FGAControlsPanel from '@/components/FGAControlsPanel';
 import { ThemeSelector } from '@/components/ThemeProvider';
 
 const FGA_CHECKS_STORAGE_KEY = 'progear-fga-checks';
+const AUTHORIZATION_DECISIONS_STORAGE_KEY = 'progear-authorization-decisions';
 
 // Reads the exact same sessionStorage the chat page (/) already writes on
 // every response - no backend or API changes needed to power this page.
 export default function FGAPage() {
   const [fgaChecks, setFgaChecks] = useState<any[]>([]);
+  const [authorizationDecisions, setAuthorizationDecisions] = useState<any[]>([]);
 
   const loadFromStorage = () => {
     try {
       const checks = sessionStorage.getItem(FGA_CHECKS_STORAGE_KEY);
+      const decisions = sessionStorage.getItem(AUTHORIZATION_DECISIONS_STORAGE_KEY);
       if (checks) setFgaChecks(JSON.parse(checks));
+      if (decisions) setAuthorizationDecisions(JSON.parse(decisions));
     } catch (e) {
       console.error('Error loading FGA data:', e);
     }
@@ -29,6 +33,10 @@ export default function FGAPage() {
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
   }, []);
+
+  const hasDelegationStop = authorizationDecisions.some(
+    (decision) => decision.engine === 'Okta delegation policy'
+  );
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-gray-50 to-white dark:from-neutral-bg dark:to-primary">
@@ -54,9 +62,15 @@ export default function FGAPage() {
       <div className="max-w-4xl mx-auto p-6 space-y-4">
         <FGAControlsPanel onApplied={loadFromStorage} />
 
-        <FGAExplanationCard checks={fgaChecks} />
+        <FGAExplanationCard checks={fgaChecks} decisions={authorizationDecisions} />
 
-        {fgaChecks.length === 0 && (
+        {fgaChecks.length === 0 && hasDelegationStop ? (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-center text-sm text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200">
+            No FGA check was made because Okta stopped delegation before ID-JAG.
+          </div>
+        ) : null}
+
+        {fgaChecks.length === 0 && !hasDelegationStop ? (
           <div className="py-12 text-center text-gray-400 dark:text-slate-500">
             <p className="text-sm">
               No FGA checks yet. Send a message on the{' '}
@@ -66,7 +80,7 @@ export default function FGAPage() {
               to see live authorization checks appear here.
             </p>
           </div>
-        )}
+        ) : null}
       </div>
     </main>
   );

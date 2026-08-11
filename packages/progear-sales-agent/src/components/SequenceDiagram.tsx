@@ -42,8 +42,8 @@ function buildSteps(agentActive: boolean, fgaEnabled: boolean): Step[] {
       detail: 'The signed-in employee asks the customer-owned agent to read or change inventory.',
     },
     {
-      from: 'agent', to: 'okta', label: 'ID token + client assertion',
-      detail: 'The Workload Principal authenticates and presents the employee identity for exchange.',
+      from: 'agent', to: 'okta', label: 'Profile + agent proof',
+      detail: 'Okta supplies live role and vacation context; the Workload Principal authenticates for exchange.',
     },
   ];
 

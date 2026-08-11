@@ -316,12 +316,12 @@ async def chat(
         ).resolve_identity(role_identifier or "")
         clearance_level = resolved_user.clearance_level
     except (KeyError, httpx.HTTPError, ValueError) as exc:
-        logger.error("Live Okta clearance lookup failed: %s", exc)
+        logger.error("Live Okta authorization-context lookup failed: %s", exc)
         raise HTTPException(
             status_code=503,
             detail=(
-                "I couldn't verify your current Okta clearance, so no inventory change "
-                "was attempted. Please try again."
+                "I couldn't verify your current Okta role and delegation context, so no "
+                "agent action was attempted. Please try again."
             ),
         ) from exc
 
@@ -331,6 +331,8 @@ async def chat(
         "name": user_claims.get("name"),
         "groups": user_claims.get("groups", []),
         "clearance_level": clearance_level,
+        "is_a_manager": resolved_user.is_a_manager,
+        "is_on_vacation": resolved_user.is_on_vacation,
         "okta_user_id": resolved_user.user_id,
     }
 
@@ -342,6 +344,7 @@ async def chat(
     logger.info("Subject (sub): %s", user_claims.get("sub"))
     logger.info("Groups: %s", user_claims.get("groups", []))
     logger.info("Resolved live clearance_level: %s", clearance_level)
+    logger.info("Resolved manager/vacation context: manager=%s vacation=%s", resolved_user.is_a_manager, resolved_user.is_on_vacation)
     logger.info("Claim keys present: %s", list(user_claims.keys()))
 
     # Create orchestrator and process request
@@ -662,8 +665,8 @@ async def _resolve_caller_user_id(authorization: Optional[str]) -> str:
 @app.get("/api/admin/demo-status")
 async def demo_status(authorization: Optional[str] = Header(None, alias="Authorization")):
     """
-    Demo-only, read-only: the signed-in user's current role level so the UI
-    can show which state is actually active.
+    Demo-only, read-only: the signed-in user's current role, derived manager
+    flag, and vacation control so the UI shows the live Okta state.
     """
     user_id = await _resolve_caller_user_id(authorization)
 
@@ -682,9 +685,9 @@ async def demo_toggle(
     authorization: Optional[str] = Header(None, alias="Authorization")
 ):
     """
-    Demo-only: change the SIGNED-IN user's own clearance_level Okta attribute
-    so the FGA role tiers can be shown live without an Okta Admin Console
-    detour. See auth/demo_admin.py for the scoping rules.
+    Demo-only: change the SIGNED-IN user's own role or vacation control. A role
+    change also synchronizes the derived manager profile attribute. See
+    auth/demo_admin.py for the scoping rules.
     """
     user_id = await _resolve_caller_user_id(authorization)
 
@@ -704,7 +707,7 @@ async def demo_toggle(
 
 @app.post("/api/admin/demo-reset")
 async def demo_reset(authorization: Optional[str] = Header(None, alias="Authorization")):
-    """Restore the signed-in persona's original role level."""
+    """Restore the signed-in persona's role and set vacation to false."""
     user_id = await _resolve_caller_user_id(authorization)
 
     try:
