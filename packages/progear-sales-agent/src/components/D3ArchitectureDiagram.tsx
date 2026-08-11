@@ -2,118 +2,193 @@
 
 import { useMemo, useState } from 'react';
 import { curveBumpX, line } from 'd3-shape';
-import {
-  Activity,
-  ArrowRight,
-  BookOpen,
-  Braces,
-  CheckCircle2,
-  CircleStop,
-  Fingerprint,
-  Power,
-  ShieldX,
-  Sparkles,
-} from 'lucide-react';
+import { Power, Sparkles } from 'lucide-react';
 import { useFGASimulation } from '@/hooks/useFGASimulation';
 import SequenceDiagram from './SequenceDiagram';
 
-type NodeId = 'user' | 'agent' | 'idjag' | 'resourceAs' | 'fga' | 'api';
+type NodeId =
+  | 'kill'
+  | 'user'
+  | 'agent'
+  | 'okta'
+  | 'resourceAs'
+  | 'fga'
+  | 'audit'
+  | 'inventory'
+  | 'customer'
+  | 'pricing'
+  | 'sales';
 
-interface ArchitectureNode {
+interface GraphNode {
   id: NodeId;
-  step: string;
   label: string;
   sublabel: string;
+  detail: string;
   x: number;
   y: number;
   w: number;
   h: number;
   color: string;
-  plain: string;
-  technical: string;
+  compact?: boolean;
+  resource?: boolean;
 }
 
-interface ArchitectureEdge {
+interface GraphEdge {
+  id: string;
   from: NodeId;
   to: NodeId;
-  label: string;
+  path: string;
+  label?: string;
+  labelX?: number;
+  labelY?: number;
   blocked?: boolean;
-  dimmed?: boolean;
+  downstream?: boolean;
 }
 
-const VIEW_WIDTH = 1280;
-const VIEW_HEIGHT = 340;
+const VIEW_W = 1200;
+const VIEW_H = 515;
 
-function connectorPath(from: ArchitectureNode, to: ArchitectureNode): string {
-  const draw = line<[number, number]>().curve(curveBumpX);
-  return draw([
-    [from.x + from.w, from.y + from.h / 2],
-    [to.x, to.y + to.h / 2],
-  ]) ?? '';
+const COLORS = {
+  user: '#8b5cf6',
+  agent: '#f97316',
+  okta: '#3b82f6',
+  authz: '#0f766e',
+  fga: '#7c3aed',
+  resource: '#4d9f45',
+  audit: '#64748b',
+  danger: '#dc2626',
+} as const;
+
+function curve(points: Array<[number, number]>): string {
+  return line<[number, number]>().curve(curveBumpX)(points) ?? '';
 }
 
-function nodeData(fgaEnabled: boolean): ArchitectureNode[] {
-  const common: ArchitectureNode[] = [
+function graphNodes(fgaEnabled: boolean): GraphNode[] {
+  const nodes: GraphNode[] = [
     {
-      id: 'user', step: '1', label: 'Employee', sublabel: 'The subject',
-      x: 24, y: 112, w: 164, h: 104, color: '#8b5cf6',
-      plain: 'Sarah, Mike, or Joe signs in and asks the agent to perform a task.',
-      technical: 'The employee remains the resource owner identified by the ID-JAG subject (`sub`).',
+      id: 'kill', label: 'Kill switch', sublabel: 'Deactivate identity',
+      detail: 'Deactivation stops new agent authentication and ID-JAG exchanges.',
+      x: 225, y: 30, w: 160, h: 48, color: COLORS.danger, compact: true,
     },
     {
-      id: 'agent', step: '2', label: 'ProGear Agent', sublabel: 'Workload Principal',
-      x: 232, y: 96, w: 194, h: 136, color: '#f97316',
-      plain: 'The agent has a governed identity of its own. It never disappears inside the user’s identity.',
-      technical: 'Okta manages the `wlp...` identity, owners, public credentials, lifecycle, and resource connections.',
+      id: 'user', label: 'Employee', sublabel: 'Signed-in subject',
+      detail: 'The employee remains the delegated request subject.',
+      x: 25, y: 235, w: 150, h: 74, color: COLORS.user,
     },
     {
-      id: 'idjag', step: '3', label: 'Okta ID-JAG', sublabel: 'Identity bridge',
-      x: 474, y: 112, w: 180, h: 104, color: '#2563eb',
-      plain: 'Okta creates signed proof tying this user, this client, and this target together.',
-      technical: 'The ID-JAG carries `sub` (end user), `client_id` (client acting for the user), and `aud` (Resource Authorization Server).',
+      id: 'agent', label: 'ProGear Agent', sublabel: 'Workload Principal',
+      detail: 'First-class agent identity: wlp… + private_key_jwt.',
+      x: 225, y: 220, w: 185, h: 104, color: COLORS.agent,
     },
     {
-      id: 'resourceAs', step: '4', label: 'Resource AS', sublabel: 'Local policy + token',
-      x: 702, y: 112, w: 190, h: 104, color: '#0f766e',
-      plain: 'The target system keeps control. Its authorization server decides whether to issue a scoped token.',
-      technical: 'It validates the ID-JAG, resolves the user, applies local policy, and issues its own short-lived access token.',
+      id: 'okta', label: 'Okta', sublabel: 'Identity + ID-JAG',
+      detail: 'Issues the delegated grant for user + agent client + target.',
+      x: 490, y: 45, w: 180, h: 82, color: COLORS.okta,
+    },
+    {
+      id: 'resourceAs', label: 'Resource AS', sublabel: 'Policy + scoped token',
+      detail: 'Validates ID-JAG, applies local policy, and issues a resource token.',
+      x: 490, y: 225, w: 180, h: 94, color: COLORS.authz,
+    },
+    {
+      id: 'audit', label: 'Audit trail', sublabel: 'Exchange + decision',
+      detail: 'Correlates user, agent, resource, scope, and outcome.',
+      x: 490, y: 410, w: 180, h: 64, color: COLORS.audit,
+    },
+    {
+      id: 'inventory', label: 'Inventory', sublabel: 'read / write',
+      detail: 'Inventory accepts only a valid token with the required scope.',
+      x: 1000, y: 50, w: 175, h: 70, color: COLORS.resource, resource: true,
+    },
+    {
+      id: 'customer', label: 'Customer', sublabel: 'read',
+      detail: 'Customer data has its own resource boundary and scope.',
+      x: 1000, y: 155, w: 175, h: 70, color: COLORS.resource, resource: true,
+    },
+    {
+      id: 'pricing', label: 'Pricing', sublabel: 'read / margin / discount',
+      detail: 'Pricing has its own scopes and resource policy.',
+      x: 1000, y: 260, w: 175, h: 70, color: COLORS.resource, resource: true,
+    },
+    {
+      id: 'sales', label: 'Sales', sublabel: 'read / quote / order',
+      detail: 'Sales has its own scopes and resource policy.',
+      x: 1000, y: 365, w: 175, h: 70, color: COLORS.resource, resource: true,
     },
   ];
 
   if (fgaEnabled) {
-    common.push({
-      id: 'fga', step: '5', label: 'FGA', sublabel: 'Advanced context',
-      x: 934, y: 112, w: 144, h: 104, color: '#7c3aed',
-      plain: 'For inventory writes, the demo also checks role, quantity, and vacation status.',
-      technical: 'The live FGA decision returns execute, request approval, or block. OAuth scopes remain the first boundary.',
+    nodes.push({
+      id: 'fga', label: 'FGA', sublabel: 'role + quantity + vacation',
+      detail: 'Inventory decision: execute, OIG approval, or block.',
+      x: 755, y: 40, w: 190, h: 90, color: COLORS.fga,
     });
   }
 
-  common.push({
-    id: 'api', step: fgaEnabled ? '6' : '5', label: 'Inventory API', sublabel: 'Protected action',
-    x: fgaEnabled ? 1116 : 1048, y: 112, w: 164, h: 104, color: '#16a34a',
-    plain: 'Inventory is reached only after the required identity and access checks succeed.',
-    technical: 'The API validates the final access token and enforces the requested read or write scope.',
-  });
-
-  return common;
+  return nodes;
 }
 
-function edgeData(fgaEnabled: boolean, agentActive: boolean): ArchitectureEdge[] {
-  const edges: ArchitectureEdge[] = [
-    { from: 'user', to: 'agent', label: 'asks' },
-    { from: 'agent', to: 'idjag', label: agentActive ? 'agent + user' : 'exchange stopped', blocked: !agentActive },
-    { from: 'idjag', to: 'resourceAs', label: 'ID-JAG', dimmed: !agentActive },
+function graphEdges(fgaEnabled: boolean, agentActive: boolean): GraphEdge[] {
+  const edges: GraphEdge[] = [
+    {
+      id: 'kill-agent', from: 'kill', to: 'agent',
+      path: 'M305 78 L305 220',
+      blocked: !agentActive,
+    },
+    {
+      id: 'user-agent', from: 'user', to: 'agent',
+      path: curve([[175, 272], [225, 272]]),
+      label: 'request', labelX: 200, labelY: 252,
+    },
+    {
+      id: 'agent-okta', from: 'agent', to: 'okta',
+      path: 'M318 220 C318 158 402 86 490 86',
+      label: agentActive ? 'authenticate' : 'exchange stopped', labelX: 410, labelY: 148,
+      blocked: !agentActive,
+    },
+    {
+      id: 'okta-resource', from: 'okta', to: 'resourceAs',
+      path: 'M580 127 L580 225',
+      label: 'ID-JAG', labelX: 620, labelY: 181,
+      downstream: true,
+    },
+    {
+      id: 'resource-audit', from: 'resourceAs', to: 'audit',
+      path: 'M580 319 L580 410',
+      label: 'log', labelX: 610, labelY: 369,
+      downstream: true,
+    },
   ];
 
+  const resourceStartX = 670;
   if (fgaEnabled) {
     edges.push(
-      { from: 'resourceAs', to: 'fga', label: 'scoped token', dimmed: !agentActive },
-      { from: 'fga', to: 'api', label: 'decision', dimmed: !agentActive }
+      {
+        id: 'resource-fga', from: 'resourceAs', to: 'fga',
+        path: curve([[resourceStartX, 246], [755, 85]]),
+        label: 'inventory token', labelX: 720, labelY: 150,
+        downstream: true,
+      },
+      {
+        id: 'fga-inventory', from: 'fga', to: 'inventory',
+        path: curve([[945, 85], [1000, 85]]),
+        label: 'decision', labelX: 972, labelY: 65,
+        downstream: true,
+      }
     );
   } else {
-    edges.push({ from: 'resourceAs', to: 'api', label: 'scoped token', dimmed: !agentActive });
+    edges.push({
+      id: 'resource-inventory', from: 'resourceAs', to: 'inventory',
+      path: curve([[resourceStartX, 244], [1000, 85]]),
+      downstream: true,
+    });
   }
+
+  edges.push(
+    { id: 'resource-customer', from: 'resourceAs', to: 'customer', path: curve([[resourceStartX, 265], [1000, 190]]), downstream: true },
+    { id: 'resource-pricing', from: 'resourceAs', to: 'pricing', path: curve([[resourceStartX, 283], [1000, 295]]), downstream: true },
+    { id: 'resource-sales', from: 'resourceAs', to: 'sales', path: curve([[resourceStartX, 302], [1000, 400]]), downstream: true }
+  );
 
   return edges;
 }
@@ -122,283 +197,193 @@ interface D3ArchitectureDiagramProps {
   title?: string;
 }
 
-export default function D3ArchitectureDiagram({ title = 'The governed access chain' }: D3ArchitectureDiagramProps) {
+export default function D3ArchitectureDiagram({ title = 'System architecture' }: D3ArchitectureDiagramProps) {
   const { isEnabled: fgaEnabled, setIsEnabled: setFgaEnabled } = useFGASimulation();
   const [agentActive, setAgentActive] = useState(true);
   const [selectedId, setSelectedId] = useState<NodeId>('agent');
+  const [hoveredId, setHoveredId] = useState<NodeId | null>(null);
 
-  const nodes = useMemo(() => nodeData(fgaEnabled), [fgaEnabled]);
-  const edges = useMemo(() => edgeData(fgaEnabled, agentActive), [fgaEnabled, agentActive]);
-  const nodeById = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
-  const selectedNode = nodeById.get(selectedId) ?? nodes[1];
+  const nodes = useMemo(() => graphNodes(fgaEnabled), [fgaEnabled]);
+  const edges = useMemo(() => graphEdges(fgaEnabled, agentActive), [fgaEnabled, agentActive]);
+  const selectedNode = nodes.find((node) => node.id === selectedId) ?? nodes[2];
+  const activeId = hoveredId ?? selectedId;
 
-  const isNodeDimmed = (id: NodeId) => !agentActive && ['idjag', 'resourceAs', 'fga', 'api'].includes(id);
-  const outcomeLabel = agentActive ? (fgaEnabled ? 'FGA decision' : 'Scoped decision') : 'Stopped before exchange';
+  const isDownstream = (id: NodeId) => ['okta', 'resourceAs', 'fga', 'audit', 'inventory', 'customer', 'pricing', 'sales'].includes(id);
 
   return (
-    <div className="space-y-8">
-      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-950">
-        <div className="border-b border-slate-200 px-5 py-5 dark:border-slate-800 sm:px-7">
-          <div className="flex flex-wrap items-start justify-between gap-5">
-            <div>
-              <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-700 dark:text-blue-300">Architecture diagram</p>
-              <h2 className="mt-1 text-xl font-bold text-slate-950 dark:text-white">{title}</h2>
-              <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-600 dark:text-slate-300">
-                The person and agent stay distinct from sign-in to business action. Select a node to go deeper.
-              </p>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => setFgaEnabled(!fgaEnabled)}
-                aria-pressed={fgaEnabled}
-                className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold transition ${
-                  fgaEnabled
-                    ? 'border-violet-300 bg-violet-50 text-violet-800 dark:border-violet-700 dark:bg-violet-950/50 dark:text-violet-200'
-                    : 'border-slate-200 bg-white text-slate-700 hover:border-violet-300 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200'
-                }`}
-              >
-                <Sparkles className="h-4 w-4" />
-                FGA layer {fgaEnabled ? 'on' : 'off'}
-              </button>
-              <button
-                type="button"
-                onClick={() => setAgentActive(!agentActive)}
-                aria-pressed={!agentActive}
-                className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold transition ${
-                  agentActive
-                    ? 'border-red-200 bg-white text-red-700 hover:bg-red-50 dark:border-red-900 dark:bg-slate-900 dark:text-red-300 dark:hover:bg-red-950/40'
-                    : 'border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200'
-                }`}
-              >
-                <Power className="h-4 w-4" />
-                {agentActive ? 'Simulate deactivation' : 'Reactivate simulation'}
-              </button>
-            </div>
+    <div className="space-y-6">
+      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-[#0b0f1a]">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-4 dark:border-slate-800 sm:px-6">
+          <div>
+            <h2 className="font-bold text-slate-950 dark:text-white">{title}</h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Hover to trace · click a node for detail</p>
           </div>
-
-          <div className={`mt-5 flex items-start gap-3 rounded-xl border px-4 py-3 ${
-            agentActive
-              ? 'border-emerald-200 bg-emerald-50/70 dark:border-emerald-900 dark:bg-emerald-950/30'
-              : 'border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950/40'
-          }`}>
-            {agentActive
-              ? <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
-              : <ShieldX className="mt-0.5 h-5 w-5 shrink-0 text-red-600 dark:text-red-400" />}
-            <div>
-              <p className={`text-sm font-bold ${agentActive ? 'text-emerald-900 dark:text-emerald-100' : 'text-red-900 dark:text-red-100'}`}>
-                {agentActive ? 'Agent identity active: new delegated exchanges may continue.' : 'Agent identity deactivated: Okta rejects new delegated exchanges.'}
-              </p>
-              <p className="mt-0.5 text-xs leading-5 text-slate-600 dark:text-slate-300">
-                {agentActive
-                  ? 'Okta can still apply user, client, resource, and scope policy on every exchange.'
-                  : 'No new ID-JAG means no new resource token. Previously issued short-lived tokens expire according to policy.'}
-                {' '}This control is a visual simulation only; it does not change the live Okta tenant.
-              </p>
-            </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setFgaEnabled(!fgaEnabled)}
+              aria-pressed={fgaEnabled}
+              className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold transition ${
+                fgaEnabled
+                  ? 'border-violet-400 bg-violet-50 text-violet-800 dark:bg-violet-950/60 dark:text-violet-200'
+                  : 'border-slate-300 text-slate-700 hover:border-violet-400 dark:border-slate-700 dark:text-slate-200'
+              }`}
+            >
+              <Sparkles className="h-4 w-4" /> FGA {fgaEnabled ? 'on' : 'off'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setAgentActive(!agentActive)}
+              aria-pressed={!agentActive}
+              className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold transition ${
+                agentActive
+                  ? 'border-red-300 text-red-700 hover:bg-red-50 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950/30'
+                  : 'border-emerald-400 bg-emerald-50 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-200'
+              }`}
+            >
+              <Power className="h-4 w-4" /> {agentActive ? 'Test kill switch' : 'Reactivate'}
+            </button>
           </div>
         </div>
 
-        <div className="overflow-x-auto bg-slate-50/70 p-2 dark:bg-slate-900/40 sm:p-4">
-          <p className="px-2 pb-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400 sm:hidden">Swipe to follow the delegated access chain →</p>
+        <div className="overflow-x-auto bg-slate-50/70 dark:bg-[#0d111c]">
+          <p className="px-5 pt-3 text-[11px] font-semibold text-slate-500 dark:text-slate-400 sm:hidden">Swipe to follow the architecture →</p>
           <svg
-            viewBox={`0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}`}
-            className="block min-w-[940px] w-full"
+            viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
+            className="block min-w-[900px] w-full"
             role="img"
-            aria-label="Architecture diagram showing a signed-in employee, ProGear AI Agent Workload Principal, Okta ID-JAG, Resource Authorization Server, optional FGA context, and Inventory API"
+            aria-label="ProGear architecture showing the user, governed AI agent, Okta ID-JAG exchange, Resource Authorization Server, optional FGA decision, audit trail, and business resources"
           >
             <defs>
-              <marker id="architecture-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-                <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b" />
+              <marker id="arch-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                <path d="M0 0 L10 5 L0 10 Z" fill="#94a3b8" />
               </marker>
-              <marker id="architecture-arrow-blocked" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-                <path d="M 0 0 L 10 5 L 0 10 z" fill="#dc2626" />
+              <marker id="arch-arrow-active" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                <path d="M0 0 L10 5 L0 10 Z" fill="#f97316" />
               </marker>
-              <filter id="architecture-shadow" x="-20%" y="-20%" width="140%" height="150%">
-                <feDropShadow dx="0" dy="5" stdDeviation="7" floodColor="#0f172a" floodOpacity="0.12" />
+              <marker id="arch-arrow-blocked" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                <path d="M0 0 L10 5 L0 10 Z" fill="#dc2626" />
+              </marker>
+              <filter id="arch-glow" x="-30%" y="-30%" width="160%" height="160%">
+                <feDropShadow dx="0" dy="0" stdDeviation="5" floodColor="#f97316" floodOpacity="0.35" />
               </filter>
             </defs>
 
-            <text x={24} y={38} className="fill-slate-500 text-[11px] font-bold uppercase tracking-widest dark:fill-slate-400">Delegated access path</text>
-            <g transform="translate(1028,18)">
-              <rect width={228} height={34} rx={17} fill={agentActive ? '#ecfdf5' : '#fef2f2'} stroke={agentActive ? '#86efac' : '#fca5a5'} />
-              <circle cx={18} cy={17} r={5} fill={agentActive ? '#16a34a' : '#dc2626'} />
-              <text x={32} y={21} fill={agentActive ? '#166534' : '#991b1b'} className="text-[11px] font-bold">
-                {agentActive ? 'New token exchange available' : 'New token exchange stopped'}
-              </text>
-            </g>
+            <text x={25} y={28} className="fill-slate-500 text-[10px] font-bold uppercase tracking-[0.16em] dark:fill-slate-400">Identity and access control plane</text>
+            <text x={1000} y={28} className="fill-slate-500 text-[10px] font-bold uppercase tracking-[0.16em] dark:fill-slate-400">Business resources</text>
 
             {edges.map((edge) => {
-              const from = nodeById.get(edge.from)!;
-              const to = nodeById.get(edge.to)!;
-              const midX = (from.x + from.w + to.x) / 2;
-              const labelWidth = Math.max(58, edge.label.length * 6 + 16);
-              const labelY = 72;
-              const color = edge.blocked ? '#dc2626' : '#64748b';
+              const connected = edge.id !== 'kill-agent' && (activeId === edge.from || activeId === edge.to);
+              const inactive = !agentActive && edge.downstream;
+              const blocked = Boolean(edge.blocked);
               return (
-                <g key={`${edge.from}-${edge.to}`} opacity={edge.dimmed ? 0.24 : 1}>
+                <g key={edge.id} opacity={inactive ? 0.32 : 1}>
                   <path
-                    d={connectorPath(from, to)}
+                    d={edge.path}
                     fill="none"
-                    stroke={color}
-                    strokeWidth={edge.blocked ? 3 : 2.2}
-                    strokeDasharray={edge.blocked ? '8 6' : undefined}
-                    markerEnd={edge.blocked ? 'url(#architecture-arrow-blocked)' : 'url(#architecture-arrow)'}
+                    className={blocked ? 'stroke-red-600' : connected ? 'stroke-orange-500' : 'stroke-slate-500 dark:stroke-slate-300'}
+                    strokeWidth={blocked || connected ? 4 : 3}
+                    strokeDasharray={blocked ? '8 6' : undefined}
+                    strokeLinecap="round"
+                    markerEnd={blocked ? 'url(#arch-arrow-blocked)' : connected ? 'url(#arch-arrow-active)' : 'url(#arch-arrow)'}
                   />
-                  <rect x={midX - labelWidth / 2} y={labelY} width={labelWidth} height={22} rx={11} className="fill-white stroke-slate-200 dark:fill-slate-950 dark:stroke-slate-700" />
-                  <text x={midX} y={labelY + 15} textAnchor="middle" fill={color} className="text-[10px] font-semibold">{edge.label}</text>
-                  {edge.blocked && (
-                    <g transform={`translate(${midX - 11},184)`}>
-                      <circle cx={11} cy={11} r={11} fill="#dc2626" />
-                      <line x1={5} y1={11} x2={17} y2={11} stroke="white" strokeWidth={2.5} strokeLinecap="round" />
+                  {edge.label && edge.labelX !== undefined && edge.labelY !== undefined ? (
+                    <g>
+                      <rect
+                        x={edge.labelX - Math.max(28, edge.label.length * 3.2)}
+                        y={edge.labelY - 12}
+                        width={Math.max(56, edge.label.length * 6.4)}
+                        height={22}
+                        rx={11}
+                        className="fill-white stroke-slate-200 dark:fill-[#0d111c] dark:stroke-slate-700"
+                      />
+                      <text
+                        x={edge.labelX}
+                        y={edge.labelY + 3}
+                        textAnchor="middle"
+                        className={blocked ? 'fill-red-600 text-[10px] font-bold' : connected ? 'fill-orange-600 text-[10px] font-bold dark:fill-orange-400' : 'fill-slate-600 text-[10px] font-semibold dark:fill-slate-200'}
+                      >
+                        {edge.label}
+                      </text>
                     </g>
-                  )}
+                  ) : null}
                 </g>
               );
             })}
 
             {nodes.map((node) => {
-              const selected = selectedNode.id === node.id;
-              const dimmed = isNodeDimmed(node.id);
+              const active = activeId === node.id;
+              const inactive = !agentActive && isDownstream(node.id);
+              const statusLabel = node.id === 'agent' ? (agentActive ? 'ACTIVE' : 'DEACTIVATED') : null;
               return (
                 <g
                   key={node.id}
-                  onClick={() => setSelectedId(node.id)}
-                  className="cursor-pointer outline-none"
+                  transform={`translate(${node.x},${node.y})`}
                   role="button"
                   tabIndex={0}
+                  aria-label={`${node.label}: ${node.sublabel}`}
+                  className="cursor-pointer outline-none"
+                  opacity={inactive ? 0.42 : activeId && !active ? 0.82 : 1}
+                  filter={active ? 'url(#arch-glow)' : undefined}
+                  onMouseEnter={() => setHoveredId(node.id)}
+                  onMouseLeave={() => setHoveredId(null)}
+                  onClick={() => setSelectedId(node.id)}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' || event.key === ' ') setSelectedId(node.id);
                   }}
-                  aria-label={`${node.label}: ${node.sublabel}`}
-                  opacity={dimmed ? 0.3 : 1}
-                  filter={selected ? 'url(#architecture-shadow)' : undefined}
                 >
                   <rect
-                    x={node.x}
-                    y={node.y}
                     width={node.w}
                     height={node.h}
-                    rx={16}
-                    className="fill-white dark:fill-slate-950"
-                    stroke={selected ? node.color : '#cbd5e1'}
-                    strokeWidth={selected ? 3 : 1.5}
+                    rx={node.compact ? 20 : 13}
+                    className="fill-white dark:fill-[#111827]"
+                    stroke={active ? node.color : '#64748b'}
+                    strokeWidth={active ? 3 : 1.7}
                   />
-                  <rect x={node.x} y={node.y} width={7} height={node.h} rx={3.5} fill={node.color} />
-                  <circle cx={node.x + 25} cy={node.y + 24} r={12} fill={node.color} />
-                  <text x={node.x + 25} y={node.y + 28} textAnchor="middle" fill="white" className="text-[10px] font-bold">{node.step}</text>
-                  <text x={node.x + 18} y={node.y + 61} className="fill-slate-950 text-[13px] font-bold dark:fill-white">{node.label}</text>
-                  <text x={node.x + 18} y={node.y + 81} className="fill-slate-500 text-[10px] dark:fill-slate-400">{node.sublabel}</text>
-                  {node.id === 'agent' && (
-                    <g transform={`translate(${node.x + 18},${node.y + 96})`}>
-                      <rect width={agentActive ? 70 : 92} height={22} rx={11} fill={agentActive ? '#dcfce7' : '#fee2e2'} />
+                  <rect x={0} y={0} width={6} height={node.h} rx={3} fill={node.color} />
+                  <circle cx={node.compact ? 19 : 22} cy={node.compact ? 24 : 25} r={5} fill={node.color} />
+                  <text x={node.compact ? 32 : 38} y={node.compact ? 28 : 29} className="fill-slate-950 text-[12px] font-bold dark:fill-white">{node.label}</text>
+                  <text x={node.compact ? 32 : 18} y={node.compact ? 43 : 50} className="fill-slate-500 text-[9px] dark:fill-slate-400">{node.sublabel}</text>
+                  {node.id === 'agent' ? (
+                    <g transform="translate(18,67)">
+                      <rect width={agentActive ? 69 : 98} height={22} rx={11} fill={agentActive ? '#dcfce7' : '#fee2e2'} />
                       <circle cx={12} cy={11} r={4} fill={agentActive ? '#16a34a' : '#dc2626'} />
-                      <text x={22} y={15} fill={agentActive ? '#166534' : '#991b1b'} className="text-[9px] font-bold">
-                        {agentActive ? 'ACTIVE' : 'DEACTIVATED'}
-                      </text>
+                      <text x={22} y={15} fill={agentActive ? '#166534' : '#991b1b'} className="text-[9px] font-bold">{statusLabel}</text>
                     </g>
-                  )}
+                  ) : null}
+                  {node.id === 'fga' ? (
+                    <g transform="translate(18,61)">
+                      <text className="fill-violet-700 text-[9px] font-bold dark:fill-violet-300">ALLOW · OIG · BLOCK</text>
+                    </g>
+                  ) : null}
                 </g>
               );
             })}
 
-            <g transform="translate(24,278)">
-              <rect width={1232} height={48} rx={14} className="fill-white stroke-slate-200 dark:fill-slate-950 dark:stroke-slate-700" />
-              <text x={18} y={20} className="fill-slate-500 text-[9px] font-bold uppercase tracking-widest dark:fill-slate-400">Accountability trail</text>
-              <text x={18} y={37} className="fill-slate-900 text-[11px] font-semibold dark:fill-white">Sarah Sales</text>
-              <text x={123} y={37} className="fill-slate-400 text-[12px]">→</text>
-              <text x={151} y={37} className="fill-slate-900 text-[11px] font-semibold dark:fill-white">ProGear Agent (wlp...)</text>
-              <text x={310} y={37} className="fill-slate-400 text-[12px]">→</text>
-              <text x={339} y={37} className="fill-slate-900 text-[11px] font-semibold dark:fill-white">Inventory</text>
-              <text x={414} y={37} className="fill-slate-400 text-[12px]">→</text>
-              <text x={443} y={37} className="fill-slate-900 text-[11px] font-semibold dark:fill-white">inventory:read</text>
-              {fgaEnabled && (
-                <>
-                  <text x={557} y={37} className="fill-slate-400 text-[12px]">→</text>
-                  <text x={585} y={37} className="fill-violet-700 text-[11px] font-semibold dark:fill-violet-300">role + quantity + vacation</text>
-                </>
-              )}
-              <g transform={`translate(${fgaEnabled ? 980 : 840},9)`}>
-                <rect width={agentActive ? 218 : 242} height={30} rx={15} fill={agentActive ? '#ecfdf5' : '#fef2f2'} />
-                <circle cx={16} cy={15} r={5} fill={agentActive ? '#16a34a' : '#dc2626'} />
-                <text x={29} y={19} fill={agentActive ? '#166534' : '#991b1b'} className="text-[10px] font-bold">Outcome: {outcomeLabel}</text>
+            {!agentActive ? (
+              <g transform="translate(432,191)">
+                <circle cx={0} cy={0} r={13} fill="#dc2626" />
+                <line x1={-6} y1={0} x2={6} y2={0} stroke="white" strokeWidth={3} strokeLinecap="round" />
               </g>
-            </g>
+            ) : null}
           </svg>
         </div>
 
-        <div className="grid gap-4 border-t border-slate-200 p-5 dark:border-slate-800 sm:grid-cols-[0.9fr,1.1fr] sm:p-7">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="flex h-8 w-8 items-center justify-center rounded-lg text-white" style={{ backgroundColor: selectedNode.color }}>
-                {selectedNode.id === 'agent' ? <Fingerprint className="h-4 w-4" /> : <Activity className="h-4 w-4" />}
-              </span>
-              <div>
-                <p className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Selected control point</p>
-                <h3 className="font-bold text-slate-950 dark:text-white">{selectedNode.label}</h3>
-              </div>
-            </div>
-            <p className="mt-3 text-sm leading-6 text-slate-700 dark:text-slate-200">{selectedNode.plain}</p>
-          </div>
-          <div className="rounded-xl bg-blue-50/70 p-4 dark:bg-blue-950/30">
-            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-blue-700 dark:text-blue-300">
-              <Braces className="h-4 w-4" /> Engineer view
-            </div>
-            <p className="mt-2 text-sm leading-6 text-slate-800 dark:text-slate-200">{selectedNode.technical}</p>
-          </div>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-slate-200 px-5 py-3 text-sm dark:border-slate-800 sm:px-6">
+          <span className="font-bold text-slate-950 dark:text-white">{selectedNode.label}</span>
+          <span className="hidden text-slate-300 dark:text-slate-700 sm:inline">|</span>
+          <span className="text-slate-600 dark:text-slate-300">{selectedNode.detail}</span>
         </div>
       </section>
 
-      <div className="grid gap-4 md:grid-cols-3">
-        {[
-          {
-            icon: Fingerprint,
-            title: 'The agent is an identity',
-            body: 'Owners, credentials, lifecycle, and resource connections attach to one governed Workload Principal.',
-          },
-          {
-            icon: ArrowRight,
-            title: 'Delegation is not impersonation',
-            body: 'The employee stays the subject while the agent client remains visible as the party acting on that person’s behalf.',
-          },
-          {
-            icon: CircleStop,
-            title: 'Revocation has a control point',
-            body: 'Deactivate the agent identity to prevent new exchanges—without changing prompts, tools, or deployment code.',
-          },
-        ].map(({ icon: Icon, title: cardTitle, body }) => (
-          <div key={cardTitle} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-950">
-            <Icon className="h-5 w-5 text-orange-600 dark:text-orange-400" />
-            <h3 className="mt-3 font-bold text-slate-950 dark:text-white">{cardTitle}</h3>
-            <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">{body}</p>
-          </div>
-        ))}
-      </div>
-
       <SequenceDiagram agentActive={agentActive} fgaEnabled={fgaEnabled} />
 
-      <details className="group rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-950">
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-4 font-semibold text-slate-950 dark:text-white sm:px-7">
-          <span className="flex items-center gap-2"><BookOpen className="h-5 w-5 text-blue-600 dark:text-blue-400" /> Standards and implementation notes for AI engineers</span>
-          <span className="text-sm text-slate-400 transition group-open:rotate-90">›</span>
-        </summary>
-        <div className="grid gap-5 border-t border-slate-200 px-5 py-5 text-sm leading-6 text-slate-700 dark:border-slate-800 dark:text-slate-200 sm:grid-cols-2 sm:px-7">
-          <div>
-            <h3 className="font-bold text-slate-950 dark:text-white">Identity continuity</h3>
-            <p className="mt-1">The ID-JAG identifies the end user, the authenticated client that will act for that user, and the target Resource Authorization Server. The target still owns subject resolution and authorization policy.</p>
-          </div>
-          <div>
-            <h3 className="font-bold text-slate-950 dark:text-white">Operational boundary</h3>
-            <p className="mt-1">Agent deactivation blocks new exchanges. Keep resource access tokens short-lived and enforce their signature, issuer, audience, expiry, and scopes at every API.</p>
-          </div>
-          <div className="sm:col-span-2 flex flex-wrap gap-3">
-            <a className="inline-flex items-center gap-1 font-semibold text-blue-700 hover:underline dark:text-blue-300" href="https://datatracker.ietf.org/doc/html/draft-ietf-oauth-identity-assertion-authz-grant" target="_blank" rel="noreferrer">IETF ID-JAG draft <ArrowRight className="h-3.5 w-3.5" /></a>
-            <a className="inline-flex items-center gap-1 font-semibold text-blue-700 hover:underline dark:text-blue-300" href="https://xaa.dev/" target="_blank" rel="noreferrer">Cross App Access <ArrowRight className="h-3.5 w-3.5" /></a>
-            <a className="inline-flex items-center gap-1 font-semibold text-blue-700 hover:underline dark:text-blue-300" href="https://developer.okta.com/docs/api/secures-ai/ai-agents" target="_blank" rel="noreferrer">Okta AI Agents API <ArrowRight className="h-3.5 w-3.5" /></a>
-          </div>
-        </div>
-      </details>
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-1 text-xs text-slate-500 dark:text-slate-400">
+        <span className="font-semibold text-slate-700 dark:text-slate-300">References</span>
+        <a className="hover:text-blue-600 hover:underline dark:hover:text-blue-300" href="https://developer.okta.com/docs/api/secures-ai/ai-agents" target="_blank" rel="noreferrer">Workload Principal</a>
+        <a className="hover:text-blue-600 hover:underline dark:hover:text-blue-300" href="https://datatracker.ietf.org/doc/html/draft-ietf-oauth-identity-assertion-authz-grant" target="_blank" rel="noreferrer">ID-JAG</a>
+        <a className="hover:text-blue-600 hover:underline dark:hover:text-blue-300" href="https://xaa.dev/" target="_blank" rel="noreferrer">Cross App Access</a>
+      </div>
     </div>
   );
 }

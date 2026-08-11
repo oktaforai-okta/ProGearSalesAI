@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { ArrowLeft, Fingerprint, ShieldCheck } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
 import D3ArchitectureDiagram from '@/components/D3ArchitectureDiagram';
 import { ThemeSelector } from '@/components/ThemeProvider';
 
@@ -27,32 +27,17 @@ export default function ArchitecturePage() {
         </div>
       </header>
 
-      <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 sm:py-12">
-        <section className="mb-8 grid items-center gap-7 lg:grid-cols-[1.35fr,0.65fr]">
+      <div className="mx-auto max-w-7xl px-4 py-7 sm:px-6 sm:py-9">
+        <section className="mb-6 flex flex-wrap items-end justify-between gap-4">
           <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-800 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-200">
-              <ShieldCheck className="h-4 w-4" /> Built around a first-class agent identity
-            </div>
-            <h2 className="mt-4 max-w-4xl text-3xl font-black tracking-tight text-slate-950 dark:text-white sm:text-5xl">
-              Know who asked, which agent acted, and what it reached.
-            </h2>
-            <p className="mt-4 max-w-3xl text-base leading-7 text-slate-600 dark:text-slate-300 sm:text-lg">
-              Okta keeps the employee and the ProGear Agent visible across the entire delegated access chain. That makes every action attributable—and gives security teams one identity they can deactivate to stop new token exchanges.
-            </p>
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-700 dark:text-blue-300">ProGear security model</p>
+            <h2 className="mt-1 text-2xl font-black tracking-tight text-slate-950 dark:text-white sm:text-3xl">User → agent → authorized resource</h2>
+            <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">Okta governs identity and token exchange. FGA adds the optional Inventory decision.</p>
           </div>
-          <div className="rounded-2xl border border-orange-200 bg-white/90 p-5 shadow-sm dark:border-orange-900 dark:bg-slate-950/80">
-            <div className="flex items-center gap-3">
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-100 text-orange-700 dark:bg-orange-950 dark:text-orange-300">
-                <Fingerprint className="h-5 w-5" />
-              </span>
-              <div>
-                <p className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">The core idea</p>
-                <p className="font-bold text-slate-950 dark:text-white">Two identities. One attributable action.</p>
-              </div>
-            </div>
-            <p className="mt-3 text-sm leading-6 text-slate-600 dark:text-slate-300">
-              The employee is the subject. The Workload Principal identifies the agent client acting on that employee’s behalf. Neither identity replaces the other.
-            </p>
+          <div className="flex flex-wrap gap-2 text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+            <span className="rounded-full border border-slate-300 px-3 py-1.5 dark:border-slate-700">Workload Principal</span>
+            <span className="rounded-full border border-slate-300 px-3 py-1.5 dark:border-slate-700">ID-JAG</span>
+            <span className="rounded-full border border-slate-300 px-3 py-1.5 dark:border-slate-700">Scoped tokens</span>
           </div>
         </section>
 
