@@ -138,6 +138,9 @@ export default function FGAControlsPanel({ onApplied }: Props) {
               </div>
               <p className="mt-1 max-w-xl text-xs leading-relaxed text-slate-600 dark:text-slate-300">
                 Turn this on for the role, quantity threshold, and VP approval demo. It also reveals the guided FGA prompts on the chat page.
+                <span className="mt-1 block font-medium text-purple-700 dark:text-purple-300">
+                  FGA simulation turns off automatically when you sign out.
+                </span>
               </p>
             </div>
             <button
