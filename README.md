@@ -129,13 +129,12 @@ For a full walkthrough of Okta org setup (AI Agent, Custom Authorization Servers
 
 <a href="https://colab.research.google.com/github/oktaforai-okta/ProGearSalesAI/blob/main/notebooks/progear-inventory-authorization-story.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open ProGear Inventory Authorization Story in Colab"/></a>
 
-**[Secure your custom AI agent with Okta](notebooks/progear-inventory-authorization-story.ipynb)** is a layered business-to-implementation guide. New readers can follow the Sarah-versus-Mike story without code; architects and developers can map the pattern to a customer-owned agent, configure Okta for AI Agents, understand the simple vacation-based delegation stop, inspect the two-step ID-JAG exchange, use the platform-neutral Python reference module, validate resource tokens, and work through production and troubleshooting checklists. It intentionally stops at the introductory Okta identity, context, scope, and exchange story—FGA and OIG remain in the application documentation. Default labs use only local examples or read-only checks and contain no credentials.
+**[Secure the ProGear AI agent with Okta](notebooks/progear-inventory-authorization-story.ipynb)** is a concise, runnable walkthrough of the complete delegated-access chain: employee sign-in, verified ID token, Workload Principal proof, ID-JAG, Inventory authorization policy, and verified scoped resource token. New readers can use a credential-free guided preview; builders can switch to Live Okta and keep private values in Colab Secrets. The Sarah-versus-Mike policy and vacation delegation stop remain easy to explain, while advanced FGA and OIG behavior stays in the web application.
 
 ## Documentation
 
 | Document | Audience | Description |
 |---|---|---|
-| **[CourtEdge ProGear Team Demo Guide](docs/CourtEdge-ProGear-Team-Demo-Guide.docx)** | Presenters, sales engineers | Ready-to-share Word runbook with the Sarah/Mike story, architecture and sequence talk tracks, optional FGA/OIG steps, screenshots, and an editable video-link placeholder ([Markdown source](docs/CourtEdge-ProGear-Team-Demo-Guide.md)) |
 | **[docs/architecture.md](docs/architecture.md)** | Anyone who wants to understand how it works | Full system walkthrough: token exchange sequence, FGA model, approval flow, MCP notes |
 | **[docs/implementation-guide.md](docs/implementation-guide.md)** | Developers, DevOps | Complete deployment walkthrough: Okta configuration, Vercel + Render setup, and recovering from an accidentally deleted AI Agent |
 | **[docs/agent-client-binding-compatibility.md](docs/agent-client-binding-compatibility.md)** | Maintainers, architects | Why the current delegation-link compatibility path exists and how to migrate when Okta restores the newer client-to-agent binding model |
