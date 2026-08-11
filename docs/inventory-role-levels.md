@@ -10,6 +10,8 @@
 
 Sarah never creates an access request. She asks her manager to make the change. The only OIG escalation in this demo is Mike, as a Manager, requesting more than 600 units from a VP.
 
+Those names are demo personas, not application rules. The backend looks up the authenticated user's live Okta profile by immutable subject (`sub`), never by email or name. Any newly onboarded employee with `clearance_level` 0 behaves as Sales, Level 1 behaves as Manager, and Level 2 behaves as VP. A genuinely missing or invalid value is denied as an unassigned role; a failed Okta profile lookup is reported separately and fails closed.
+
 ## End-to-end decision
 
 1. Okta authenticates the employee; the backend reads that employee's current `clearance_level` from the live Okta profile.

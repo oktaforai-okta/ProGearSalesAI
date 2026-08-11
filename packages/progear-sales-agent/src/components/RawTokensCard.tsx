@@ -226,6 +226,9 @@ function StoppedExchangeSection({
 }) {
   const reason = decision?.reason ?? stopReason;
   if (!reason) return null;
+  const stopLabel = stopReason?.startsWith('Authentication stopped')
+    ? 'Authentication stopped'
+    : 'Request stopped';
 
   return (
     <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-red-800">
@@ -233,7 +236,7 @@ function StoppedExchangeSection({
         <ShieldOff className="h-4 w-4 shrink-0" />
         <span className="text-sm font-semibold">Exchange stopped after Step 1</span>
         <span className="ml-auto rounded-full bg-white/70 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide">
-          {decision ? 'Clearance denied' : 'Authentication stopped'}
+          {decision ? 'Clearance denied' : stopLabel}
         </span>
       </div>
       <p className="mt-1 text-xs leading-relaxed">{reason}</p>

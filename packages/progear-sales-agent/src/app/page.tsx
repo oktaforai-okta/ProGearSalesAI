@@ -367,6 +367,8 @@ export default function Home() {
     sessionStorage.removeItem(PENDING_APPROVAL_STORAGE_KEY);
     sessionStorage.removeItem(TOKEN_FLOW_STOP_STORAGE_KEY);
 
+    let responseStatus: number | null = null;
+
     try {
       const idToken = session?.idToken;
 
@@ -386,6 +388,7 @@ export default function Home() {
           simulate_fga: isFGASimulationEnabled,
         }),
       });
+      responseStatus = response.status;
 
       const contentType = response.headers.get('content-type') || '';
       const data = contentType.includes('application/json')
@@ -428,18 +431,21 @@ export default function Home() {
     } catch (error) {
       console.error('Chat error:', error);
       const errorMessage = error instanceof Error ? error.message : '';
+      const stopPrefix = responseStatus === 401
+        ? 'Authentication stopped before token exchange.'
+        : responseStatus === 503
+          ? 'Authorization context could not be verified before token exchange.'
+          : 'Request stopped before token exchange.';
       const tokenFlowStop = errorMessage
-        ? `Authentication stopped before token exchange. ${errorMessage}`
-        : 'Authentication stopped before token exchange. Please sign in again.';
+        ? `${stopPrefix} ${errorMessage}`
+        : `${stopPrefix} Please try again.`;
       sessionStorage.setItem(TOKEN_FLOW_STOP_STORAGE_KEY, tokenFlowStop);
       setChatMessages((prev) => [
         ...prev,
         {
           id: `msg-${Date.now()}`,
           role: 'assistant',
-          content: errorMessage
-            ? `The request could not reach the ProGear service. ${errorMessage}`
-            : 'The request could not reach the ProGear service. Please try again.',
+          content: errorMessage || 'The request could not reach the ProGear service. Please try again.',
           timestamp: Date.now(),
         },
       ]);

@@ -7,9 +7,16 @@ import httpx
 from auth.inventory_policy import normalize_role_level
 
 
+def _normalize_base_url(value: str) -> str:
+    value = value.strip().rstrip("/")
+    if value and not value.startswith(("http://", "https://")):
+        value = f"https://{value}"
+    return value
+
+
 class OktaRoleResolver:
     def __init__(self, base_url: str, api_token: str):
-        self._base_url = base_url.rstrip("/")
+        self._base_url = _normalize_base_url(base_url)
         self._api_token = api_token
 
     async def resolve(self, identifier: str) -> int:

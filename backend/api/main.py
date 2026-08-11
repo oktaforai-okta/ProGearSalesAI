@@ -290,60 +290,57 @@ async def chat(
     if authorization and authorization.startswith("Bearer "):
         user_token = authorization[7:]
 
-    # Validate user
-    if user_token:
-        try:
-            user_claims = await okta_auth.validate_token(user_token)
-
-            # The ID token authenticates the employee. Authorization uses the
-            # employee's live Okta profile so a role change takes effect on the
-            # next request and a browser value can never grant write access.
-            clearance_level = -1
-            clearance_claim = user_claims.get("Clearance", user_claims.get("clearance_level"))
-            if clearance_claim is not None:
-                try:
-                    clearance_level = int(clearance_claim)
-                except (ValueError, TypeError):
-                    logger.warning(f"Invalid Clearance claim in ID token: {clearance_claim}")
-
-            role_identifier = user_claims.get("sub") or user_claims.get("email")
-            try:
-                clearance_level = await OktaRoleResolver(
-                    base_url=os.environ["OKTA_DOMAIN"],
-                    api_token=os.environ["OKTA_API_TOKEN"],
-                ).resolve(role_identifier or "")
-            except (KeyError, httpx.HTTPError, ValueError) as exc:
-                # Fail closed for writes. Reads may still proceed; the
-                # orchestrator treats -1 as an unassigned role for any write.
-                logger.warning("Could not resolve live Okta clearance: %s", exc)
-                clearance_level = -1
-
-            user_info = {
-                "sub": user_claims.get("sub"),
-                "email": user_claims.get("email"),
-                "name": user_claims.get("name"),
-                "groups": user_claims.get("groups", []),
-                "clearance_level": clearance_level,
-            }
-
-            # Log sanitized ID token metadata only - never the raw JWT or the
-            # full decoded claim body (deployed on Render; logs are not a
-            # place for token material).
-            logger.info(f"=== ID Token (User) ===")
-            logger.info(f"User: {user_info.get('email')}")
-            logger.info(f"Subject (sub): {user_claims.get('sub')}")
-            logger.info(f"Groups: {user_claims.get('groups', [])}")
-            logger.info(f"Clearance claim (raw): {user_claims.get('Clearance')} | clearance_level: {user_claims.get('clearance_level')}")
-            logger.info(f"Resolved clearance_level: {clearance_level}")
-            logger.info(f"Claim keys present: {list(user_claims.keys())}")
-        except Exception as e:
-            logger.warning(f"Token validation failed: {e}")
-            raise HTTPException(
-                status_code=401,
-                detail="Your sign-in token could not be verified. Please sign out and sign back in.",
-            ) from e
-    else:
+    # Validate the employee token separately from authorization-context
+    # resolution so an Okta profile API failure is never mislabeled as either
+    # an authentication failure or an unassigned role.
+    if not user_token:
         raise HTTPException(status_code=401, detail="Missing Okta bearer token")
+    try:
+        user_claims = await okta_auth.validate_token(user_token)
+    except Exception as exc:
+        logger.warning("Token validation failed: %s", exc)
+        raise HTTPException(
+            status_code=401,
+            detail="Your sign-in token could not be verified. Please sign out and sign back in.",
+        ) from exc
+
+    # The ID token authenticates the employee. Authorization uses the
+    # employee's live Okta profile, identified by subject rather than by a
+    # persona name, so any user assigned level 0, 1, or 2 follows the same
+    # policy dynamically on their next request.
+    role_identifier = user_claims.get("sub") or user_claims.get("email")
+    try:
+        clearance_level = await OktaRoleResolver(
+            base_url=os.environ["OKTA_DOMAIN"],
+            api_token=os.environ["OKTA_API_TOKEN"],
+        ).resolve(role_identifier or "")
+    except (KeyError, httpx.HTTPError, ValueError) as exc:
+        logger.error("Live Okta clearance lookup failed: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "I couldn't verify your current Okta clearance, so no inventory change "
+                "was attempted. Please try again."
+            ),
+        ) from exc
+
+    user_info = {
+        "sub": user_claims.get("sub"),
+        "email": user_claims.get("email"),
+        "name": user_claims.get("name"),
+        "groups": user_claims.get("groups", []),
+        "clearance_level": clearance_level,
+    }
+
+    # Log sanitized ID token metadata only - never the raw JWT or the full
+    # decoded claim body (deployed on Render; logs are not a place for token
+    # material).
+    logger.info("=== ID Token (User) ===")
+    logger.info("User: %s", user_info.get("email"))
+    logger.info("Subject (sub): %s", user_claims.get("sub"))
+    logger.info("Groups: %s", user_claims.get("groups", []))
+    logger.info("Resolved live clearance_level: %s", clearance_level)
+    logger.info("Claim keys present: %s", list(user_claims.keys()))
 
     # Create orchestrator and process request
     try:

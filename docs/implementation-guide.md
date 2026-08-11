@@ -440,6 +440,8 @@ For Inventory, `clearance_level` is the single role source of truth:
 3. Create `ProGear-Managers` with a group rule matching Level 1 or 2.
 4. Create `ProGear-VPs` with a group rule matching Level 2.
 
+The three named users are demo fixtures only. ProGear does not match Sarah's, Mike's, or Joe's email address in authorization code; it resolves every authenticated user by Okta subject and applies the current `clearance_level`. For repeatable onboarding, assign the value through your Okta identity-lifecycle or profile-mapping process so any new Sales, Manager, or VP user automatically follows the same policy.
+
 Do not use a separate Manager Boolean for application authorization. A compatibility `Manager` token claim may evaluate true for Levels 1 and 2, but the backend and FGA policy use only `clearance_level`.
 
 ### Step 3: Register the AI Agent and Configure Access

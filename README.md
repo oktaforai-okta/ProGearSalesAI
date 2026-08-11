@@ -47,6 +47,8 @@ With **Simulate FGA** enabled, the three default Okta role levels tell one compl
 | Mike Manager | 1 — Manager | Reads and writes 1–600 units directly; writes of 601+ units request VP approval when FGA is enabled. |
 | Joe VP | 2 — VP | Reads and writes any quantity directly. |
 
+Sarah, Mike, and Joe are example personas, not hard-coded identities. The backend resolves the authenticated employee's current Okta profile by subject on every request, so any user assigned `clearance_level` 0, 1, or 2 follows the same Sales, Manager, or VP policy. Use your Okta identity-lifecycle or profile-mapping process to assign that value when onboarding additional users.
+
 ## What This Demo Shows
 
 An AI sales agent needs to read and write real business data (inventory, pricing, customer records) on a user's behalf. This demo answers the questions that matter for enterprise AI agent security:

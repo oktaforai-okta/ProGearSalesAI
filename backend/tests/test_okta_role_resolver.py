@@ -7,8 +7,8 @@ from services.okta_role_resolver import OktaRoleResolver
 
 
 class OktaRoleResolverTests(unittest.IsolatedAsyncioTestCase):
-    async def test_resolve_uses_live_okta_profile_clearance(self):
-        request = httpx.Request("GET", "https://example.okta.com/api/v1/users/00u123")
+    async def test_resolve_normalizes_domain_and_uses_live_profile(self):
+        request = httpx.Request("GET", "https://example.okta.com/api/v1/users/00u-new-sales")
         response = httpx.Response(
             200,
             request=request,
@@ -18,14 +18,34 @@ class OktaRoleResolverTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("httpx.AsyncClient.get", mocked_get):
             level = await OktaRoleResolver(
-                "https://example.okta.com",
+                "example.okta.com/",
                 "secret-token",
-            ).resolve("00u123")
+            ).resolve("00u-new-sales")
 
         self.assertEqual(level, 0)
         mocked_get.assert_awaited_once()
-        _, kwargs = mocked_get.await_args
+        args, kwargs = mocked_get.await_args
+        self.assertEqual(
+            args[0],
+            "https://example.okta.com/api/v1/users/00u-new-sales",
+        )
         self.assertEqual(kwargs["headers"]["Authorization"], "SSWS secret-token")
+
+    async def test_any_manager_profile_resolves_to_level_one(self):
+        request = httpx.Request("GET", "https://example.okta.com/api/v1/users/00u-new-manager")
+        response = httpx.Response(
+            200,
+            request=request,
+            json={"profile": {"clearance_level": 1}},
+        )
+
+        with patch("httpx.AsyncClient.get", AsyncMock(return_value=response)):
+            level = await OktaRoleResolver(
+                "https://example.okta.com",
+                "secret-token",
+            ).resolve("00u-new-manager")
+
+        self.assertEqual(level, 1)
 
     async def test_missing_identifier_fails_closed(self):
         level = await OktaRoleResolver(
