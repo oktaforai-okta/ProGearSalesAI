@@ -1,608 +1,300 @@
 'use client';
 
-/**
- * SequenceDiagram — the "Watch a request" experience.
- *
- * Replaces an earlier hub-and-spoke-graph-plus-animated-dot design that
- * repeated feedback confirmed doesn't work: a dot moving along an arbitrary
- * edge on a free-floating graph gives no stable "forward" direction, no
- * fixed sense of which actor is which, and no persistent notion of "where
- * are we in the story" — the literal "can't connect the dots" complaint.
- *
- * This is a UML-style sequence diagram instead: each actor gets a FIXED
- * vertical lane; each step is a discrete, numbered, horizontal arrow
- * stacked strictly top-to-bottom, so "down" always means "later". Exactly
- * one step is active at a time — its arrow draws itself and both lanes it
- * touches glow — with played steps left as dimmed breadcrumbs above and
- * future steps ghosted below. A persistent "Step N of M" counter plus a
- * scrubber removes any ambiguity about position in the sequence.
- *
- * Same hybrid pattern as the Overview diagram: React owns state, the SVG,
- * and every row as JSX; D3 owns only the imperative self-drawing stroke
- * animation of the single active arrow (stroke-dashoffset).
- */
+import { useEffect, useMemo, useState } from 'react';
+import { ArrowRight, CheckCircle2, Code2, ShieldX } from 'lucide-react';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { select } from 'd3-selection';
-import { easeCubicInOut } from 'd3-ease';
-
-type Persona = 'sarah' | 'mike';
-type MsgKind = 'call' | 'return' | 'self' | 'deny' | 'approvalPause';
-
-const C = {
-  oktaBlue: '#007dc1',
-  accent: '#ff6b35',
-  purple: '#8b5cf6',
-  green: '#22c55e',
-  deny: '#ef4444',
-  lane: '#475569',
-  laneActive: '#ff6b35',
-  nodeFill: '#16213e',
-  text: '#e2e8f0',
-  textDim: '#94a3b8',
-} as const;
+type ActorId = 'user' | 'agent' | 'idp' | 'resourceAs' | 'fga' | 'api';
 
 interface Actor {
-  id: string;
+  id: ActorId;
   label: string;
   sublabel: string;
-  accent: string;
-  icon: string;
+  color: string;
 }
 
-// Fixed lanes, left to right. Order is deliberate: the request flows
-// rightward into the trust/governance actors, then rightward again to the
-// business system; returns point back left. The AI Agent only routes
-// and phrases — it is deliberately NOT styled as a trust node.
-const ACTORS: Actor[] = [
-  { id: 'you', label: 'User', sublabel: 'Signed-in person', accent: C.purple, icon: '\u{1F464}' },
-  { id: 'ai', label: 'AI Agent', sublabel: 'Routes only', accent: C.oktaBlue, icon: '\u{1F916}' },
-  { id: 'okta', label: 'Okta', sublabel: 'Identity + pass', accent: C.oktaBlue, icon: '\u{1F510}' },
-  { id: 'rules', label: 'Access Rules', sublabel: 'Relationship + context', accent: C.accent, icon: '\u{1F5C2}' },
-  { id: 'approver', label: 'Approver', sublabel: 'Human sign-off', accent: C.purple, icon: '\u{1F44D}' },
-  { id: 'system', label: 'Business System', sublabel: 'Inventory & more', accent: C.green, icon: '\u{1F4E6}' },
+interface SequenceStep {
+  from: ActorId;
+  to: ActorId;
+  label: string;
+  shortLabel: string;
+  plain: string;
+  technical: string;
+  blocked?: boolean;
+}
+
+interface SequenceDiagramProps {
+  agentActive?: boolean;
+  fgaEnabled?: boolean;
+}
+
+const BASE_ACTORS: Actor[] = [
+  { id: 'user', label: 'Employee', sublabel: 'Sarah, Mike, or Joe', color: '#8b5cf6' },
+  { id: 'agent', label: 'ProGear Agent', sublabel: 'Workload Principal', color: '#f97316' },
+  { id: 'idp', label: 'Okta', sublabel: 'Identity provider', color: '#2563eb' },
+  { id: 'resourceAs', label: 'Resource AS', sublabel: 'Local authorization', color: '#0f766e' },
+  { id: 'api', label: 'Inventory API', sublabel: 'Protected resource', color: '#16a34a' },
 ];
 
-interface Message {
-  from: string;
-  to: string;
-  label: string;
-  caption: string;
-  kind: MsgKind;
-  note?: string;
-}
+const FGA_ACTOR: Actor = {
+  id: 'fga',
+  label: 'FGA',
+  sublabel: 'Context decision',
+  color: '#7c3aed',
+};
 
-interface Scenario {
-  key: string;
-  label: string;
-  persona: Persona;
-  question: string;
-  messages: Message[];
-  closingLine: string;
-  branches?: { approve: Message[]; reject: Message[] };
-}
-
-// Content follows the live three-tier policy: Level 1 Sales, Level 2 Manager,
-// Level 3 VP; 600 is the Manager ceiling and 601 starts the VP tier.
-const SCENARIOS: Scenario[] = [
-  {
-    key: 'happy',
-    label: 'Happy path',
-    persona: 'sarah',
-    question: 'How many basketballs are in stock?',
-    messages: [
-      { from: 'you', to: 'ai', kind: 'call', label: 'asks a question', caption: 'Sarah asks the assistant a question in plain English.' },
-      { from: 'ai', to: 'okta', kind: 'call', label: "requests a pass, on Sarah's behalf", caption: "Before touching anything, the assistant asks Okta for permission, on Sarah's behalf." },
-      { from: 'okta', to: 'ai', kind: 'return', label: 'issues a short-lived, scoped pass', caption: "Okta confirms it's really Sarah, and issues a pass good for ONE system, ONE purpose.", note: 'scope: inventory:read' },
-      { from: 'ai', to: 'rules', kind: 'call', label: 'checks context', caption: "The assistant checks the live access rules for Sarah's relationship and context." },
-      { from: 'rules', to: 'ai', kind: 'return', label: 'context is fine', caption: "Sarah's relationships and current context check out." },
-      { from: 'ai', to: 'system', kind: 'call', label: 'uses the pass', caption: 'Now, and only now, the assistant reaches the inventory system with the narrow pass.' },
-      { from: 'system', to: 'ai', kind: 'return', label: 'returns cleared data', caption: 'Inventory returns just the stock data Sarah is cleared to see.' },
-      { from: 'ai', to: 'you', kind: 'return', label: 'answers', caption: 'Sarah gets a clear answer. The AI never had more power than she does.' },
-    ],
-    closingLine: 'Same pattern every time: verify the person, issue a narrow pass, check context, log it, then act.',
-  },
-  {
-    key: 'denied',
-    label: 'Sales needs Manager',
-    persona: 'sarah',
-    question: 'Add 50 basketballs to inventory.',
-    messages: [
-      { from: 'you', to: 'ai', kind: 'call', label: 'asks to change inventory', caption: 'Sarah asks the assistant to add 50 basketballs.' },
-      { from: 'ai', to: 'okta', kind: 'call', label: 'requests a write pass', caption: "The assistant asks Okta for permission to write, on Sarah's behalf." },
-      { from: 'okta', to: 'ai', kind: 'return', label: 'issues a scoped pass', caption: 'Okta issues a scoped token containing Sarah’s Level 1 Sales role.', note: 'Clearance: 1 (Sales)' },
-      { from: 'ai', to: 'rules', kind: 'call', label: 'checks role + quantity', caption: 'FGA checks Sarah’s role against a standard 50-unit write.' },
-      { from: 'rules', to: 'approver', kind: 'call', label: 'Manager approval required', caption: 'Level 1 cannot execute the change, so the system creates a Manager approval request.', note: 'required: Level 2' },
-    ],
-    closingLine: 'Nothing changed yet. A Manager must approve before the inventory write executes.',
-  },
-  {
-    key: 'vacation',
-    label: 'Blocked on vacation',
-    persona: 'mike',
-    question: "Add 200 units to my warehouse's stock.",
-    messages: [
-      { from: 'you', to: 'ai', kind: 'call', label: 'asks to adjust stock', caption: "Mike, a warehouse manager, asks to adjust his warehouse's stock." },
-      { from: 'ai', to: 'okta', kind: 'call', label: 'requests a pass', caption: "The assistant asks Okta for permission, on Mike's behalf." },
-      { from: 'okta', to: 'ai', kind: 'return', label: 'Manager role confirmed', caption: "Okta issues a token containing Mike's Level 2 Manager role.", note: 'Clearance: 2 (Manager)' },
-      { from: 'ai', to: 'rules', kind: 'call', label: 'checks live context', caption: "The assistant checks the live access rules for Mike's warehouse." },
-      { from: 'rules', to: 'ai', kind: 'deny', label: 'on vacation — blocked', caption: 'But the access rules see a live flag: Mike is on vacation right now. Blocked this second.', note: 'on_vacation: true' },
-    ],
-    closingLine: "Even a legitimate manager is blocked the instant context changes. Flip the flag back and he's in again. No code change needed.",
-  },
-  {
-    key: 'approval',
-    label: 'Needs approval',
-    persona: 'mike',
-    question: 'Add 601 basketballs to inventory.',
-    messages: [
-      { from: 'you', to: 'ai', kind: 'call', label: 'asks for a large change', caption: 'Mike asks to add 601 basketballs — the first quantity in the VP tier.' },
-      { from: 'ai', to: 'okta', kind: 'call', label: 'requests a write pass', caption: "The assistant asks Okta for permission, on Mike's behalf." },
-      { from: 'okta', to: 'ai', kind: 'return', label: 'issues a scoped write pass', caption: 'Okta issues a scoped pass for warehouse writes.', note: 'scope: inventory:write' },
-      { from: 'ai', to: 'rules', kind: 'call', label: 'checks role + quantity', caption: "FGA sees Mike is Level 2, not on vacation, and asks whether he can execute a 601-unit write." },
-      { from: 'rules', to: 'ai', kind: 'deny', label: 'VP tier — no direct write', caption: 'A Manager can execute through 600. At 601, FGA requires Level 3.', note: 'required: Level 3 (VP)' },
-      { from: 'ai', to: 'approver', kind: 'approvalPause', label: 'creates VP approval', caption: 'The system creates an Okta VP approval request. Inventory is unchanged while it waits.', note: '601+ → VP' },
-    ],
-    closingLine: '',
-    branches: {
-      approve: [
-        { from: 'approver', to: 'ai', kind: 'return', label: 'VP approved', caption: 'An eligible Level 3 VP approves. Now, and only now, the change can be written.' },
-        { from: 'ai', to: 'system', kind: 'call', label: 'writes the change', caption: 'The assistant writes the 601-unit adjustment.' },
-        { from: 'system', to: 'ai', kind: 'return', label: 'confirms', caption: 'Inventory confirms the update.' },
-        { from: 'ai', to: 'you', kind: 'return', label: 'confirms to Mike', caption: 'Mike gets confirmation that the 601-unit adjustment went through.' },
-      ],
-      reject: [
-        { from: 'approver', to: 'ai', kind: 'deny', label: 'denied by approver', caption: 'A human denied it. The AI could not push it through on its own.' },
-      ],
+function buildSteps(agentActive: boolean, fgaEnabled: boolean): SequenceStep[] {
+  const firstSteps: SequenceStep[] = [
+    {
+      from: 'user',
+      to: 'agent',
+      label: 'Ask the agent to read or change inventory',
+      shortLabel: 'User asks',
+      plain: 'The employee asks one customer-owned agent to perform a business task.',
+      technical: 'The signed-in employee remains the resource owner and the subject of the delegated request.',
     },
-  },
-];
+    {
+      from: 'agent',
+      to: 'idp',
+      label: 'Authenticate the agent and present user context',
+      shortLabel: 'Prove both identities',
+      plain: 'The agent identifies itself and carries the signed-in employee’s identity to Okta.',
+      technical: 'The Workload Principal authenticates as the OAuth client and presents the user’s subject token for exchange.',
+    },
+  ];
 
-const VIEW_W = 980;
-const MARGIN_X = 76;
-const HEADER_H = 82;
-const ROW_H = 48;
-const ROW_TOP = HEADER_H + 18;
-// A row whose message carries a note chip (e.g. "scope: inventory:read")
-// packs a label, an arrow, AND a chip into one row -- more content than a
-// plain row. Giving every row the same flat ROW_H left note rows cramped
-// (label/chip crowding the next row's label). Only note rows get this
-// extra height, so the fix doesn't undo the "fit on one screen" sizing
-// for the ~80% of rows that don't have a note.
-const NOTE_ROW_EXTRA_H = 26;
-
-function rowHeight(m: Message): number {
-  return ROW_H + (m.note ? NOTE_ROW_EXTRA_H : 0);
-}
-
-// Cumulative row centers, since rows are no longer a uniform height.
-function computeRowCenters(messages: Message[]): number[] {
-  const centers: number[] = [];
-  let cursor = ROW_TOP;
-  for (const m of messages) {
-    const h = rowHeight(m);
-    centers.push(cursor + h / 2);
-    cursor += h;
+  if (!agentActive) {
+    return [
+      ...firstSteps,
+      {
+        from: 'idp',
+        to: 'agent',
+        label: 'Stop: the agent identity is deactivated',
+        shortLabel: 'Exchange stopped',
+        plain: 'Okta refuses to issue a new delegated grant, so the request never reaches Inventory.',
+        technical: 'The new ID-JAG exchange fails. Any access token already issued remains subject to its own short expiry and revocation policy.',
+        blocked: true,
+      },
+    ];
   }
-  return centers;
-}
 
-// How long the active arrow takes to draw itself, and how long it sits fully
-// drawn before the next step begins. Slower than a typical UI transition on
-// purpose — this is meant to be narrated/read step by step, not glanced at.
-const DRAW_MS = 1100;
-const PAUSE_MS = 900;
+  const steps: SequenceStep[] = [
+    ...firstSteps,
+    {
+      from: 'idp',
+      to: 'agent',
+      label: 'Issue an ID-JAG for this user, client, and target',
+      shortLabel: 'Issue ID-JAG',
+      plain: 'Okta creates a short-lived, signed bridge between the employee, agent, and target authorization server.',
+      technical: 'The ID-JAG identifies the end user in `sub`, the client acting for that user in `client_id`, and the Resource Authorization Server in `aud`.',
+    },
+    {
+      from: 'agent',
+      to: 'resourceAs',
+      label: 'Exchange the ID-JAG for one scoped access token',
+      shortLabel: 'Apply local policy',
+      plain: 'The target authorization server makes its own decision and returns only the permission this task needs.',
+      technical: 'The Resource Authorization Server validates issuer, audience, client continuity, user mapping, and local policy before issuing its access token.',
+    },
+  ];
 
-function laneX(actorIndex: number, count: number): number {
-  const usable = VIEW_W - MARGIN_X * 2;
-  return MARGIN_X + (usable * actorIndex) / (count - 1);
-}
-
-interface Props {
-  title?: string;
-}
-
-export default function SequenceDiagram({ title = 'Sequence' }: Props) {
-  const [scenarioKey, setScenarioKey] = useState('happy');
-  const [branch, setBranch] = useState<'approve' | 'reject' | null>(null);
-  const [played, setPlayed] = useState(0);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [awaitingDecision, setAwaitingDecision] = useState(false);
-
-  const activeArrowRef = useRef<SVGLineElement | SVGPathElement | null>(null);
-  const cancelledRef = useRef(false);
-  const rafRef = useRef<number | null>(null);
-
-  const scenario = useMemo(() => SCENARIOS.find((s) => s.key === scenarioKey)!, [scenarioKey]);
-
-  const messages = useMemo<Message[]>(() => {
-    if (scenario.branches && branch) return [...scenario.messages, ...scenario.branches[branch]];
-    return scenario.messages;
-  }, [scenario, branch]);
-
-  const actorIndex = useCallback((id: string) => ACTORS.findIndex((a) => a.id === id), []);
-
-  const activeStep = played > 0 ? messages[played - 1] : null;
-  const activeActors = useMemo(() => {
-    if (!activeStep) return new Set<string>();
-    return new Set([activeStep.from, activeStep.to]);
-  }, [activeStep]);
-
-  const caption =
-    played === 0
-      ? `"${scenario.question}" — press Play to watch what happens.`
-      : awaitingDecision
-      ? messages[played - 1].caption
-      : played >= messages.length
-      ? branch === 'reject'
-        ? 'A human stayed in the loop and said no.'
-        : scenario.closingLine || messages[played - 1].caption
-      : messages[played - 1].caption;
-
-  const reset = useCallback(() => {
-    cancelledRef.current = true;
-    if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
-    setPlayed(0);
-    setBranch(null);
-    setIsPlaying(false);
-    setAwaitingDecision(false);
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      cancelledRef.current = true;
-      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
-    };
-  }, []);
-
-  useEffect(() => {
-    reset();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scenarioKey]);
-
-  const drawActiveArrow = useCallback((durationMs: number) => {
-    return new Promise<void>((resolve) => {
-      const el = activeArrowRef.current;
-      if (!el) {
-        resolve();
-        return;
-      }
-      const len = el.getTotalLength();
-      const sel = select(el);
-      sel.attr('stroke-dasharray', `${len} ${len}`).attr('stroke-dashoffset', len).attr('opacity', 1);
-
-      let start: number | null = null;
-      const tick = (ts: number) => {
-        if (cancelledRef.current) {
-          resolve();
-          return;
-        }
-        if (start === null) start = ts;
-        const raw = Math.min((ts - start) / durationMs, 1);
-        const u = easeCubicInOut(raw);
-        sel.attr('stroke-dashoffset', len * (1 - u));
-        if (raw < 1) {
-          rafRef.current = requestAnimationFrame(tick);
-        } else {
-          resolve();
-        }
-      };
-      rafRef.current = requestAnimationFrame(tick);
+  if (fgaEnabled) {
+    steps.push({
+      from: 'agent',
+      to: 'fga',
+      label: 'Evaluate role, quantity, and vacation context',
+      shortLabel: 'Check live context',
+      plain: 'The optional advanced layer decides whether to execute, request approval, or block the inventory write.',
+      technical: 'FGA evaluates the live Okta claims plus action and quantity. It does not replace OAuth scope enforcement.',
     });
-  }, []);
+  }
 
-  const play = useCallback(async () => {
-    if (isPlaying) return;
-    cancelledRef.current = false;
-    setIsPlaying(true);
-    setBranch(null);
-    setPlayed(0);
-
-    for (let i = 0; i < scenario.messages.length; i++) {
-      if (cancelledRef.current) return;
-      setPlayed(i + 1);
-      await new Promise((r) => setTimeout(r, 20));
-      await drawActiveArrow(DRAW_MS);
-
-      const step = scenario.messages[i];
-      if (step.kind === 'approvalPause') {
-        setAwaitingDecision(true);
-        setIsPlaying(false);
-        return;
-      }
-      await new Promise((r) => setTimeout(r, PAUSE_MS));
+  steps.push(
+    {
+      from: 'agent',
+      to: 'api',
+      label: 'Call Inventory with the scoped access token',
+      shortLabel: 'Call the resource',
+      plain: 'Only after the identity and authorization checks pass does the agent call the protected API.',
+      technical: 'Inventory validates the bearer token’s signature, issuer, audience, expiry, and required scope before executing.',
+    },
+    {
+      from: 'api',
+      to: 'agent',
+      label: 'Return the result and preserve the audit chain',
+      shortLabel: 'Return + audit',
+      plain: 'The employee receives the answer while the user, agent, resource, scope, and outcome remain traceable.',
+      technical: 'Token-grant evidence in Okta and application/resource logs can be correlated without treating the agent as the user.',
     }
-    setIsPlaying(false);
-  }, [isPlaying, scenario, drawActiveArrow]);
-
-  const decide = useCallback(
-    async (choice: 'approve' | 'reject') => {
-      if (!scenario.branches) return;
-      setAwaitingDecision(false);
-      setBranch(choice);
-      setIsPlaying(true);
-      cancelledRef.current = false;
-
-      const branchMsgs = scenario.branches[choice];
-      const base = scenario.messages.length;
-      for (let i = 0; i < branchMsgs.length; i++) {
-        if (cancelledRef.current) return;
-        setPlayed(base + i + 1);
-        await new Promise((r) => setTimeout(r, 20));
-        await drawActiveArrow(DRAW_MS);
-        await new Promise((r) => setTimeout(r, PAUSE_MS));
-      }
-      setIsPlaying(false);
-    },
-    [scenario, drawActiveArrow]
   );
 
-  const scrubTo = useCallback(
-    (n: number) => {
-      if (isPlaying || awaitingDecision) return;
-      setPlayed(n);
-      cancelledRef.current = false;
-      setTimeout(() => void drawActiveArrow(400), 20);
-    },
-    [isPlaying, awaitingDecision, drawActiveArrow]
+  return steps;
+}
+
+export default function SequenceDiagram({ agentActive = true, fgaEnabled = false }: SequenceDiagramProps) {
+  const actors = useMemo(
+    () => (fgaEnabled ? [...BASE_ACTORS.slice(0, 4), FGA_ACTOR, BASE_ACTORS[4]] : BASE_ACTORS),
+    [fgaEnabled]
   );
+  const steps = useMemo(() => buildSteps(agentActive, fgaEnabled), [agentActive, fgaEnabled]);
+  const [selectedStep, setSelectedStep] = useState(0);
 
-  const rowCenters = useMemo(() => computeRowCenters(messages), [messages]);
-  const totalRowsHeight = useMemo(() => messages.reduce((sum, m) => sum + rowHeight(m), 0), [messages]);
-  const svgHeight = ROW_TOP + totalRowsHeight + 32;
-  const lifelineBottom = ROW_TOP + totalRowsHeight + 10;
+  useEffect(() => setSelectedStep(0), [agentActive, fgaEnabled]);
 
-  // "User"'s sublabel reflects whichever persona this scenario is about —
-  // the sequence is inherently persona-specific (the approval/vacation
-  // stories only make sense for a warehouse manager), so it's derived from
-  // the scenario rather than an independent switcher.
-  const youSublabel = scenario.persona === 'sarah' ? 'Signed in as Sarah' : 'Signed in as Mike';
+  const current = steps[Math.min(selectedStep, steps.length - 1)];
+  const viewWidth = 1120;
+  const laneTop = 92;
+  const rowHeight = 54;
+  const diagramHeight = laneTop + steps.length * rowHeight + 42;
+  const margin = 82;
+  const laneX = (id: ActorId) => {
+    const index = actors.findIndex((actor) => actor.id === id);
+    return margin + ((viewWidth - margin * 2) * index) / Math.max(actors.length - 1, 1);
+  };
 
   return (
-    <div className="w-full rounded-2xl bg-[#0d0d14] border border-white/10 overflow-hidden shadow-2xl">
-      <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3 border-b border-white/10 bg-white/[0.02]">
-        <div className="flex items-center gap-2">
-          <div className="text-sm font-semibold text-slate-100">{title}</div>
-          <div className="hidden sm:block text-xs text-slate-500">each column is an actor · read top to bottom</div>
+    <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-950">
+      <div className="border-b border-slate-200 px-5 py-5 dark:border-slate-800 sm:px-7">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-orange-600 dark:text-orange-400">Sequence diagram</p>
+            <h2 className="mt-1 text-xl font-bold text-slate-950 dark:text-white">Follow one delegated request</h2>
+            <p className="mt-1 max-w-3xl text-sm text-slate-600 dark:text-slate-300">
+              Time moves down. Select a step for its plain-language meaning and protocol detail.
+            </p>
+          </div>
+          <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold ${
+            agentActive
+              ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300'
+              : 'bg-red-50 text-red-700 dark:bg-red-950/50 dark:text-red-300'
+          }`}>
+            {agentActive ? <CheckCircle2 className="h-4 w-4" /> : <ShieldX className="h-4 w-4" />}
+            {agentActive ? 'Agent active' : 'Agent deactivated'}
+          </span>
         </div>
-        <div className="flex items-center gap-2">
-          {SCENARIOS.map((s) => (
+
+        <div className="mt-5 flex gap-2 overflow-x-auto pb-1" aria-label="Sequence steps">
+          {steps.map((step, index) => (
             <button
-              key={s.key}
-              onClick={() => setScenarioKey(s.key)}
-              disabled={isPlaying}
-              className={`px-3 py-1 rounded-full text-xs font-medium border transition disabled:opacity-50 ${
-                scenarioKey === s.key
-                  ? 'bg-orange-500/20 text-orange-300 border-orange-500/50'
-                  : 'bg-white/5 text-slate-300 border-white/10 hover:border-white/25'
+              key={`${step.from}-${step.to}-${step.shortLabel}`}
+              type="button"
+              onClick={() => setSelectedStep(index)}
+              aria-pressed={selectedStep === index}
+              className={`flex shrink-0 items-center gap-2 rounded-lg border px-3 py-2 text-left text-xs font-semibold transition ${
+                selectedStep === index
+                  ? step.blocked
+                    ? 'border-red-300 bg-red-50 text-red-800 dark:border-red-700 dark:bg-red-950/50 dark:text-red-200'
+                    : 'border-orange-300 bg-orange-50 text-orange-900 dark:border-orange-700 dark:bg-orange-950/40 dark:text-orange-100'
+                  : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300'
               }`}
             >
-              {s.label}
+              <span className="flex h-5 w-5 items-center justify-center rounded-full bg-current/10 text-[10px]">{index + 1}</span>
+              {step.shortLabel}
             </button>
           ))}
         </div>
       </div>
 
-      <div className="flex items-center gap-3 px-5 py-2.5 border-b border-white/10 bg-black/20">
-        <button
-          onClick={() => (played === 0 || played >= messages.length ? play() : reset())}
-          disabled={isPlaying}
-          className="px-4 py-1.5 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 disabled:opacity-50 transition"
-        >
-          {isPlaying ? 'Playing…' : played >= messages.length && played > 0 ? '↺ Replay' : '▶ Play'}
-        </button>
-        <button
-          onClick={reset}
-          className="px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 border border-white/10 hover:border-white/25 transition"
-        >
-          Reset
-        </button>
-        <div className="ml-auto flex items-center gap-2 text-xs text-slate-400">
-          <span className="tabular-nums">
-            Step {Math.min(played, messages.length)} of {messages.length}
-          </span>
-          <div className="flex items-center gap-1">
-            {messages.map((_, i) => {
-              const isActive = i === played - 1;
-              const isPlayed = i < played;
-              return (
-                <button
-                  key={i}
-                  onClick={() => scrubTo(i + 1)}
-                  disabled={isPlaying || awaitingDecision || i >= played}
-                  aria-label={`Go to step ${i + 1}`}
-                  className={`h-2 rounded-full transition-all ${
-                    isActive ? 'w-5 bg-orange-400' : isPlayed ? 'w-2 bg-orange-500/60' : 'w-2 bg-white/15'
-                  } ${i < played && !isPlaying ? 'cursor-pointer' : 'cursor-default'}`}
-                />
-              );
-            })}
-          </div>
-        </div>
-      </div>
-
-      <div className="flex-1 min-w-0">
+      <div className="overflow-x-auto bg-slate-50/70 dark:bg-slate-900/40">
+        <p className="px-5 pt-3 text-[11px] font-semibold text-slate-500 dark:text-slate-400 sm:hidden">Swipe to follow the sequence →</p>
         <svg
-          viewBox={`0 0 ${VIEW_W} ${svgHeight}`}
-          preserveAspectRatio="xMidYMid meet"
-          className="w-full h-auto block"
+          viewBox={`0 0 ${viewWidth} ${diagramHeight}`}
+          className="block min-w-[880px] w-full"
           role="img"
-          aria-label="Sequence diagram: a request moving through each actor in order"
+          aria-label="Sequence diagram showing the employee, governed AI agent, Okta, resource authorization server, optional FGA policy, and Inventory API"
         >
           <defs>
-            <marker id="seqArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto" markerUnits="strokeWidth">
-              <path d="M0,0 L6,3 L0,6 z" fill={C.laneActive} />
+            <marker id="sequence-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b" />
             </marker>
-            <marker id="seqArrowDim" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto" markerUnits="strokeWidth">
-              <path d="M0,0 L6,3 L0,6 z" fill={C.lane} />
+            <marker id="sequence-arrow-active" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#f97316" />
             </marker>
-            <marker id="seqArrowDeny" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto" markerUnits="strokeWidth">
-              <path d="M0,0 L6,3 L0,6 z" fill={C.deny} />
+            <marker id="sequence-arrow-blocked" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#dc2626" />
             </marker>
           </defs>
 
-          {ACTORS.map((a, i) => {
-            const x = laneX(i, ACTORS.length);
-            const isActive = activeActors.has(a.id);
+          {actors.map((actor) => {
+            const x = laneX(actor.id);
             return (
-              <line
-                key={`life-${a.id}`}
-                x1={x}
-                y1={HEADER_H}
-                x2={x}
-                y2={lifelineBottom}
-                stroke={isActive ? a.accent : C.lane}
-                strokeOpacity={isActive ? 0.7 : 0.25}
-                strokeWidth={isActive ? 2.5 : 1.5}
-                style={{ transition: 'stroke 200ms, stroke-opacity 200ms, stroke-width 200ms' }}
-              />
-            );
-          })}
-
-          {ACTORS.map((a, i) => {
-            const x = laneX(i, ACTORS.length);
-            const isActive = activeActors.has(a.id);
-            const w = 112;
-            const h = 62;
-            const sublabel = a.id === 'you' ? youSublabel : a.sublabel;
-            return (
-              <g key={`hdr-${a.id}`} transform={`translate(${x},${HEADER_H / 2})`}>
-                <rect
-                  x={-w / 2}
-                  y={-h / 2}
-                  width={w}
-                  height={h}
-                  rx={12}
-                  fill={C.nodeFill}
-                  stroke={a.accent}
-                  strokeWidth={isActive ? 2.5 : 1.25}
-                  style={{
-                    filter: isActive ? `drop-shadow(0 0 12px ${a.accent}aa)` : 'none',
-                    transition: 'stroke-width 200ms, filter 200ms',
-                  }}
-                />
-                <text textAnchor="middle" y={-8} fontSize={18} className="select-none">
-                  {a.icon}
-                </text>
-                <text textAnchor="middle" y={12} fontSize={12} fontWeight={600} fill={C.text} className="select-none">
-                  {a.label}
-                </text>
-                <text textAnchor="middle" y={24} fontSize={9} fill={C.textDim} className="select-none">
-                  {sublabel}
-                </text>
+              <g key={actor.id}>
+                <rect x={x - 72} y={18} width={144} height={54} rx={12} className="fill-white stroke-slate-200 dark:fill-slate-950 dark:stroke-slate-700" strokeWidth={1.5} />
+                <circle cx={x - 54} cy={36} r={5} fill={actor.color} />
+                <text x={x} y={39} textAnchor="middle" className="fill-slate-900 text-[12px] font-bold dark:fill-white">{actor.label}</text>
+                <text x={x} y={57} textAnchor="middle" className="fill-slate-500 text-[9px] dark:fill-slate-400">{actor.sublabel}</text>
+                <line x1={x} y1={72} x2={x} y2={diagramHeight - 20} className="stroke-slate-300 dark:stroke-slate-700" strokeWidth={1.2} strokeDasharray="4 6" />
               </g>
             );
           })}
 
-          {messages.map((m, i) => {
-            const y = rowCenters[i];
-            const fromX = laneX(actorIndex(m.from), ACTORS.length);
-            const toX = laneX(actorIndex(m.to), ACTORS.length);
-            const isActive = i === played - 1;
-            const isPlayed = i < played;
-            const isFuture = i >= played;
-            // Once a step has played it stays fully lit -- only steps not
-            // yet reached are dimmed. isActive still separately drives the
-            // brighter "in progress" arrow color/weight below, so the
-            // current step reads as distinct even though it shares full
-            // opacity with everything already played.
-            const rowOpacity = isPlayed ? 1 : 0.14;
-            const isDeny = m.kind === 'deny';
-            const isPause = m.kind === 'approvalPause';
-
-            if (m.kind === 'self') {
-              const loopW = 46;
-              return (
-                <g key={`row-${i}`} opacity={rowOpacity} style={{ transition: 'opacity 250ms' }}>
-                  <text x={fromX + loopW + 10} y={y - 6} fontSize={11} fill={isActive ? C.text : C.textDim} className="select-none">
-                    {m.label}
-                  </text>
-                  <path
-                    ref={isActive ? (activeArrowRef as React.Ref<SVGPathElement>) : undefined}
-                    d={`M ${fromX} ${y - 10} h ${loopW} v 20 h ${-loopW}`}
-                    fill="none"
-                    stroke={isActive ? C.laneActive : C.lane}
-                    strokeWidth={isActive ? 2.5 : 1.5}
-                    strokeOpacity={isActive ? 1 : 0.6}
-                    markerEnd={isActive ? 'url(#seqArrow)' : 'url(#seqArrowDim)'}
-                  />
-                  <circle cx={fromX} cy={y} r={11} fill={isActive ? C.laneActive : C.nodeFill} stroke={isActive ? C.laneActive : C.lane} strokeWidth={1.5} />
-                  <text x={fromX} y={y + 4} textAnchor="middle" fontSize={11} fontWeight={700} fill={isActive ? '#fff' : C.textDim} className="select-none">
-                    {i + 1}
-                  </text>
-                </g>
-              );
-            }
-
-            const dir = toX >= fromX ? 1 : -1;
-            const stroke = isDeny ? C.deny : isActive ? C.laneActive : C.lane;
-            const midX = (fromX + toX) / 2;
-
+          {steps.map((step, index) => {
+            const y = laneTop + index * rowHeight + 20;
+            const active = selectedStep === index;
+            const blocked = Boolean(step.blocked);
+            const fromX = laneX(step.from);
+            const toX = laneX(step.to);
+            const direction = toX >= fromX ? 1 : -1;
+            const startX = fromX + direction * 8;
+            const endX = toX - direction * 10;
+            const color = blocked ? '#dc2626' : active ? '#f97316' : '#64748b';
+            const marker = blocked ? 'url(#sequence-arrow-blocked)' : active ? 'url(#sequence-arrow-active)' : 'url(#sequence-arrow)';
             return (
-              <g key={`row-${i}`} opacity={rowOpacity} style={{ transition: 'opacity 250ms' }}>
-                <rect x={0} y={y - rowHeight(m) / 2} width={VIEW_W} height={rowHeight(m)} fill="transparent" className={isPlayed && !isPlaying ? 'cursor-pointer' : ''} onClick={() => isPlayed && !isPlaying && scrubTo(i + 1)} />
-                <text x={midX} y={y - 13} textAnchor="middle" fontSize={11} fontWeight={isActive ? 600 : 400} fill={isDeny ? C.deny : isActive ? C.text : C.textDim} className="select-none">
-                  {m.label}
-                </text>
+              <g
+                key={`${step.from}-${step.to}-${index}`}
+                onClick={() => setSelectedStep(index)}
+                className="cursor-pointer"
+                role="button"
+                tabIndex={0}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') setSelectedStep(index);
+                }}
+                aria-label={`Step ${index + 1}: ${step.label}`}
+              >
+                {active && <rect x={24} y={y - 23} width={viewWidth - 48} height={44} rx={10} fill={blocked ? '#fef2f2' : '#fff7ed'} opacity={0.9} />}
+                <circle cx={34} cy={y} r={12} fill={color} />
+                <text x={34} y={y + 4} textAnchor="middle" fill="white" className="text-[10px] font-bold">{index + 1}</text>
                 <line
-                  ref={isActive ? (activeArrowRef as React.Ref<SVGLineElement>) : undefined}
-                  x1={fromX + dir * 12}
+                  x1={startX}
                   y1={y}
-                  x2={toX - dir * 12}
+                  x2={endX}
                   y2={y}
-                  stroke={stroke}
-                  strokeWidth={isActive ? 3 : 2}
-                  strokeOpacity={isFuture ? 0.6 : 1}
-                  strokeDasharray={isDeny || m.kind === 'return' ? '7 5' : 'none'}
-                  markerEnd={isDeny ? 'url(#seqArrowDeny)' : isActive ? 'url(#seqArrow)' : 'url(#seqArrowDim)'}
+                  stroke={color}
+                  strokeWidth={active ? 2.8 : 1.8}
+                  strokeDasharray={blocked ? '7 5' : undefined}
+                  markerEnd={marker}
+                  opacity={active ? 1 : 0.72}
                 />
-                {m.note && (
-                  <g transform={`translate(${midX}, ${y + 15})`}>
-                    <rect x={-m.note.length * 3.2 - 6} y={-9} width={m.note.length * 6.4 + 12} height={18} rx={9} fill={isDeny ? '#3a0f0f' : '#0d1b2a'} stroke={isDeny ? C.deny : C.oktaBlue} strokeOpacity={0.6} strokeWidth={1} />
-                    <text textAnchor="middle" y={4} fontSize={9.5} fontFamily="monospace" fill={isDeny ? C.deny : C.textDim} className="select-none">
-                      {m.note}
-                    </text>
-                  </g>
-                )}
-                {isDeny && (
-                  <g transform={`translate(${toX - dir * 12}, ${y})`}>
-                    <circle r={9} fill="#1a0b0b" stroke={C.deny} strokeWidth={2} />
-                    <line x1={-4} y1={4} x2={4} y2={-4} stroke={C.deny} strokeWidth={2} />
-                    <line x1={-4} y1={-4} x2={4} y2={4} stroke={C.deny} strokeWidth={2} />
-                  </g>
-                )}
-                {isPause && isActive && (
-                  <g transform={`translate(${toX - dir * 12}, ${y})`}>
-                    <circle r={9} fill={C.nodeFill} stroke={C.purple} strokeWidth={2} />
-                    <line x1={-3} y1={-4} x2={-3} y2={4} stroke={C.purple} strokeWidth={2} />
-                    <line x1={3} y1={-4} x2={3} y2={4} stroke={C.purple} strokeWidth={2} />
-                  </g>
-                )}
-                <circle cx={fromX} cy={y} r={11} fill={isActive ? stroke : C.nodeFill} stroke={isActive ? stroke : C.lane} strokeWidth={1.5} />
-                <text x={fromX} y={y + 4} textAnchor="middle" fontSize={11} fontWeight={700} fill={isActive ? '#fff' : C.textDim} className="select-none">
-                  {i + 1}
+                <rect
+                  x={(fromX + toX) / 2 - Math.min(190, Math.max(94, step.label.length * 3.1))}
+                  y={y - 18}
+                  width={Math.min(380, Math.max(188, step.label.length * 6.2))}
+                  height={20}
+                  rx={10}
+                  className="fill-slate-50 dark:fill-slate-900"
+                />
+                <text x={(fromX + toX) / 2} y={y - 5} textAnchor="middle" fill={color} className="text-[10px] font-semibold">
+                  {step.label}
                 </text>
               </g>
             );
           })}
         </svg>
-
-        <div className="px-5 py-3 border-t border-white/10 bg-black/20 min-h-[52px] flex items-center">
-          <p className="text-sm text-slate-200 leading-snug">{caption}</p>
-        </div>
-
-        {awaitingDecision && (
-          <div className="px-5 py-3 border-t border-white/10 bg-purple-950/40 flex items-center gap-3">
-            <span className="text-xs text-slate-300">Awaiting a human decision:</span>
-            <button onClick={() => decide('approve')} className="px-3 py-1.5 rounded-md text-xs font-semibold bg-green-600/80 hover:bg-green-600 text-white transition">
-              Approve
-            </button>
-            <button onClick={() => decide('reject')} className="px-3 py-1.5 rounded-md text-xs font-semibold bg-red-600/80 hover:bg-red-600 text-white transition">
-              Deny
-            </button>
-          </div>
-        )}
       </div>
-    </div>
+
+      <div className="grid gap-4 border-t border-slate-200 p-5 dark:border-slate-800 sm:grid-cols-2 sm:p-7">
+        <div className="rounded-xl bg-slate-50 p-4 dark:bg-slate-900">
+          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            <ArrowRight className="h-4 w-4" /> Plain language
+          </div>
+          <p className="mt-2 text-sm leading-6 text-slate-800 dark:text-slate-200">{current.plain}</p>
+        </div>
+        <div className="rounded-xl bg-blue-50/70 p-4 dark:bg-blue-950/30">
+          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-blue-700 dark:text-blue-300">
+            <Code2 className="h-4 w-4" /> Protocol detail
+          </div>
+          <p className="mt-2 text-sm leading-6 text-slate-800 dark:text-slate-200">{current.technical}</p>
+        </div>
+      </div>
+    </section>
   );
 }

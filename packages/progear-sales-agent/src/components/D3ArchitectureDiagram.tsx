@@ -1,796 +1,404 @@
 'use client';
 
-/**
- * D3ArchitectureDiagram — the customer-facing "how it works" experience.
- *
- * Two modes with two different jobs, deliberately using two different
- * visual paradigms:
- * - Overview: "what are the pieces and how do they relate" — a resting
- *   hub-and-spoke relationship graph, hover-to-trace, click-for-detail.
- *   A graph is the right tool for a static relationship question.
- * - Watch a request: "what happens, in what order" — delegated entirely to
- *   <SequenceDiagram>, a UML-style lane diagram. An earlier version tried to
- *   answer this temporal question by animating a dot along this same graph;
- *   repeated feedback ("lines crossing", "can't connect the dots") confirmed
- *   that doesn't work, because a hub-and-spoke graph has no stable "forward"
- *   direction for a dot to follow. Sequence is a different question with a
- *   different right tool, so it gets a different component.
- *
- * Pattern: HYBRID (verified against this app's real strict-mode tsconfig).
- * React owns all state, the SVG element, and every node/label as JSX so
- * click/hover stay native-React and drive the side panel + highlight state.
- * D3 owns only the interior of one <g ref> — the edge paths — via a keyed
- * data-join in useEffect, plus imperative attr mutation for hover-highlight.
- * D3 never touches the DOM during SSR; everything DOM-facing lives in
- * effects that run client-side post-mount.
- *
- * Layout is FIXED (authored x/y), not d3-force — a small, known graph reads
- * as a stable story every load.
- */
-
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { select, type Selection } from 'd3-selection';
-import { line, curveBumpX } from 'd3-shape';
+import { useMemo, useState } from 'react';
+import { curveBumpX, line } from 'd3-shape';
+import {
+  Activity,
+  ArrowRight,
+  BookOpen,
+  Braces,
+  CheckCircle2,
+  CircleStop,
+  Fingerprint,
+  Power,
+  ShieldX,
+  Sparkles,
+} from 'lucide-react';
+import { useFGASimulation } from '@/hooks/useFGASimulation';
 import SequenceDiagram from './SequenceDiagram';
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+type NodeId = 'user' | 'agent' | 'idjag' | 'resourceAs' | 'fga' | 'api';
 
-type Mode = 'overview' | 'flow';
-
-interface NodeDetail {
-  body: string;
-  subpoints?: string[];
-  callouts?: string[];
-  architect?: string;
-  // A decoded (illustrative, not real) token payload shown to architects
-  // so they can see the actual claim shape instead of just prose about
-  // it. Values are made up for illustration -- never a real token.
-  tokenExample?: { label: string; json: string };
-}
-
-interface DiagramNode {
-  id: string;
+interface ArchitectureNode {
+  id: NodeId;
+  step: string;
   label: string;
   sublabel: string;
   x: number;
   y: number;
   w: number;
   h: number;
-  accent: string;
-  hero?: boolean;
-  dim?: boolean;
-  chip?: boolean;
-  order?: number;
-  description: string;
-  detail: NodeDetail;
+  color: string;
+  plain: string;
+  technical: string;
 }
 
-interface PhysicalEdge {
-  id: string;
-  source: string;
-  target: string;
+interface ArchitectureEdge {
+  from: NodeId;
+  to: NodeId;
+  label: string;
+  blocked?: boolean;
+  dimmed?: boolean;
 }
 
-// ---------------------------------------------------------------------------
-// Brand palette — mirrors tailwind.config.js so SVG fills match the app.
-// Color = meaning: blue = Okta/identity, orange = access/action, purple =
-// human/governance, green = business data (reached only after checks pass).
-// ---------------------------------------------------------------------------
+const VIEW_WIDTH = 1280;
+const VIEW_HEIGHT = 340;
 
-const C = {
-  oktaBlue: '#007dc1',
-  accent: '#ff6b35',
-  purple: '#8b5cf6',
-  green: '#22c55e',
-  deny: '#ef4444',
-  slate: '#334155',
-  edge: '#475569',
-  edgeActive: '#ff6b35',
-  nodeFill: '#16213e',
-  text: '#e2e8f0',
-  textDim: '#94a3b8',
-} as const;
-
-const VIEW_W = 1040;
-const VIEW_H = 620;
-
-// ---------------------------------------------------------------------------
-// Data model — 8 nodes across 3 tiers (actor / trust / resource), 7 edges.
-// Content verified against the app's actual code (backend/auth/agent_config.py,
-// fga_client.py and auth/inventory_policy.py), not assumed — see
-// SequenceDiagram.tsx for the note chips carrying the exact scope strings,
-// role tiers, and the confirmed 600/601 boundary.
-// ---------------------------------------------------------------------------
-
-const NODES: DiagramNode[] = [
-  {
-    id: 'you',
-    label: 'User',
-    sublabel: 'Signed-in person',
-    x: 76, y: 320, w: 150, h: 70,
-    accent: C.purple,
-    order: 1,
-    description: 'The signed-in person asking a question in plain English.',
-    detail: {
-      body: "The signed-in person asking a question. Okta verifies who you are — the AI acts on your behalf, within your limits, never on its own.",
-      callouts: ['Verified by Okta login', 'Role determines what you can do'],
-    },
-  },
-  {
-    id: 'ai',
-    label: 'AI Agent',
-    sublabel: 'Understands + routes',
-    x: 300, y: 320, w: 150, h: 70,
-    accent: C.oktaBlue,
-    order: 2,
-    description: 'The chatbot that understands your request and figures out which systems it needs.',
-    detail: {
-      body: "Reads your question and routes it to the right systems. It never decides what you're allowed to see — that's Okta's job, not the AI's.",
-      callouts: ['Has its own Okta identity (a Workload Principal)', 'No standing access of its own'],
-      architect: 'Claude via the raw Anthropic SDK — wording and routing only, not the security boundary.',
-      tokenExample: {
-        label: 'Step 1: the ID-JAG assertion',
-        json: `{
-  "sub": "mike@example.com",
-  "act": {
-    "sub": "wlpuoor63yK6..."
-  },
-  "exp": 1751500060
-}`,
-      },
-    },
-  },
-  {
-    id: 'okta',
-    label: 'Okta',
-    sublabel: 'Identity + Access',
-    x: 560, y: 120, w: 150, h: 70,
-    accent: C.oktaBlue,
-    hero: true,
-    order: 3,
-    description: 'Issues a short-lived, single-purpose pass every time the AI needs to touch a system.',
-    detail: {
-      body: "Before the AI touches any system, it asks Okta for permission. Okta checks who you are and whether your role allows this — then issues a short-lived, single-purpose pass, or refuses.",
-      subpoints: [
-        "Every system has its own separate pass. A pass for pricing can't open inventory.",
-        'Passes expire in minutes, so a leaked one is near-worthless.',
-        'The AI never holds a master key. It gets a fresh, narrow pass each time.',
-      ],
-      callouts: ['Passes are scoped per system + per action', "All-or-nothing: if a role can't do it, the whole request is refused"],
-      architect: 'Two-step ID-JAG exchange. 4 separate Custom Authorization Servers (one per domain) — no down-scoping.',
-      tokenExample: {
-        label: 'Step 2: the scoped access token',
-        json: `{
-  "aud": "progear-inventory",
-  "sub": "mike@example.com",
-  "scp": [
-    "inventory:write"
-  ],
-  "Vacation": false,
-  "Clearance": 2,
-  "exp": 1751500300
-}`,
-      },
-    },
-  },
-  {
-    id: 'fga',
-    label: 'Access Rules',
-    sublabel: 'Role + quantity + context',
-    x: 610, y: 300, w: 150, h: 70,
-    accent: C.accent,
-    hero: true,
-    order: 4,
-    description: 'A live check of role level, requested quantity, and vacation status.',
-    detail: {
-      body: 'A live decision using one Okta role value: Level 1 Sales, Level 2 Manager, or Level 3 VP. Quantity selects the required tier, and vacation blocks every write.',
-      subpoints: [
-        'Reads: Levels 1, 2, and 3 can read inventory.',
-        'Writes of 1–600: Manager or VP executes; Sales creates Manager approval.',
-        'Writes of 601+: VP executes; Sales or Manager creates VP approval.',
-        "Context: 'on vacation' blocks every write, including approval submission.",
-      ],
-      callouts: ['Blocks instantly on context change', 'No redeploy needed to revoke'],
-      architect: "Auth0 FGA (Zanzibar-style relationship graph). Vacation is a contextual tuple, not stored — takes effect next check.",
-    },
-  },
-  {
-    id: 'approval',
-    label: 'Approval Gate',
-    sublabel: 'Human Approval Only',
-    x: 600, y: 505, w: 150, h: 70,
-    accent: C.purple,
-    order: 5,
-    description: 'High-impact actions (like a large inventory change) pause here for a human to approve.',
-    detail: {
-      body: "High-impact writes pause for a real person to approve or deny. The AI can't push them through on its own.",
-      subpoints: [
-        'A Sales write of 1–600 requires Manager approval.',
-        'Any non-VP write of 601 or more requires VP approval.',
-        'The approver’s current Okta role level is verified before execution.',
-        'Nothing happens to the business system until sign-off lands.',
-      ],
-      callouts: ['Human-in-the-loop', 'Auto-resumes once approved'],
-      architect: 'A real Okta Identity Governance (OIG) Access Request carrying the required approver role and level.',
-    },
-  },
-  {
-    id: 'inventory',
-    label: 'Inventory',
-    sublabel: 'read / write / alerts',
-    x: 945, y: 160, w: 150, h: 70,
-    accent: C.green,
-    description: 'Stock levels and adjustments.',
-    detail: {
-      body: 'Stock levels and adjustments. Reads are available to all three roles; writes execute or route to Manager/VP approval based on role and quantity.',
-    },
-  },
-  {
-    id: 'customer',
-    label: 'Customer',
-    sublabel: 'read',
-    x: 945, y: 280, w: 150, h: 70,
-    accent: C.green,
-    description: 'Customer accounts and history.',
-    detail: {
-      body: 'Customer accounts and history.',
-    },
-  },
-  {
-    id: 'pricing',
-    label: 'Pricing',
-    sublabel: 'read',
-    x: 945, y: 400, w: 150, h: 70,
-    accent: C.green,
-    description: 'Product and deal pricing.',
-    detail: {
-      body: 'Product and deal pricing.',
-    },
-  },
-  {
-    id: 'sales',
-    label: 'Sales',
-    sublabel: 'read',
-    x: 945, y: 520, w: 150, h: 70,
-    accent: C.green,
-    description: 'Orders, quotes, and pipeline.',
-    detail: {
-      body: 'Orders, quotes, and pipeline.',
-    },
-  },
-  {
-    id: 'audit',
-    label: 'Audit Trail',
-    sublabel: 'Every decision logged',
-    x: 762, y: 120, w: 150, h: 70,
-    accent: C.slate,
-    dim: true,
-    order: 6,
-    description: 'A permanent, searchable record of every pass issued and every allow/deny decision.',
-    detail: {
-      body: "Every access decision — granted or denied — is logged instantly. Answers 'who did what, when, why' without trusting the AI to self-report.",
-      callouts: ['Queryable', 'Covers grants AND denials'],
-      architect: "Okta's System Log — a queryable, tamper-evident stream separate from this app's own logging.",
-    },
-  },
-  {
-    id: 'killswitch',
-    label: 'Kill Switch',
-    sublabel: 'Revoke in one click',
-    x: 120, y: 70, w: 108, h: 34,
-    accent: C.deny,
-    dim: true,
-    chip: true,
-    description: "Turn off the AI's access instantly by deactivating its identity or flipping a context flag.",
-    detail: {
-      body: "One step cuts the AI's access: deactivate its identity, or flip a context flag. Takes effect almost immediately — no redeploy.",
-      callouts: ['Deactivate identity — OR — flip a context flag'],
-    },
-  },
-];
-
-// The four business-domain boxes are siblings reached by one shared "bus"
-// out of the AI hub, not a sequential chain -- this list is the single
-// source of truth for that grouping so edge/highlight logic below never
-// has to hardcode all four ids separately.
-const BUSINESS_NODE_IDS = ['inventory', 'customer', 'pricing', 'sales'];
-const BUSINESS_EDGE_IDS = BUSINESS_NODE_IDS.map((id) => `ai_${id}`);
-
-const EDGES: PhysicalEdge[] = [
-  { id: 'you_ai', source: 'you', target: 'ai' },
-  { id: 'ai_okta', source: 'ai', target: 'okta' },
-  { id: 'ai_fga', source: 'ai', target: 'fga' },
-  { id: 'ai_approval', source: 'ai', target: 'approval' },
-  { id: 'ai_inventory', source: 'ai', target: 'inventory' },
-  { id: 'ai_customer', source: 'ai', target: 'customer' },
-  { id: 'ai_pricing', source: 'ai', target: 'pricing' },
-  { id: 'ai_sales', source: 'ai', target: 'sales' },
-  { id: 'okta_audit', source: 'okta', target: 'audit' },
-  { id: 'fga_audit', source: 'fga', target: 'audit' },
-];
-
-// ---------------------------------------------------------------------------
-// Pure geometry helpers (no DOM; safe to call anywhere)
-// ---------------------------------------------------------------------------
-
-function findNode(list: DiagramNode[], id: string): DiagramNode {
-  const n = list.find((n) => n.id === id);
-  if (!n) throw new Error(`Unknown node id: ${id}`);
-  return n;
+function connectorPath(from: ArchitectureNode, to: ArchitectureNode): string {
+  const draw = line<[number, number]>().curve(curveBumpX);
+  return draw([
+    [from.x + from.w, from.y + from.h / 2],
+    [to.x, to.y + to.h / 2],
+  ]) ?? '';
 }
 
-const linkPath = line<[number, number]>()
-  .x((d) => d[0])
-  .y((d) => d[1])
-  .curve(curveBumpX);
+function nodeData(fgaEnabled: boolean): ArchitectureNode[] {
+  const common: ArchitectureNode[] = [
+    {
+      id: 'user', step: '1', label: 'Employee', sublabel: 'The subject',
+      x: 24, y: 112, w: 164, h: 104, color: '#8b5cf6',
+      plain: 'Sarah, Mike, or Joe signs in and asks the agent to perform a task.',
+      technical: 'The employee remains the resource owner identified by the ID-JAG subject (`sub`).',
+    },
+    {
+      id: 'agent', step: '2', label: 'ProGear Agent', sublabel: 'Workload Principal',
+      x: 232, y: 96, w: 194, h: 136, color: '#f97316',
+      plain: 'The agent has a governed identity of its own. It never disappears inside the user’s identity.',
+      technical: 'Okta manages the `wlp...` identity, owners, public credentials, lifecycle, and resource connections.',
+    },
+    {
+      id: 'idjag', step: '3', label: 'Okta ID-JAG', sublabel: 'Identity bridge',
+      x: 474, y: 112, w: 180, h: 104, color: '#2563eb',
+      plain: 'Okta creates signed proof tying this user, this client, and this target together.',
+      technical: 'The ID-JAG carries `sub` (end user), `client_id` (client acting for the user), and `aud` (Resource Authorization Server).',
+    },
+    {
+      id: 'resourceAs', step: '4', label: 'Resource AS', sublabel: 'Local policy + token',
+      x: 702, y: 112, w: 190, h: 104, color: '#0f766e',
+      plain: 'The target system keeps control. Its authorization server decides whether to issue a scoped token.',
+      technical: 'It validates the ID-JAG, resolves the user, applies local policy, and issues its own short-lived access token.',
+    },
+  ];
 
-// Every business-domain edge shares the same first two waypoints, so they
-// draw on top of each other from the AI hub through the open lane between
-// the FGA box (bottom y=335) and the Approval Gate (top y=473) — around
-// y=400 — reading as one trunk that only splits into four once it's clear
-// of the trust tier. From the branch point (870,400) each edge takes its
-// own short final hop up/down to its box, so none crosses the AI's other
-// spokes nor the okta_audit / fga_audit edges.
-const EDGE_WAYPOINTS: Record<string, Array<[number, number]>> = {
-  ai_inventory: [[470, 400], [870, 400], [870, 160]],
-  ai_customer: [[470, 400], [870, 400], [870, 280]],
-  ai_pricing: [[470, 400], [870, 400]],
-  ai_sales: [[470, 400], [870, 400], [870, 520]],
-};
-
-function edgePoints(edge: PhysicalEdge, nodes: DiagramNode[]): Array<[number, number]> {
-  const s = findNode(nodes, edge.source);
-  const t = findNode(nodes, edge.target);
-  const mids = EDGE_WAYPOINTS[edge.id] ?? [];
-  return [[s.x, s.y], ...mids, [t.x, t.y]];
-}
-
-function edgeD(edge: PhysicalEdge, nodes: DiagramNode[]): string {
-  return linkPath(edgePoints(edge, nodes))!;
-}
-
-function pointAlongEdge(edge: PhysicalEdge, nodes: DiagramNode[], u: number): [number, number] {
-  const pts = edgePoints(edge, nodes);
-  const segLens: number[] = [];
-  let total = 0;
-  for (let i = 0; i < pts.length - 1; i++) {
-    const d = Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]);
-    segLens.push(d);
-    total += d;
+  if (fgaEnabled) {
+    common.push({
+      id: 'fga', step: '5', label: 'FGA', sublabel: 'Advanced context',
+      x: 934, y: 112, w: 144, h: 104, color: '#7c3aed',
+      plain: 'For inventory writes, the demo also checks role, quantity, and vacation status.',
+      technical: 'The live FGA decision returns execute, request approval, or block. OAuth scopes remain the first boundary.',
+    });
   }
-  if (total === 0) return [pts[0][0], pts[0][1]];
-  const target = Math.max(0, Math.min(1, u)) * total;
-  let acc = 0;
-  for (let i = 0; i < segLens.length; i++) {
-    if (target <= acc + segLens[i] || i === segLens.length - 1) {
-      const local = segLens[i] === 0 ? 0 : (target - acc) / segLens[i];
-      return [pts[i][0] + (pts[i + 1][0] - pts[i][0]) * local, pts[i][1] + (pts[i + 1][1] - pts[i][1]) * local];
-    }
-    acc += segLens[i];
+
+  common.push({
+    id: 'api', step: fgaEnabled ? '6' : '5', label: 'Inventory API', sublabel: 'Protected action',
+    x: fgaEnabled ? 1116 : 1048, y: 112, w: 164, h: 104, color: '#16a34a',
+    plain: 'Inventory is reached only after the required identity and access checks succeed.',
+    technical: 'The API validates the final access token and enforces the requested read or write scope.',
+  });
+
+  return common;
+}
+
+function edgeData(fgaEnabled: boolean, agentActive: boolean): ArchitectureEdge[] {
+  const edges: ArchitectureEdge[] = [
+    { from: 'user', to: 'agent', label: 'asks' },
+    { from: 'agent', to: 'idjag', label: agentActive ? 'agent + user' : 'exchange stopped', blocked: !agentActive },
+    { from: 'idjag', to: 'resourceAs', label: 'ID-JAG', dimmed: !agentActive },
+  ];
+
+  if (fgaEnabled) {
+    edges.push(
+      { from: 'resourceAs', to: 'fga', label: 'scoped token', dimmed: !agentActive },
+      { from: 'fga', to: 'api', label: 'decision', dimmed: !agentActive }
+    );
+  } else {
+    edges.push({ from: 'resourceAs', to: 'api', label: 'scoped token', dimmed: !agentActive });
   }
-  return [pts[pts.length - 1][0], pts[pts.length - 1][1]];
+
+  return edges;
 }
-
-const EDGE_LABELS: Record<string, string> = {
-  you_ai: 'asks / answers',
-  ai_okta: 'requests a pass ↔ issues one',
-  ai_fga: 'checks context ↔ confirms',
-  ai_approval: 'high-impact action',
-  // Shown once, on the shared trunk -- applies to all four business edges,
-  // so the other three intentionally have no entry here (see edge-label
-  // render: a missing key just skips the label).
-  ai_pricing: 'uses the pass ↔ returns data',
-  okta_audit: 'logs the decision',
-  fga_audit: 'logs the check',
-};
-
-// Each label is pushed off its edge midpoint along the edge's perpendicular
-// normal by this many px, tuned so the two corridors fanning out of the AI
-// node (ai_okta / ai_fga) sit on opposite sides and no anchor lands on a
-// node. A semi-opaque pill is drawn behind each label so it stays legible.
-const EDGE_LABEL_OFFSET: Record<string, number> = {
-  ai_okta: -12,
-  ai_fga: 16,
-  ai_approval: 18,
-  ai_pricing: -20,
-  okta_audit: 50,
-  fga_audit: -16,
-};
-
-const EDGE_LABEL_U: Record<string, number> = {};
-
-interface DetachedLabel {
-  x: number;
-  y: number;
-  anchorX: number;
-  anchorY: number;
-}
-
-// Edges whose label can't sit on or near the line itself without being
-// occluded by nearby node boxes (this file draws edge-label <g>s before
-// node <g>s, so nodes paint on top) get lifted clear of the boxes
-// entirely, with a short leader line + arrowhead pointing back down to
-// the actual edge so it's still clear which edge the label belongs to.
-const EDGE_LABEL_DETACHED: Record<string, DetachedLabel> = {
-  you_ai: { x: 188, y: 260, anchorX: 188, anchorY: 320 },
-};
-
-function edgeLabelAnchor(edge: PhysicalEdge, nodes: DiagramNode[], offset: number, u = 0.5): [number, number] {
-  const [px, py] = pointAlongEdge(edge, nodes, u);
-  const [bx, by] = pointAlongEdge(edge, nodes, Math.max(0, u - 0.02));
-  const [ax, ay] = pointAlongEdge(edge, nodes, Math.min(1, u + 0.02));
-  const dx = ax - bx;
-  const dy = ay - by;
-  const len = Math.hypot(dx, dy) || 1;
-  return [px + (-dy / len) * offset, py + (dx / len) * offset];
-}
-
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
 
 interface D3ArchitectureDiagramProps {
   title?: string;
 }
 
-export default function D3ArchitectureDiagram({ title = 'Architecture' }: D3ArchitectureDiagramProps) {
-  const edgesRef = useRef<SVGGElement | null>(null);
+export default function D3ArchitectureDiagram({ title = 'The governed access chain' }: D3ArchitectureDiagramProps) {
+  const { isEnabled: fgaEnabled, setIsEnabled: setFgaEnabled } = useFGASimulation();
+  const [agentActive, setAgentActive] = useState(true);
+  const [selectedId, setSelectedId] = useState<NodeId>('agent');
 
-  const [mode, setMode] = useState<Mode>('overview');
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [hoveredId, setHoveredId] = useState<string | null>(null);
-  const [showArchitect, setShowArchitect] = useState(false);
-  // Softens the Flow<->Sequence switch into a brief crossfade instead of an
-  // instant hard swap, which read as an abrupt, unannounced jump.
-  const [contentVisible, setContentVisible] = useState(true);
+  const nodes = useMemo(() => nodeData(fgaEnabled), [fgaEnabled]);
+  const edges = useMemo(() => edgeData(fgaEnabled, agentActive), [fgaEnabled, agentActive]);
+  const nodeById = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
+  const selectedNode = nodeById.get(selectedId) ?? nodes[1];
 
-  useEffect(() => {
-    setContentVisible(false);
-    const t = setTimeout(() => setContentVisible(true), 30);
-    return () => clearTimeout(t);
-  }, [mode]);
-
-  const selectedNode = useMemo(() => (selectedId ? NODES.find((n) => n.id === selectedId) ?? null : null), [selectedId]);
-
-  // --- D3-owned subtree: draw edges via an imperative, keyed data-join. -----
-  useEffect(() => {
-    const g = edgesRef.current;
-    if (!g) return;
-    const gSel: Selection<SVGGElement, unknown, null, undefined> = select(g);
-
-    gSel
-      .selectAll<SVGPathElement, PhysicalEdge>('path.edge')
-      .data(EDGES, (d) => d.id)
-      .join((enter) => enter.append('path').attr('class', 'edge').attr('fill', 'none').attr('stroke-linecap', 'round'))
-      .attr('d', (d) => edgeD(d, NODES))
-      .attr('stroke-width', 2.5)
-      .attr('stroke', C.edge)
-      .attr('stroke-opacity', 0.55);
-
-    return () => {
-      gSel.selectAll('path.edge').remove();
-    };
-    // `mode` is a real dependency, not a lint-appeasing add: the <g> this
-    // effect draws into lives inside the Flow-only branch of the mode
-    // ternary, so it fully unmounts when switching to Sequence and a BRAND
-    // NEW <g> mounts when switching back. An empty dep array only ran this
-    // join once for the component's whole lifetime, so the second and later
-    // times you returned to Flow, the fresh <g> never got repopulated and
-    // every edge silently vanished.
-  }, [mode]);
-
-  // --- Hover/select highlight — pure attr update, no re-join. ---------------
-  // Kill Switch has no edges of its own, so selecting it doesn't fall out of
-  // the generic "edges touching the active node" rule below. Instead it's a
-  // special case: it visualizes WHAT gets cut — the AI's reach into every
-  // business domain — by forcing all four of those edges into a red, dashed
-  // "severed" state.
-  useEffect(() => {
-    const g = edgesRef.current;
-    if (!g) return;
-    const activeNode = hoveredId ?? selectedId;
-    const killSwitchActive = selectedId === 'killswitch';
-
-    select(g)
-      .selectAll<SVGPathElement, PhysicalEdge>('path.edge')
-      .attr('stroke', (d) =>
-        killSwitchActive && BUSINESS_EDGE_IDS.includes(d.id)
-          ? C.deny
-          : activeNode && (d.source === activeNode || d.target === activeNode)
-          ? C.edgeActive
-          : C.edge
-      )
-      .attr('stroke-opacity', (d) =>
-        killSwitchActive && BUSINESS_EDGE_IDS.includes(d.id)
-          ? 1
-          : activeNode && (d.source === activeNode || d.target === activeNode)
-          ? 0.95
-          : 0.4
-      )
-      .attr('stroke-width', (d) =>
-        killSwitchActive && BUSINESS_EDGE_IDS.includes(d.id)
-          ? 3.5
-          : activeNode && (d.source === activeNode || d.target === activeNode)
-          ? 3.5
-          : 2.5
-      )
-      .attr('stroke-dasharray', (d) => (killSwitchActive && BUSINESS_EDGE_IDS.includes(d.id) ? '7 5' : 'none'));
-  }, [hoveredId, selectedId]);
+  const isNodeDimmed = (id: NodeId) => !agentActive && ['idjag', 'resourceAs', 'fga', 'api'].includes(id);
+  const outcomeLabel = agentActive ? (fgaEnabled ? 'FGA decision' : 'Scoped decision') : 'Stopped before exchange';
 
   return (
-    <div className="w-full rounded-2xl bg-[#0d0d14] border border-white/10 overflow-hidden shadow-2xl">
-      {/* Toolbar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3 border-b border-white/10 bg-white/[0.02]">
-        <div className="flex items-center gap-2">
-          <div className="text-sm font-semibold text-slate-100">{title}</div>
-          {mode === 'overview' && (
-            <div className="hidden sm:block text-xs text-slate-500">hover to trace · click a node for detail</div>
-          )}
-        </div>
+    <div className="space-y-8">
+      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-950">
+        <div className="border-b border-slate-200 px-5 py-5 dark:border-slate-800 sm:px-7">
+          <div className="flex flex-wrap items-start justify-between gap-5">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-700 dark:text-blue-300">Architecture diagram</p>
+              <h2 className="mt-1 text-xl font-bold text-slate-950 dark:text-white">{title}</h2>
+              <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-600 dark:text-slate-300">
+                The person and agent stay distinct from sign-in to business action. Select a node to go deeper.
+              </p>
+            </div>
 
-        <div className="flex items-center gap-2">
-          <div className="flex rounded-lg bg-black/30 border border-white/10 p-0.5 text-xs">
-            {(['overview', 'flow'] as Mode[]).map((m) => (
+            <div className="flex flex-wrap gap-2">
               <button
-                key={m}
-                onClick={() => setMode(m)}
-                className={`px-3 py-1.5 rounded-md font-medium transition ${
-                  mode === m ? 'bg-white/15 text-white' : 'text-slate-400 hover:text-slate-200'
+                type="button"
+                onClick={() => setFgaEnabled(!fgaEnabled)}
+                aria-pressed={fgaEnabled}
+                className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold transition ${
+                  fgaEnabled
+                    ? 'border-violet-300 bg-violet-50 text-violet-800 dark:border-violet-700 dark:bg-violet-950/50 dark:text-violet-200'
+                    : 'border-slate-200 bg-white text-slate-700 hover:border-violet-300 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200'
                 }`}
               >
-                {m === 'overview' ? 'Flow' : 'Sequence'}
+                <Sparkles className="h-4 w-4" />
+                FGA layer {fgaEnabled ? 'on' : 'off'}
               </button>
-            ))}
-          </div>
-
-          {mode === 'overview' && (
-            <label className="flex items-center gap-1.5 text-[11px] text-slate-400 cursor-pointer select-none">
-              <input type="checkbox" checked={showArchitect} onChange={(e) => setShowArchitect(e.target.checked)} className="accent-orange-500" />
-              For architects
-            </label>
-          )}
-        </div>
-      </div>
-
-      <div
-        className="transition-opacity duration-300 ease-out"
-        style={{ opacity: contentVisible ? 1 : 0 }}
-      >
-      {mode === 'flow' ? (
-        <div className="p-0">
-          <SequenceDiagram />
-        </div>
-      ) : (
-        <>
-          <div className="px-5 py-2.5 border-b border-white/10 bg-black/20">
-            <button
-              onClick={() => setMode('flow')}
-              className="px-4 py-1.5 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 transition"
-            >
-              ▶ See it as a Sequence
-            </button>
-          </div>
-
-          <div className="flex flex-col lg:flex-row">
-            <div className="flex-1 min-w-0">
-              <svg
-                viewBox={`-24 -24 ${VIEW_W + 48} ${VIEW_H + 48}`}
-                preserveAspectRatio="xMidYMid meet"
-                className="w-full h-auto block"
-                role="img"
-                aria-label="Interactive system architecture diagram"
+              <button
+                type="button"
+                onClick={() => setAgentActive(!agentActive)}
+                aria-pressed={!agentActive}
+                className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold transition ${
+                  agentActive
+                    ? 'border-red-200 bg-white text-red-700 hover:bg-red-50 dark:border-red-900 dark:bg-slate-900 dark:text-red-300 dark:hover:bg-red-950/40'
+                    : 'border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200'
+                }`}
               >
-                <g ref={edgesRef} />
-
-                {/* Resting-state edge labels, each offset along its edge's
-                    perpendicular normal and backed by a pill so it stays
-                    legible over any edge or glow. */}
-                {EDGES.map((e) => {
-                  const isKillCut = selectedId === 'killswitch' && BUSINESS_EDGE_IDS.includes(e.id);
-                  // All four business edges turn red/dashed (see the D3
-                  // highlight effect above), but they share a trunk, so
-                  // only one of them renders the "access cut" text itself
-                  // -- otherwise four labels stack exactly on top of each
-                  // other where the trunk splits.
-                  const label = isKillCut ? (e.id === 'ai_pricing' ? 'access cut' : null) : EDGE_LABELS[e.id];
-                  if (!label) return null;
-                  const detached = EDGE_LABEL_DETACHED[e.id];
-                  const pillW = label.length * 5.6 + 8;
-
-                  if (detached) {
-                    return (
-                      <g key={`lbl-${e.id}`} className="pointer-events-none select-none">
-                        <line
-                          x1={detached.x}
-                          y1={detached.y + 9}
-                          x2={detached.anchorX}
-                          y2={detached.anchorY - 8}
-                          stroke={C.textDim}
-                          strokeOpacity={0.45}
-                          strokeWidth={1.5}
-                        />
-                        <polygon
-                          points={`${detached.anchorX - 4},${detached.anchorY - 8} ${detached.anchorX + 4},${detached.anchorY - 8} ${detached.anchorX},${detached.anchorY - 1}`}
-                          fill={C.textDim}
-                          fillOpacity={0.45}
-                        />
-                        <rect x={detached.x - pillW / 2} y={detached.y - 9} width={pillW} height={18} rx={9} fill="#0d0d14" fillOpacity={0.82} />
-                        <text x={detached.x} y={detached.y + 3.5} textAnchor="middle" fontSize={10.5} fill={C.textDim}>
-                          {label}
-                        </text>
-                      </g>
-                    );
-                  }
-
-                  const [lx, ly] = edgeLabelAnchor(e, NODES, EDGE_LABEL_OFFSET[e.id] ?? 0, EDGE_LABEL_U[e.id] ?? 0.5);
-                  return (
-                    <g key={`lbl-${e.id}`} className="pointer-events-none select-none">
-                      <rect
-                        x={lx - pillW / 2}
-                        y={ly - 9}
-                        width={pillW}
-                        height={18}
-                        rx={9}
-                        fill={isKillCut ? '#3a0f0f' : '#0d0d14'}
-                        fillOpacity={0.82}
-                        stroke={isKillCut ? C.deny : 'none'}
-                        strokeOpacity={0.6}
-                      />
-                      <text x={lx} y={ly + 3.5} textAnchor="middle" fontSize={10.5} fontWeight={isKillCut ? 700 : 400} fill={isKillCut ? C.deny : C.textDim}>
-                        {label}
-                      </text>
-                    </g>
-                  );
-                })}
-
-                {/* Governance rail — a faint band threading the trust tier
-                    (Okta → Access Rules → Approval Gate), reminding the
-                    viewer these three checks are one connected governance
-                    layer. */}
-                <path
-                  d="M 560 155 C 600 210, 610 235, 610 265 S 606 400, 604 473"
-                  fill="none"
-                  stroke="#ffd166"
-                  strokeOpacity={0.16}
-                  strokeWidth={3}
-                  strokeDasharray="2 6"
-                />
-
-                {/* Nodes. */}
-                {NODES.map((n) => {
-                  const isSelected = n.id === selectedId;
-                  const isHovered = n.id === hoveredId;
-                  // Kill Switch has no edges of its own (see the highlight effect
-                  // above), so its "victims" — the AI Agent and the four business
-                  // domain boxes the red cut lines actually connect — need to be
-                  // explicitly lit up here too. Otherwise selecting Kill Switch
-                  // dims everything else on the canvas, including the very nodes
-                  // the whole point is to draw attention to.
-                  const isKillEndpoint = selectedId === 'killswitch' && (n.id === 'ai' || BUSINESS_NODE_IDS.includes(n.id));
-                  const isActive = isSelected || isHovered || isKillEndpoint;
-                  const dim = (hoveredId ?? selectedId) && !isActive;
-                  const label = n.sublabel;
-
-                  return (
-                    <g
-                      key={n.id}
-                      transform={`translate(${n.x},${n.y})`}
-                      className="cursor-pointer"
-                      opacity={n.dim && !isActive ? 0.6 : dim ? 0.55 : 1}
-                      onMouseEnter={() => setHoveredId(n.id)}
-                      onMouseLeave={() => setHoveredId(null)}
-                      onClick={() => setSelectedId((cur) => (cur === n.id ? null : n.id))}
-                      style={{ transition: 'opacity 150ms ease' }}
-                    >
-                      <rect
-                        x={-n.w / 2}
-                        y={-n.h / 2}
-                        width={n.w}
-                        height={n.h}
-                        rx={n.chip ? n.h / 2 : 12}
-                        fill={n.chip ? 'rgba(0,0,0,0.35)' : C.nodeFill}
-                        stroke={isKillEndpoint ? C.deny : n.accent}
-                        strokeWidth={isSelected ? 3 : isKillEndpoint ? 2.5 : n.hero ? 2.5 : 1.5}
-                        style={{
-                          filter: isActive
-                            ? `drop-shadow(0 0 ${n.hero || isKillEndpoint ? 16 : 10}px ${isKillEndpoint ? C.deny : n.accent}aa)`
-                            : n.hero
-                            ? `drop-shadow(0 0 8px ${n.accent}55)`
-                            : 'none',
-                          transition: 'stroke-width 120ms ease, filter 200ms ease',
-                        }}
-                      />
-                      <text textAnchor="middle" y={n.chip ? 4 : -4} fontSize={n.chip ? 11 : n.hero ? 16 : 14} fontWeight={600} fill={C.text} className="select-none">
-                        {n.label}
-                      </text>
-                      {!n.chip && (
-                        <text textAnchor="middle" y={15} fontSize={10.5} fill={C.textDim} className="select-none">
-                          {label}
-                        </text>
-                      )}
-                      {n.order !== undefined && (
-                        <g transform={`translate(${-n.w / 2 + 2},${-n.h / 2 + 2})`}>
-                          <circle r={10} fill="#0b1120" stroke={n.accent} strokeWidth={1.5} />
-                          <text textAnchor="middle" y={4} fontSize={11} fontWeight={700} fill="#fff" className="select-none">
-                            {n.order}
-                          </text>
-                        </g>
-                      )}
-                    </g>
-                  );
-                })}
-              </svg>
-            </div>
-
-            {/* Detail side panel */}
-            <div className="lg:w-64 shrink-0 border-t lg:border-t-0 lg:border-l border-white/10 p-4">
-              {selectedNode ? (
-                <div>
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className="w-3 h-3 rounded-full" style={{ backgroundColor: selectedNode.accent }} />
-                    <span className="text-sm text-slate-100 font-semibold">{selectedNode.label}</span>
-                  </div>
-                  <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-1.5">{selectedNode.sublabel}</div>
-                  <p className="text-xs text-slate-300 leading-relaxed">{selectedNode.detail.body}</p>
-
-                  {selectedNode.detail.subpoints && (
-                    <ul className="mt-2 space-y-1">
-                      {selectedNode.detail.subpoints.map((s, i) => (
-                        <li key={i} className="text-[11px] text-slate-400 flex gap-1.5">
-                          <span className="text-slate-600">—</span>
-                          <span>{s}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-
-                  {selectedNode.detail.callouts && (
-                    <div className="mt-2 flex flex-wrap gap-1">
-                      {selectedNode.detail.callouts.map((c, i) => (
-                        <span
-                          key={i}
-                          className="px-1.5 py-0.5 rounded-full text-[9px] font-medium border"
-                          style={{ color: selectedNode.accent, borderColor: `${selectedNode.accent}55`, backgroundColor: `${selectedNode.accent}15` }}
-                        >
-                          {c}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-
-                  {showArchitect && selectedNode.detail.architect && (
-                    <div className="mt-3 pt-2 border-t border-white/10">
-                      <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-1">For architects</div>
-                      <p className="text-[11px] text-slate-400 leading-relaxed">{selectedNode.detail.architect}</p>
-                      {selectedNode.detail.tokenExample && (
-                        <div className="mt-2.5">
-                          <div className="text-[9.5px] text-slate-500 mb-1">{selectedNode.detail.tokenExample.label}</div>
-                          <pre className="text-[9.5px] text-emerald-300/90 bg-black/40 border border-white/10 rounded-lg p-2 leading-snug whitespace-pre-wrap break-all">
-                            {selectedNode.detail.tokenExample.json}
-                          </pre>
-                          <div className="text-[9px] text-slate-600 mt-1">Illustrative example — not a real token.</div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  <button onClick={() => setSelectedId(null)} className="mt-3 block text-[11px] text-slate-400 hover:text-slate-200 transition">
-                    Clear selection
-                  </button>
-                </div>
-              ) : (
-                <div className="text-xs text-slate-500">
-                  Select a node to see what it does. Hover any node to trace its connections, or hit "See it as a
-                  Sequence" to see a real request move through the whole system step by step.
-                </div>
-              )}
+                <Power className="h-4 w-4" />
+                {agentActive ? 'Simulate deactivation' : 'Reactivate simulation'}
+              </button>
             </div>
           </div>
-        </>
-      )}
+
+          <div className={`mt-5 flex items-start gap-3 rounded-xl border px-4 py-3 ${
+            agentActive
+              ? 'border-emerald-200 bg-emerald-50/70 dark:border-emerald-900 dark:bg-emerald-950/30'
+              : 'border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950/40'
+          }`}>
+            {agentActive
+              ? <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+              : <ShieldX className="mt-0.5 h-5 w-5 shrink-0 text-red-600 dark:text-red-400" />}
+            <div>
+              <p className={`text-sm font-bold ${agentActive ? 'text-emerald-900 dark:text-emerald-100' : 'text-red-900 dark:text-red-100'}`}>
+                {agentActive ? 'Agent identity active: new delegated exchanges may continue.' : 'Agent identity deactivated: Okta rejects new delegated exchanges.'}
+              </p>
+              <p className="mt-0.5 text-xs leading-5 text-slate-600 dark:text-slate-300">
+                {agentActive
+                  ? 'Okta can still apply user, client, resource, and scope policy on every exchange.'
+                  : 'No new ID-JAG means no new resource token. Previously issued short-lived tokens expire according to policy.'}
+                {' '}This control is a visual simulation only; it does not change the live Okta tenant.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto bg-slate-50/70 p-2 dark:bg-slate-900/40 sm:p-4">
+          <p className="px-2 pb-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400 sm:hidden">Swipe to follow the delegated access chain →</p>
+          <svg
+            viewBox={`0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}`}
+            className="block min-w-[940px] w-full"
+            role="img"
+            aria-label="Architecture diagram showing a signed-in employee, ProGear AI Agent Workload Principal, Okta ID-JAG, Resource Authorization Server, optional FGA context, and Inventory API"
+          >
+            <defs>
+              <marker id="architecture-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b" />
+              </marker>
+              <marker id="architecture-arrow-blocked" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#dc2626" />
+              </marker>
+              <filter id="architecture-shadow" x="-20%" y="-20%" width="140%" height="150%">
+                <feDropShadow dx="0" dy="5" stdDeviation="7" floodColor="#0f172a" floodOpacity="0.12" />
+              </filter>
+            </defs>
+
+            <text x={24} y={38} className="fill-slate-500 text-[11px] font-bold uppercase tracking-widest dark:fill-slate-400">Delegated access path</text>
+            <g transform="translate(1028,18)">
+              <rect width={228} height={34} rx={17} fill={agentActive ? '#ecfdf5' : '#fef2f2'} stroke={agentActive ? '#86efac' : '#fca5a5'} />
+              <circle cx={18} cy={17} r={5} fill={agentActive ? '#16a34a' : '#dc2626'} />
+              <text x={32} y={21} fill={agentActive ? '#166534' : '#991b1b'} className="text-[11px] font-bold">
+                {agentActive ? 'New token exchange available' : 'New token exchange stopped'}
+              </text>
+            </g>
+
+            {edges.map((edge) => {
+              const from = nodeById.get(edge.from)!;
+              const to = nodeById.get(edge.to)!;
+              const midX = (from.x + from.w + to.x) / 2;
+              const labelWidth = Math.max(58, edge.label.length * 6 + 16);
+              const labelY = 72;
+              const color = edge.blocked ? '#dc2626' : '#64748b';
+              return (
+                <g key={`${edge.from}-${edge.to}`} opacity={edge.dimmed ? 0.24 : 1}>
+                  <path
+                    d={connectorPath(from, to)}
+                    fill="none"
+                    stroke={color}
+                    strokeWidth={edge.blocked ? 3 : 2.2}
+                    strokeDasharray={edge.blocked ? '8 6' : undefined}
+                    markerEnd={edge.blocked ? 'url(#architecture-arrow-blocked)' : 'url(#architecture-arrow)'}
+                  />
+                  <rect x={midX - labelWidth / 2} y={labelY} width={labelWidth} height={22} rx={11} className="fill-white stroke-slate-200 dark:fill-slate-950 dark:stroke-slate-700" />
+                  <text x={midX} y={labelY + 15} textAnchor="middle" fill={color} className="text-[10px] font-semibold">{edge.label}</text>
+                  {edge.blocked && (
+                    <g transform={`translate(${midX - 11},184)`}>
+                      <circle cx={11} cy={11} r={11} fill="#dc2626" />
+                      <line x1={5} y1={11} x2={17} y2={11} stroke="white" strokeWidth={2.5} strokeLinecap="round" />
+                    </g>
+                  )}
+                </g>
+              );
+            })}
+
+            {nodes.map((node) => {
+              const selected = selectedNode.id === node.id;
+              const dimmed = isNodeDimmed(node.id);
+              return (
+                <g
+                  key={node.id}
+                  onClick={() => setSelectedId(node.id)}
+                  className="cursor-pointer outline-none"
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') setSelectedId(node.id);
+                  }}
+                  aria-label={`${node.label}: ${node.sublabel}`}
+                  opacity={dimmed ? 0.3 : 1}
+                  filter={selected ? 'url(#architecture-shadow)' : undefined}
+                >
+                  <rect
+                    x={node.x}
+                    y={node.y}
+                    width={node.w}
+                    height={node.h}
+                    rx={16}
+                    className="fill-white dark:fill-slate-950"
+                    stroke={selected ? node.color : '#cbd5e1'}
+                    strokeWidth={selected ? 3 : 1.5}
+                  />
+                  <rect x={node.x} y={node.y} width={7} height={node.h} rx={3.5} fill={node.color} />
+                  <circle cx={node.x + 25} cy={node.y + 24} r={12} fill={node.color} />
+                  <text x={node.x + 25} y={node.y + 28} textAnchor="middle" fill="white" className="text-[10px] font-bold">{node.step}</text>
+                  <text x={node.x + 18} y={node.y + 61} className="fill-slate-950 text-[13px] font-bold dark:fill-white">{node.label}</text>
+                  <text x={node.x + 18} y={node.y + 81} className="fill-slate-500 text-[10px] dark:fill-slate-400">{node.sublabel}</text>
+                  {node.id === 'agent' && (
+                    <g transform={`translate(${node.x + 18},${node.y + 96})`}>
+                      <rect width={agentActive ? 70 : 92} height={22} rx={11} fill={agentActive ? '#dcfce7' : '#fee2e2'} />
+                      <circle cx={12} cy={11} r={4} fill={agentActive ? '#16a34a' : '#dc2626'} />
+                      <text x={22} y={15} fill={agentActive ? '#166534' : '#991b1b'} className="text-[9px] font-bold">
+                        {agentActive ? 'ACTIVE' : 'DEACTIVATED'}
+                      </text>
+                    </g>
+                  )}
+                </g>
+              );
+            })}
+
+            <g transform="translate(24,278)">
+              <rect width={1232} height={48} rx={14} className="fill-white stroke-slate-200 dark:fill-slate-950 dark:stroke-slate-700" />
+              <text x={18} y={20} className="fill-slate-500 text-[9px] font-bold uppercase tracking-widest dark:fill-slate-400">Accountability trail</text>
+              <text x={18} y={37} className="fill-slate-900 text-[11px] font-semibold dark:fill-white">Sarah Sales</text>
+              <text x={123} y={37} className="fill-slate-400 text-[12px]">→</text>
+              <text x={151} y={37} className="fill-slate-900 text-[11px] font-semibold dark:fill-white">ProGear Agent (wlp...)</text>
+              <text x={310} y={37} className="fill-slate-400 text-[12px]">→</text>
+              <text x={339} y={37} className="fill-slate-900 text-[11px] font-semibold dark:fill-white">Inventory</text>
+              <text x={414} y={37} className="fill-slate-400 text-[12px]">→</text>
+              <text x={443} y={37} className="fill-slate-900 text-[11px] font-semibold dark:fill-white">inventory:read</text>
+              {fgaEnabled && (
+                <>
+                  <text x={557} y={37} className="fill-slate-400 text-[12px]">→</text>
+                  <text x={585} y={37} className="fill-violet-700 text-[11px] font-semibold dark:fill-violet-300">role + quantity + vacation</text>
+                </>
+              )}
+              <g transform={`translate(${fgaEnabled ? 980 : 840},9)`}>
+                <rect width={agentActive ? 218 : 242} height={30} rx={15} fill={agentActive ? '#ecfdf5' : '#fef2f2'} />
+                <circle cx={16} cy={15} r={5} fill={agentActive ? '#16a34a' : '#dc2626'} />
+                <text x={29} y={19} fill={agentActive ? '#166534' : '#991b1b'} className="text-[10px] font-bold">Outcome: {outcomeLabel}</text>
+              </g>
+            </g>
+          </svg>
+        </div>
+
+        <div className="grid gap-4 border-t border-slate-200 p-5 dark:border-slate-800 sm:grid-cols-[0.9fr,1.1fr] sm:p-7">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg text-white" style={{ backgroundColor: selectedNode.color }}>
+                {selectedNode.id === 'agent' ? <Fingerprint className="h-4 w-4" /> : <Activity className="h-4 w-4" />}
+              </span>
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Selected control point</p>
+                <h3 className="font-bold text-slate-950 dark:text-white">{selectedNode.label}</h3>
+              </div>
+            </div>
+            <p className="mt-3 text-sm leading-6 text-slate-700 dark:text-slate-200">{selectedNode.plain}</p>
+          </div>
+          <div className="rounded-xl bg-blue-50/70 p-4 dark:bg-blue-950/30">
+            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-blue-700 dark:text-blue-300">
+              <Braces className="h-4 w-4" /> Engineer view
+            </div>
+            <p className="mt-2 text-sm leading-6 text-slate-800 dark:text-slate-200">{selectedNode.technical}</p>
+          </div>
+        </div>
+      </section>
+
+      <div className="grid gap-4 md:grid-cols-3">
+        {[
+          {
+            icon: Fingerprint,
+            title: 'The agent is an identity',
+            body: 'Owners, credentials, lifecycle, and resource connections attach to one governed Workload Principal.',
+          },
+          {
+            icon: ArrowRight,
+            title: 'Delegation is not impersonation',
+            body: 'The employee stays the subject while the agent client remains visible as the party acting on that person’s behalf.',
+          },
+          {
+            icon: CircleStop,
+            title: 'Revocation has a control point',
+            body: 'Deactivate the agent identity to prevent new exchanges—without changing prompts, tools, or deployment code.',
+          },
+        ].map(({ icon: Icon, title: cardTitle, body }) => (
+          <div key={cardTitle} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-950">
+            <Icon className="h-5 w-5 text-orange-600 dark:text-orange-400" />
+            <h3 className="mt-3 font-bold text-slate-950 dark:text-white">{cardTitle}</h3>
+            <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">{body}</p>
+          </div>
+        ))}
       </div>
+
+      <SequenceDiagram agentActive={agentActive} fgaEnabled={fgaEnabled} />
+
+      <details className="group rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-950">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-4 font-semibold text-slate-950 dark:text-white sm:px-7">
+          <span className="flex items-center gap-2"><BookOpen className="h-5 w-5 text-blue-600 dark:text-blue-400" /> Standards and implementation notes for AI engineers</span>
+          <span className="text-sm text-slate-400 transition group-open:rotate-90">›</span>
+        </summary>
+        <div className="grid gap-5 border-t border-slate-200 px-5 py-5 text-sm leading-6 text-slate-700 dark:border-slate-800 dark:text-slate-200 sm:grid-cols-2 sm:px-7">
+          <div>
+            <h3 className="font-bold text-slate-950 dark:text-white">Identity continuity</h3>
+            <p className="mt-1">The ID-JAG identifies the end user, the authenticated client that will act for that user, and the target Resource Authorization Server. The target still owns subject resolution and authorization policy.</p>
+          </div>
+          <div>
+            <h3 className="font-bold text-slate-950 dark:text-white">Operational boundary</h3>
+            <p className="mt-1">Agent deactivation blocks new exchanges. Keep resource access tokens short-lived and enforce their signature, issuer, audience, expiry, and scopes at every API.</p>
+          </div>
+          <div className="sm:col-span-2 flex flex-wrap gap-3">
+            <a className="inline-flex items-center gap-1 font-semibold text-blue-700 hover:underline dark:text-blue-300" href="https://datatracker.ietf.org/doc/html/draft-ietf-oauth-identity-assertion-authz-grant" target="_blank" rel="noreferrer">IETF ID-JAG draft <ArrowRight className="h-3.5 w-3.5" /></a>
+            <a className="inline-flex items-center gap-1 font-semibold text-blue-700 hover:underline dark:text-blue-300" href="https://xaa.dev/" target="_blank" rel="noreferrer">Cross App Access <ArrowRight className="h-3.5 w-3.5" /></a>
+            <a className="inline-flex items-center gap-1 font-semibold text-blue-700 hover:underline dark:text-blue-300" href="https://developer.okta.com/docs/api/secures-ai/ai-agents" target="_blank" rel="noreferrer">Okta AI Agents API <ArrowRight className="h-3.5 w-3.5" /></a>
+          </div>
+        </div>
+      </details>
     </div>
   );
 }

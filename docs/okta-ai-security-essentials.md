@@ -203,13 +203,13 @@ When your compliance team, security officer, or board asks about AI security, yo
 |-------------------|-----------|
 | "We need to rotate credentials" | "Click 'Deactivate' - done" |
 | "IT needs to update multiple systems" | "Any admin can do it in seconds" |
-| "It might take hours or days" | "Immediate effect, no propagation delay" |
+| "It might take hours or days" | "New authentication and token exchanges stop at the identity control point" |
 
 **Example from the demo:**
 - Go to Okta Admin Console → Applications → AI Agents
 - Find the agent
 - Click "Deactivate"
-- The agent can no longer access anything, effective immediately
+- The agent can no longer authenticate or obtain new delegated tokens; any previously issued short-lived token follows resource policy
 
 ---
 
@@ -444,7 +444,7 @@ Not all AI implementations are created equal. There are four different approache
 **The benefits:**
 - Complete visibility: You know exactly who, what, when, and why
 - Fine-grained control: Different employees get different access
-- Instant revocation: One click to disable an AI agent
+- New-token cutoff: One click disables the agent's authentication and delegated exchanges
 - Unified management: Same system you use for employee access
 
 **Status:** Works today. This demo proves it.
@@ -565,11 +565,11 @@ In Okta, AI agents aren't just applications with passwords. They're first-class 
 - Go to Applications → AI Agents
 - Find the agent
 - Click "Deactivate"
-- The agent is immediately disabled
+- New authentication and delegated token exchanges for that agent stop
 - It's now 4:56 PM
 - You can investigate calmly
 
-**The "Deactivate" button is like a kill switch.** It doesn't delete anything or cause data loss. The agent simply can't authenticate anymore. When you're ready, you can reactivate it.
+**The "Deactivate" button is like a kill switch for new access.** It doesn't delete anything or cause data loss. The agent can no longer authenticate or obtain new delegated tokens. A short-lived resource token issued before deactivation remains governed by its expiry and the resource server's revocation policy. When you're ready, you can reactivate the agent.
 
 ### Complete Audit Trail
 
@@ -741,12 +741,12 @@ Mike Manager (ProGear-Warehouse):
 
 3. **9:03 PM - Agent deactivated**
    - Clicks "Deactivate"
-   - Confirmation: "Agent will be unable to authenticate immediately"
+   - Confirmation: the agent can no longer authenticate or obtain new delegated tokens
    - Clicks "Confirm"
 
 4. **9:04 PM - Threat contained**
-   - Any further requests from the agent are rejected
-   - No access to any company data
+   - New delegated token exchanges from the agent are rejected
+   - Previously issued short-lived tokens age out under resource policy
    - All legitimate users can still work (other systems unaffected)
 
 5. **Monday morning - Investigation**
@@ -807,7 +807,7 @@ Put the checks together and the picture is crisp: Okta establishes identity and 
 |-----------------|-------------|
 | "How do you control AI access to customer data?" | "The same way we control employee access - through Okta policies. Here's the policy that governs it." |
 | "Can you show me who accessed what?" | "Yes. Here's the complete log with user, AI agent, data accessed, and timestamp for any time period you want." |
-| "What happens if an AI agent is compromised?" | "We deactivate it with one click. Here's the runbook. The agent immediately loses all access." |
+| "What happens if an AI agent is compromised?" | "We deactivate its governed identity with one click. New delegated token exchanges stop, and short-lived tokens already issued age out under resource policy." |
 | "How do you ensure AI agents only access appropriate data?" | "Each user's AI requests are governed by their group membership. Same rules as direct access." |
 
 **Compliance frameworks this supports:**
@@ -826,7 +826,7 @@ Put the checks together and the picture is crisp: Okta establishes identity and 
 | **Least Privilege** | AI agents get temporary, limited access - just enough to answer the user's question |
 | **No Shared Secrets** | AI agents use cryptographic keys, not passwords that can be stolen or shared |
 | **Complete Visibility** | Every access attempt is logged with full context |
-| **Rapid Response** | One-click deactivation, immediate effect |
+| **Rapid Response** | One-click deactivation stops new authentication and token exchanges |
 | **Pattern Detection** | Logs enable detection of unusual behavior |
 
 **What your security team gains:**
@@ -860,9 +860,9 @@ Put the checks together and the picture is crisp: Okta establishes identity and 
 | Executive Question | Your Answer |
 |-------------------|-------------|
 | "Are our AI systems secure?" | "Yes. They're governed by the same identity system as our employees, with complete audit trails." |
-| "What's our risk exposure?" | "Minimal. Each AI action is tied to a specific user and logged. We can deactivate any AI agent instantly." |
+| "What's our risk exposure?" | "Each AI action is tied to a specific user and logged. We can deactivate an agent identity to stop new access, while short token lifetimes bound existing exposure." |
 | "Are we compliant?" | "Yes. We can demonstrate who accessed what, when, and why for any time period." |
-| "What if something goes wrong?" | "We have complete logs for investigation and can shut down any AI agent immediately." |
+| "What if something goes wrong?" | "We have complete logs for investigation and can immediately stop an AI agent from obtaining new access." |
 
 ---
 
@@ -1003,7 +1003,7 @@ AI agents are powerful tools. They can access customer data, financial informati
 - Complete visibility into every AI agent and what it accesses
 - The same access controls for AI as for human employees
 - Every action tied to a specific user with complete audit trail
-- One-click ability to deactivate any AI agent instantly
+- One-click ability to deactivate an AI agent and stop new delegated access
 - A live check that the actual situation (not just the job title) supports the request
 - Human sign-off automatically required before the highest-stakes actions complete
 

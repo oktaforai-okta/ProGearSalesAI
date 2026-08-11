@@ -196,9 +196,9 @@ Every ID-JAG exchange, granted or denied, is a token-grant event in **Okta's Sys
 
 ## 9. Cutting off access
 
-Two independent mechanisms can stop the agent from acting, and both take effect almost immediately because every credential in this system is short-lived and re-derived per request: there's no long-lived session to revoke.
+Two independent mechanisms can stop new agent actions. The distinction between **stopping new token issuance** and **revoking a token already issued** matters operationally.
 
-- **Deactivate the Workload Principal.** An admin can deactivate the AI agent's identity in Okta directly. The next ID-JAG exchange attempt for that agent fails outright.
+- **Deactivate the Workload Principal.** An admin can deactivate the AI agent's identity in Okta directly. The next ID-JAG exchange attempt for that agent fails outright, so the agent cannot obtain a new resource access token. A resource token issued before deactivation remains governed by its short expiry and the resource server's revocation policy; keep token lifetimes narrow and validation strict.
 - **Change live FGA inputs.** Vacation status and the role derived from `clearance_level` are contextual tuples evaluated at check time, so the next exchanged token drives the next decision: no redeploy and no mutable role copy in FGA. This repo ships scoped demo endpoints for that purpose: `POST /api/admin/demo-toggle` lets the *signed-in* user change only their own `is_on_vacation` or `clearance_level` (validated as 1, 2, or 3), while `/api/admin/demo-reset` restores the persona's starting role and sets vacation to false. The user ID always comes from the validated token, never from the request body (`backend/auth/demo_admin.py`).
 
 ---
@@ -218,7 +218,7 @@ Both halves deploy from this single repo with `main` as the single production so
 
 One page in the running frontend exists specifically to make this architecture visible and explorable, beyond this document:
 
-- **`/architecture`**: interactive D3.js diagrams (`D3ArchitectureDiagram` component): a hub-and-spoke relationship graph you can hover/click to trace connections (the resource tier is four separate boxes for Inventory, Customer, Pricing, and Sales rather than one bundled node, so each domain's own access rules are traceable), and a UML-style sequence-diagram walkthrough of 4 real scenarios (happy path, access denied, blocked on vacation, needs human approval). Steps stay lit as playback advances, so the whole path taken so far is always visible, not just the current step.
+- **`/architecture`** presents two complementary views. The architecture diagram is a clean left-to-right trust chain: employee subject → ProGear Workload Principal → Okta ID-JAG → Resource Authorization Server → Inventory API. Selecting a node reveals an engineer-level explanation without crowding the executive view. A simulated deactivation severs the chain before ID-JAG and explicitly distinguishes new-token cutoff from already-issued token expiry. The sequence diagram then shows the same request in time order and exposes plain-language and protocol detail one step at a time. When the shared **Simulate FGA** preference is enabled, both diagrams add the role + quantity + vacation decision between scoped OAuth access and the protected inventory action; when it is off, the advanced layer disappears.
 
 There's also a **`/tokens`** page showing the raw token exchanges, FGA checks, and pending approvals as they happen in real time for the current session, useful for watching the mechanisms above fire on an actual request instead of just reading about them.
 
@@ -228,4 +228,5 @@ There's also a **`/tokens`** page showing the raw token exchanges, FGA checks, a
 
 - [Implementation Guide](./implementation-guide.md): step-by-step deployment instructions
 - [Okta AI Agent Documentation](https://developer.okta.com/docs/guides/ai-agent-governance/): official Okta docs
-- [IETF ID-JAG Specification](https://datatracker.ietf.org/doc/draft-ietf-oauth-identity-assertion-authz-grant/): Identity Assertion JWT Authorization Grant draft
+- [IETF ID-JAG Specification](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-identity-assertion-authz-grant): Identity Assertion JWT Authorization Grant draft
+- [Cross App Access](https://xaa.dev/): approachable overview of the cross-domain delegation pattern

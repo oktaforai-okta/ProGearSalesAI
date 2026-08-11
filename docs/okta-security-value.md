@@ -255,7 +255,7 @@ The two-step design keeps those concerns cleanly separated: **identity proof** (
 | Identify which AI agents exist | **Yes** - dedicated AI Agents section |
 | Know who owns each AI agent | **Yes** - mandatory owner field |
 | See which user the agent acted for | **Yes** - in token and logs |
-| Revoke AI agent access instantly | **Yes** - one-click deactivate |
+| Stop new AI agent access | **Yes** - one-click deactivation blocks new token exchanges |
 | Audit AI actions by user | **Yes** - query by user or agent |
 
 ### What This Demo Proves
@@ -374,7 +374,7 @@ def token_exchange(subject_token):
 | User attribution in tokens | **Yes** - you read the `act` claim |
 | Audit in Okta | **Yes** - ID-JAG issuance logged |
 | Audit in your system | **Yes** - you log with both identities |
-| Instant revocation | **Yes** - deactivate agent in Okta |
+| New-token cutoff | **Yes** - deactivate the agent in Okta; existing short-lived tokens follow resource policy |
 
 ### Status
 
@@ -500,7 +500,7 @@ There is no way to tell these apart after the fact, because the credential authe
 - **You cannot answer "who did this?"** for any single action - the exact question an incident responder or auditor asks first.
 - **You cannot apply different policy to different users** through the credential itself. Any per-user restriction has to be reimplemented in application code, invisible to Okta and absent from your audit trail - which means it's also invisible to whoever is supposed to be reviewing access.
 
-A Workload Principal fixes this by giving the AI its own identity that travels *alongside*, but never replaces, the user's identity on every request (the `act` claim you'll see below). The AI cannot make a request that omits whose behalf it's acting on. That one design choice is the foundation everything else in this document depends on: the audit trail, per-user policy enforcement, and instant revocation all require the underlying credential to carry "acting for whom" - none of them work if it can't.
+A Workload Principal fixes this by giving the AI its own identity that travels *alongside*, but never replaces, the user's identity. The ID-JAG preserves the user in `sub` and the acting client in `client_id`; this demo's final resource token also uses `act.sub` for the agent actor. That separation is the foundation for the audit trail, per-user policy enforcement, and a centralized cutoff for new agent access.
 
 ### Key Properties
 
@@ -511,7 +511,7 @@ A Workload Principal fixes this by giving the AI its own identity that travels *
 | **Cryptographic Credentials** | RS256 key pair (no passwords) | Secure, rotatable authentication |
 | **Direct User access** | Which assigned users can sign in to the agent-bound OIDC app | Controlled entry points |
 | **Managed Connections** | Which APIs this agent can access | Explicit scope boundaries |
-| **Enable/Disable Toggle** | One click to activate or deactivate | Instant revocation capability |
+| **Enable/Disable Toggle** | One click to activate or deactivate | Stops new authentication and delegated token exchanges |
 
 ### Where It Lives
 
@@ -675,7 +675,7 @@ When Mike Manager (warehouse team) tries to access customer data:
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### Instant Revocation
+### Stop New Delegated Access
 
 If an AI agent is compromised or behaving unexpectedly:
 
@@ -683,7 +683,7 @@ If an AI agent is compromised or behaving unexpectedly:
 2. Find the agent
 3. Click **Deactivate**
 
-**Result:** All token exchanges immediately fail. No credential rotation needed. No hunting for API keys. One click.
+**Result:** New token exchanges fail without credential rotation or a deployment change. A token issued before deactivation remains subject to its short expiry and the resource server's revocation policy.
 
 ---
 
@@ -797,13 +797,11 @@ Routing this through Okta Identity Governance, rather than a bespoke approval bo
 
 ### "Who did this AI act for?"
 
-**Answer:** Every token issued contains both identities:
-- `sub` (subject): The user the agent acted for
-- `act` (actor): The AI agent that performed the action
+**Answer:** The delegation chain keeps both identities visible. In the ID-JAG, `sub` identifies the end user and `client_id` identifies the client acting for that user at the Resource Authorization Server. In this demo's final resource token, `sub` remains the user and `act.sub` identifies the agent actor.
 
 ### "Can we shut it down NOW?"
 
-**Answer:** Yes. **Deactivate** button on the AI Agent page. One click, immediate effect.
+**Answer:** Yes. The **Deactivate** button on the AI Agent page stops new authentication and delegated token exchanges at one control point. Previously issued short-lived resource tokens continue to follow resource policy.
 
 ### "How do we prove compliance to auditors?"
 
@@ -823,7 +821,7 @@ Routing this through Okta Identity Governance, rather than a bespoke approval bo
 │   ✓ User identity preserved in every AI action                  │
 │   ✓ Policy-based access control (same as humans)                │
 │   ✓ Complete audit trail for compliance                         │
-│   ✓ Instant revocation with one click                           │
+│   ✓ Stop new delegated access with one click                   │
 │                                                                 │
 │   ✓ Works today for internal APIs (Scenarios 2 & 3)             │
 │   ✓ Same pattern extends to external SaaS (Scenario 4)          │
