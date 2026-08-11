@@ -1,6 +1,6 @@
 # ProGear Sales AI: Okta AI Agent Governance + Auth0 FGA Demo
 
-> A sales-demo app for **CourtEdge ProGear**, a basketball-equipment retailer. An AI shopping/sales assistant is secured end-to-end with **Okta AI Agent Governance** (Workload Principal identity, ID-JAG token exchange), **Auth0 Fine-Grained Authorization (FGA)** for role-, quantity-, and context-aware inventory checks, and **Okta Identity Governance (OIG)** for Manager and VP approval.
+> **One custom agent. One employee identity. Only the access the job requires.** CourtEdge ProGear is a customer-owned basketball sales assistant registered as a custom agent in Okta. **Okta AI Agent Governance** gives it a Workload Principal and carries delegated user identity with the [IETF Identity Assertion JWT Authorization Grant (ID-JAG)](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-identity-assertion-authz-grant). **Auth0 FGA** evaluates role, quantity, and live vacation context; **Okta Identity Governance** routes Manager and VP approvals. This delegated-access pattern is **Cross App Access (XAA)**—[explore XAA.dev](https://xaa.dev/).
 
 ![Okta AI Agent Governance](https://img.shields.io/badge/Okta-AI%20Agent%20Governance-blue)
 ![Auth0 FGA](https://img.shields.io/badge/Auth0-FGA-orange)
