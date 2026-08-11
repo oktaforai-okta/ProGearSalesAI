@@ -91,12 +91,8 @@ function SignInContent() {
         {/* Sign In Button - Basketball Orange Theme */}
         <button
           onClick={handleSignIn}
-          className="flex w-full items-center justify-center space-x-3 rounded-xl border-b-4 border-court-brown/50 bg-gradient-to-r from-accent to-court-orange px-6 py-3 font-bold text-white shadow-lg transition-all duration-300 ease-in-out hover:scale-[1.02] hover:from-court-orange hover:to-accent hover:shadow-xl"
+          className="flex w-full items-center justify-center rounded-xl border-b-4 border-court-brown/50 bg-gradient-to-r from-accent to-court-orange px-6 py-3 font-bold text-white shadow-lg transition-all duration-300 ease-in-out hover:scale-[1.02] hover:from-court-orange hover:to-accent hover:shadow-xl"
         >
-          <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
-            <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="2"/>
-            <path d="M12 2v20M2 12h20" stroke="currentColor" strokeWidth="1.5"/>
-          </svg>
           <span>Sign in with Okta</span>
         </button>
       </div>
