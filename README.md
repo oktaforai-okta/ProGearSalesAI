@@ -1,6 +1,8 @@
 # ProGear Sales AI: Okta AI Agent Governance + Auth0 FGA Demo
 
-> **One custom agent. One employee identity. Only the access the job requires.** CourtEdge ProGear is a customer-owned basketball sales assistant registered as a custom agent in Okta. **Okta AI Agent Governance** gives it a Workload Principal and carries delegated user identity with the [IETF Identity Assertion JWT Authorization Grant (ID-JAG)](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-identity-assertion-authz-grant). **Auth0 FGA** evaluates role, quantity, and live vacation context; **Okta Identity Governance** routes Manager and VP approvals. This delegated-access pattern is **Cross App Access (XAA)**—[explore XAA.dev](https://xaa.dev/).
+> **AI agents are identities. Every delegated action stays attributable.** CourtEdge ProGear registers its customer-owned sales agent in Okta as a [Workload Principal](https://developer.okta.com/docs/api/secures-ai/ai-agents)—a first-class identity with its own owners, credentials, lifecycle, resource connections, and audit trail. When the agent acts for Sarah, Mike, or Joe, **Cross App Access (XAA)** uses the [IETF Identity Assertion JWT Authorization Grant (ID-JAG)](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-identity-assertion-authz-grant) to carry the user's identity across trust domains while identifying the agent client acting on that user's behalf. The result is a traceable delegation chain: **user → agent → resource → scope → action**. [Explore XAA.dev](https://xaa.dev/).
+
+**Auth0 FGA** then evaluates role, quantity, and live vacation context, while **Okta Identity Governance** routes Manager and VP approvals for changes that require a higher role.
 
 ![Okta AI Agent Governance](https://img.shields.io/badge/Okta-AI%20Agent%20Governance-blue)
 ![Auth0 FGA](https://img.shields.io/badge/Auth0-FGA-orange)
@@ -14,9 +16,9 @@
 
 Production deploys from `main`; feature branches may produce temporary previews, but they are not production sources.
 
-### A customer-owned custom agent in Okta
+### How Okta governs this custom agent
 
-**ProGear Sales Agent is a customer-owned custom AI agent registered in Okta**, not a generic chatbot identity or a separate identity for each internal tool. Okta represents it as one Workload Principal (`wlp`) under **Directory → AI Agents**, where administrators can assign owners, control resource connections, activate or deactivate the agent, and audit which employee it acted for. The application remains customer-owned; Okta supplies the governed agent identity and delegated access path.
+The ProGear Sales Agent is not a generic chatbot identity or a separate identity for each internal tool. Its Workload Principal (`wlp`) under **Directory → AI Agents** is the durable control point for the complete agent: administrators can assign owners, manage credentials and resource connections, activate or deactivate it, and use Okta's System Log to trace its delegation activity. The application remains customer-owned; Okta supplies the governed identity and preserves accountability when that agent acts for a user.
 
 User sign-in uses Okta **direct User access** on the registered ProGear Sales Agent. The agent-bound OIDC app shares the agent's `wlp...` client ID and authenticates token requests with `private_key_jwt`; there is no separate sign-on client secret.
 
