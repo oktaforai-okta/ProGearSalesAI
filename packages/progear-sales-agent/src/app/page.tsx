@@ -31,8 +31,8 @@ type ExampleQuestion = {
 // The everyday demo stays focused on the two core personas. The advanced FGA
 // demo adds the quantity boundary without duplicating the Manager tier.
 const simpleExampleQuestions: ExampleQuestion[] = [
-  { text: 'How many basketballs are in stock?', badge: 'Sarah · Read', action: 'read' },
-  { text: 'Add 50 basketballs to inventory', badge: 'Mike · Write', action: 'standard' },
+  { text: 'How many basketballs are in stock?', badge: 'Read', action: 'read' },
+  { text: 'Can you add 50 basketballs to the inventory?', badge: 'Write', action: 'standard' },
 ];
 
 const fgaExampleQuestions: ExampleQuestion[] = [
