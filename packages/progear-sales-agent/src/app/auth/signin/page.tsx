@@ -17,7 +17,7 @@ function SignInContent() {
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-gradient-to-br from-slate-100 via-orange-50 to-amber-100 px-4 py-20 dark:from-primary dark:via-primary-light dark:to-court-brown sm:py-12">
       <div className="absolute right-4 top-4 z-20">
-        <ThemeSelector />
+        <ThemeSelector iconOnly />
       </div>
       {/* Basketball Court Pattern Background */}
       <div className="absolute inset-0 opacity-5">

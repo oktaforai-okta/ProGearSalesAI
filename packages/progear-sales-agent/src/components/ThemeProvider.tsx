@@ -70,7 +70,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   );
 }
 
-export function ThemeSelector({ compact = false }: { compact?: boolean }) {
+export function ThemeSelector({ iconOnly = false }: { iconOnly?: boolean }) {
   const context = useContext(ThemeContext);
   if (!context) return null;
 
@@ -87,16 +87,17 @@ export function ThemeSelector({ compact = false }: { compact?: boolean }) {
             key={value}
             type="button"
             aria-pressed={active}
+            aria-label={`${label} theme`}
             title={`${label} theme`}
             onClick={() => context.setTheme(value)}
-            className={`flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-medium transition ${
+            className={`flex items-center gap-1.5 rounded-lg text-xs font-medium transition ${iconOnly ? 'p-2' : 'px-2.5 py-2'} ${
               active
                 ? 'bg-slate-900 text-white shadow-sm dark:bg-white dark:text-slate-900'
                 : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
             }`}
           >
             <Icon className="h-3.5 w-3.5" />
-            <span className={compact ? (active ? 'inline' : 'hidden') : 'hidden sm:inline'}>{label}</span>
+            <span className={iconOnly ? 'sr-only' : 'hidden sm:inline'}>{label}</span>
           </button>
         );
       })}
