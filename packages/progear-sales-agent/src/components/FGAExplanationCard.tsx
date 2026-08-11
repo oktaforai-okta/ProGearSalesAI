@@ -95,7 +95,7 @@ export default function FGAExplanationCard({ checks, decisions = [], isLoading =
         <div>
           <h2 className="flex items-center gap-2 font-semibold text-white">
             <Shield className="h-5 w-5" />
-            Fine-Grained Authorization (FGA) Architecture
+            Human In The Loop Architecture
           </h2>
           <p className="mt-1 text-xs text-white/80">Okta controls delegation. FGA controls the inventory action.</p>
         </div>

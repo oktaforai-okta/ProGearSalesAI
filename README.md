@@ -135,6 +135,7 @@ For a full walkthrough of Okta org setup (AI Agent, Custom Authorization Servers
 
 | Document | Audience | Description |
 |---|---|---|
+| **[CourtEdge ProGear Team Demo Guide](docs/CourtEdge-ProGear-Team-Demo-Guide.docx)** | Presenters, sales engineers | Ready-to-share Word runbook with the Sarah/Mike story, architecture and sequence talk tracks, optional FGA/OIG steps, screenshots, and an editable video-link placeholder ([Markdown source](docs/CourtEdge-ProGear-Team-Demo-Guide.md)) |
 | **[docs/architecture.md](docs/architecture.md)** | Anyone who wants to understand how it works | Full system walkthrough: token exchange sequence, FGA model, approval flow, MCP notes |
 | **[docs/implementation-guide.md](docs/implementation-guide.md)** | Developers, DevOps | Complete deployment walkthrough: Okta configuration, Vercel + Render setup, and recovering from an accidentally deleted AI Agent |
 | **[docs/agent-client-binding-compatibility.md](docs/agent-client-binding-compatibility.md)** | Maintainers, architects | Why the current delegation-link compatibility path exists and how to migrate when Okta restores the newer client-to-agent binding model |
