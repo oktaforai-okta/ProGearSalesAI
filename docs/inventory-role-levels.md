@@ -25,10 +25,10 @@
 - Compatibility claim: `Manager = clearance_level is 2 or 3`; application authorization does not depend on this claim.
 - `ProGear-Managers` membership rule: level 2 or 3.
 - `ProGear-VPs` membership rule: level 3.
-- Demo personas: Sarah Sales = Level 1, Mike Manager = Level 2, and Joe VP = Level 3; vacation defaults to false.
+- Demo personas: Sarah Sales = Level 1, Mike Manager = Level 2, and Joe VP = Level 3; vacation defaults to false. Joe also belongs to `ProGear-Warehouse` so the Inventory authorization server can issue the coarse inventory scopes before FGA evaluates his VP level.
 - The Sales inventory authorization-server rule grants `inventory:read` and `inventory:write`. The write scope only lets the request reach the FGA layer; it does not itself authorize direct execution.
 
-The demo starts with **Simulate FGA** off. That browser-local preference hides the role/vacation controls and guided FGA prompts until the presenter explicitly opts in; changing the preference does not itself mutate Okta. In simple mode, the backend still applies the Okta-signed role and vacation context, but a request that needs a higher role is denied instead of being sent to FGA/OIG. This makes the switch safe: turning simulation off can never bypass the Manager/VP execution boundary. Once enabled, the controls may only change the signed-in user's `clearance_level` and `is_on_vacation`. They validate the role as 1, 2, or 3. Reset restores that persona's starting role and always sets vacation to false.
+The demo starts with **Simulate FGA** off. That browser-local preference shows only two everyday examples—Sarah's read and Mike's normal write—and hides the role/vacation controls. Enabling it replaces those examples with the three FGA tiers and reveals the advanced controls; changing the preference does not itself mutate Okta. In simple mode, the backend still applies the Okta-signed role and vacation context, but a request that needs a higher role is denied instead of being sent to FGA/OIG. This makes the switch safe: turning simulation off can never bypass the Manager/VP execution boundary. Once enabled, the controls may only change the signed-in user's `clearance_level` and `is_on_vacation`. They validate the role as 1, 2, or 3. Reset restores that persona's starting role and always sets vacation to false.
 
 ## Auth0 FGA model
 
@@ -47,14 +47,13 @@ Role and vacation tuples are contextual: they are derived from the signed Okta t
 
 ## Deterministic demo prompts
 
-These prompts appear on the chat page only after **Simulate FGA** is enabled on `/fga`:
+These prompts replace the two everyday examples after **Simulate FGA** is enabled on `/fga`:
 
 1. `How many basketballs are in stock?`
 2. `Add 50 basketballs to inventory`
-3. `Add 600 basketballs to inventory`
-4. `Add 601 basketballs to inventory`
+3. `Add 601 basketballs to inventory`
 
-For Sarah's default Level 1, prompt 1 reads successfully, prompts 2 and 3 create Manager requests, and prompt 4 creates a VP request. For Mike's default Level 2, prompts 2 and 3 execute, while prompt 4 creates a VP request. At Level 3, all four execute unless vacation is true.
+For Sarah's default Level 1, prompt 1 reads successfully, prompt 2 creates a Manager request, and prompt 3 creates a VP request. For Mike's default Level 2, prompt 2 executes while prompt 3 creates a VP request. At Level 3, all three execute unless vacation is true.
 
 ## Deployment values
 

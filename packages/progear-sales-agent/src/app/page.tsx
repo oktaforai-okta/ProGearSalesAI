@@ -22,13 +22,23 @@ interface Message {
   fgaChecks?: any[];
 }
 
-// These prompts are the complete role story: read access, a normal change,
-// the upper Manager boundary, and the first quantity that requires VP power.
-const exampleQuestions: { text: string; action: 'read' | 'standard' | 'large' }[] = [
-  { text: 'How many basketballs are in stock?', action: 'read' },
-  { text: 'Add 50 basketballs to inventory', action: 'standard' },
-  { text: 'Add 600 basketballs to inventory', action: 'standard' },
-  { text: 'Add 601 basketballs to inventory', action: 'large' },
+type ExampleQuestion = {
+  text: string;
+  badge: string;
+  action: 'read' | 'standard' | 'large';
+};
+
+// The everyday demo stays focused on the two core personas. The advanced FGA
+// demo adds the quantity boundary without duplicating the Manager tier.
+const simpleExampleQuestions: ExampleQuestion[] = [
+  { text: 'How many basketballs are in stock?', badge: 'Sarah · Read', action: 'read' },
+  { text: 'Add 50 basketballs to inventory', badge: 'Mike · Write', action: 'standard' },
+];
+
+const fgaExampleQuestions: ExampleQuestion[] = [
+  { text: 'How many basketballs are in stock?', badge: 'Read', action: 'read' },
+  { text: 'Add 50 basketballs to inventory', badge: '1–600', action: 'standard' },
+  { text: 'Add 601 basketballs to inventory', badge: '601+ · VP', action: 'large' },
 ];
 
 const CHAT_STORAGE_KEY = 'progear-chat-messages';
@@ -525,20 +535,17 @@ export default function Home() {
                   Your AI-powered basketball equipment sales assistant is ready. Ask about orders, inventory, pricing, or customers.
                 </p>
 
-                {/* Guided role and threshold prompts are intentionally opt-in. */}
-                {isFGASimulationEnabled ? (
-                <div className="grid grid-cols-1 gap-3 text-left sm:grid-cols-2">
-                  {exampleQuestions.map((question, idx) => {
+                <div className="mx-auto flex max-w-lg flex-col gap-2.5 text-left">
+                  {(isFGASimulationEnabled ? fgaExampleQuestions : simpleExampleQuestions).map((question) => {
                     const isRead = question.action === 'read';
-                    const badge = isRead ? 'Read' : question.action === 'large' ? '601+ · VP' : '1–600';
                     return (
                       <button
-                        key={idx}
+                        key={question.badge}
                         onClick={() => handleSendMessage(question.text)}
-                        className="group flex items-start space-x-3 rounded-xl border-2 border-accent/20 bg-white/95 p-4 text-left backdrop-blur-sm transition-all hover:border-accent hover:shadow-xl dark:bg-slate-900/95"
+                        className="group flex min-h-14 items-center gap-3 rounded-xl border-2 border-accent/20 bg-white/95 px-3.5 py-2.5 text-left backdrop-blur-sm transition-all hover:border-accent hover:shadow-lg dark:bg-slate-900/95"
                       >
                         <span
-                          className={`flex-shrink-0 px-2 py-1 rounded-md text-[10px] font-bold tracking-wide uppercase ${
+                          className={`min-w-20 flex-shrink-0 rounded-md px-2 py-1 text-center text-[10px] font-bold uppercase tracking-wide ${
                             isRead
                               ? 'bg-emerald-100 text-emerald-700'
                               : question.action === 'large'
@@ -546,26 +553,15 @@ export default function Home() {
                                 : 'bg-court-orange/15 text-court-orange'
                           }`}
                         >
-                          {badge}
+                          {question.badge}
                         </span>
-                        <span className="text-sm font-medium leading-relaxed text-gray-700 group-hover:text-primary dark:text-slate-200 dark:group-hover:text-white">
+                        <span className="text-sm font-medium leading-snug text-gray-700 group-hover:text-primary dark:text-slate-200 dark:group-hover:text-white">
                           {question.text}
                         </span>
                       </button>
                     );
                   })}
                 </div>
-                ) : (
-                  <div className="rounded-xl border border-slate-200 bg-white/80 p-4 text-left shadow-sm dark:border-slate-700 dark:bg-slate-900/70">
-                    <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">Simple chat mode</p>
-                    <p className="mt-1 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
-                      Type a question below to demo Sarah or Mike normally. Guided role, vacation, and approval prompts stay hidden until you enable{' '}
-                      <Link href="/fga" className="font-semibold text-purple-700 underline underline-offset-2 dark:text-purple-300">
-                        Simulate FGA
-                      </Link>.
-                    </p>
-                  </div>
-                )}
               </div>
             )}
 

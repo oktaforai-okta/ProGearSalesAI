@@ -420,6 +420,7 @@ Create three groups to demonstrate RBAC:
    |------|-------|--------------|
    | Sarah Sales | `ProGear-Sales` | Agent access across all four resource domains |
    | Mike Manager | `ProGear-Warehouse` | Agent access to the Inventory domain only |
+   | Joe VP | `ProGear-Warehouse` | Agent access to the Inventory domain; Level 3 controls the VP decision |
    | Frank Finance | `ProGear-Finance` | Agent access to the Pricing domain only |
 
    > **Verification:** Click on each user in **Directory** → **People** and check the **Groups** tab to confirm they're in the correct group.
@@ -1205,14 +1206,13 @@ Four key scenarios demonstrate resource RBAC and the three-tier Inventory story:
 
 ### Scenario 3: Inventory authorization and approval tiers
 
-Open `/fga` and select **Simulate FGA** first. The application intentionally starts in simple chat mode, so the advanced controls and preset prompts remain hidden until the presenter opts in. Then use the preset prompts in this order:
+The chat page starts with two everyday examples: Sarah's inventory read and Mike's 50-unit inventory write. Open `/fga` and select **Simulate FGA** to reveal the advanced controls and replace those examples with the three-tier FGA prompt set. Then use the prompts in this order:
 
 1. `How many basketballs are in stock?`
 2. `Add 50 basketballs to inventory`
-3. `Add 600 basketballs to inventory`
-4. `Add 601 basketballs to inventory`
+3. `Add 601 basketballs to inventory`
 
-Sarah's read succeeds. Her 50- and 600-unit writes create Manager requests, while 601 creates a VP request. Mike's 50- and 600-unit writes execute directly, while 601 creates a VP request. Change either user to Level 3 and 601 executes directly. Setting vacation to true leaves the read available but blocks every write and does not create an approval request.
+Sarah's read succeeds. Her 50-unit write creates a Manager request, while 601 creates a VP request. Mike's 50-unit write executes directly, while 601 creates a VP request. Change either user to Level 3 and 601 executes directly. Setting vacation to true leaves the read available but blocks every write and does not create an approval request.
 
 ### Scenario 4: One resource domain (Frank Finance)
 
