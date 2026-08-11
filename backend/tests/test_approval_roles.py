@@ -165,7 +165,42 @@ class ApprovalRoleTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(request_id, "request-created")
             self.assertEqual(oig.create_kwargs["requester_id"], "00u-manager")
+            justification = oig.create_kwargs["justification_value"]
+            self.assertNotIn("[INTENT_JSON]", justification)
+            self.assertIn("Requested for: mike.manager@example.com", justification)
+            self.assertIn("Action: Add 601 basketballs to inventory", justification)
+            self.assertIn("Reason: Exceeds the Manager limit of 600 units", justification)
+            self.assertIn("Required approval: VP (Level 2)", justification)
             self.assertEqual(service.pending_request_ids(), ["request-created"])
+
+            # New requests recover the action from the private ledger; OIG no
+            # longer needs to expose machine-readable JSON to the approver.
+            oig.raw = {
+                "requestStatus": "OPEN",
+                "requesterFieldValues": [{"value": justification}],
+                "approvals": [{"status": "PENDING"}],
+            }
+            restarted_service = ApprovalService(
+                oig=oig,
+                demo_store=_Store(),
+                mint_service_token=_mint_token,
+                validate_service_token=_validate_token,
+                request_type_id="request-type",
+                justification_field_id="justification-field",
+                ledger_path=Path(tmp) / "ledger.json",
+            )
+            status = await restarted_service.get_status(request_id)
+            self.assertIsNotNone(status.intent)
+            self.assertEqual(status.intent.quantity_delta, 601)
+
+    async def test_legacy_request_intent_still_decodes_from_justification(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            raw = _approved_raw(2, "VP")
+            service = self._service(raw, _Store(), Path(tmp) / "ledger.json", 2)
+            status = await service.get_status("legacy-request")
+            self.assertIsNotNone(status.intent)
+            self.assertEqual(status.intent.required_approver_role, "VP")
+            self.assertEqual(status.intent.quantity_delta, 601)
 
     async def test_status_cache_collapses_duplicate_oig_polls_and_serves_stale_on_429(self):
         with tempfile.TemporaryDirectory() as tmp:

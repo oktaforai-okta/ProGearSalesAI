@@ -19,14 +19,13 @@ import logging
 import os
 import tempfile
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from .intent import (
     Intent,
     decode_intent,
-    encode_justification,
 )
 from .okta_oig_client import OktaOIGClient, OIGAuthError, OIGUnavailable
 
@@ -59,6 +58,7 @@ class ApprovalStatus:
 @dataclass
 class _LedgerEntry:
     """Per-request persistent state for the idempotency ledger."""
+    intent: dict[str, Any] | None = None
     executed: bool = False
     executed_at: str | None = None
     txn_id: str | None = None
@@ -71,6 +71,7 @@ class _LedgerEntry:
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "intent": self.intent,
             "executed": self.executed,
             "executed_at": self.executed_at,
             "txn_id": self.txn_id,
@@ -85,6 +86,7 @@ class _LedgerEntry:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "_LedgerEntry":
         return cls(
+            intent=data.get("intent") if isinstance(data.get("intent"), dict) else None,
             executed=bool(data.get("executed")),
             executed_at=data.get("executed_at"),
             txn_id=data.get("txn_id"),
@@ -249,17 +251,16 @@ class ApprovalService:
             required_approver_role=required_approver_role,
             required_approver_level=required_approver_level,
         )
-        subject = f"Inventory write: +{qty} {product}"
+        unit_name = product if qty == 1 or product.endswith("s") else f"{product}s"
+        subject = f"Inventory write: +{qty} {unit_name}"
         human = (
-            f"AI agent requests inventory write on behalf of {user_email}.\n"
-            f"Governed agent: {agent_id or agent}.\n"
-            f"Action: Add {qty} units of {product} (scope: {scope}).\n"
-            f"Original task: \"{original_task}\".\n"
+            f"Requested for: {user_email}\n"
+            f"Action: Add {qty} {unit_name} to inventory\n"
+            f"Reason: Exceeds the Manager limit of {self._threshold - 1} units\n"
             f"Required approval: {required_approver_role or 'VP'} "
-            f"(level {required_approver_level or 2}+).\n"
-            f"Approver group: {approver_group_name}."
+            f"(Level {required_approver_level or 2})\n"
+            "Governed agent: ProGear Sales Agent"
         )
-        justification = encode_justification(human, intent)
 
         try:
             created = await self._oig.create_request(
@@ -267,7 +268,7 @@ class ApprovalService:
                 subject=subject,
                 requester_id=requester_id,
                 justification_field_id=self._justification_field_id,
-                justification_value=justification,
+                justification_value=human,
             )
         except (OIGUnavailable, OIGAuthError) as exc:
             logger.error("OIG create_request failed: %s", exc)
@@ -276,10 +277,13 @@ class ApprovalService:
         request_id = created.get("id") or created.get("requestId")
         if not request_id:
             raise RuntimeError(f"OIG response missing request id: {created!r}")
-        # Persist newly-created request IDs so the background worker polls only
-        # this service's active approvals instead of repeatedly scanning every
-        # historical request in the tenant.
-        self._ledger.put(request_id, _LedgerEntry())
+        # Keep execution data out of OIG's requester-visible Justification field.
+        # The persistent ledger supplies the exact action after approval while
+        # OIG presents only the concise decision context to the approver.
+        self._ledger.put(
+            request_id,
+            _LedgerEntry(intent=json.loads(intent.to_json())),
+        )
         return request_id, intent
 
     # ---------- status ----------
@@ -312,8 +316,17 @@ class ApprovalService:
         status.poll_error = False
         self._status_cache[status.request_id] = (time.monotonic(), copy.deepcopy(status))
 
-    def _extract_intent(self, raw: dict) -> Intent | None:
-        """Pull the [INTENT_JSON] fence out of the Justification field."""
+    def _extract_intent(self, request_id: str, raw: dict) -> Intent | None:
+        """Load execution intent from the ledger, with legacy OIG fallback."""
+        ledger_intent = self._ledger.get(request_id).intent
+        if ledger_intent is not None:
+            try:
+                return Intent(**ledger_intent)
+            except (TypeError, ValueError) as exc:
+                logger.error("Invalid ledger intent for %s: %s", request_id, exc)
+
+        # Compatibility for requests created before intent moved out of the
+        # requester-visible Justification field.
         for fv in raw.get("requesterFieldValues") or []:
             value = fv.get("value")
             if value and isinstance(value, str):
@@ -395,7 +408,7 @@ class ApprovalService:
         return ("approved", approver_summary, approved_at, None)
 
     def _status_from_raw(self, request_id: str, raw: dict) -> ApprovalStatus:
-        intent = self._extract_intent(raw)
+        intent = self._extract_intent(request_id, raw)
         submitted_at = raw.get("created") or raw.get("createdAt")
         oig_request_status = (raw.get("requestStatus") or "").upper()
 
@@ -497,7 +510,7 @@ class ApprovalService:
 
             intent = status.intent
             if intent is None:
-                msg = "intent could not be decoded from justification"
+                msg = "approval execution intent is unavailable"
                 logger.error("%s: %s", request_id, msg)
                 ledger_entry.failed_attempts += 1
                 ledger_entry.last_error = msg

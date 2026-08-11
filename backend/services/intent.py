@@ -1,4 +1,4 @@
-"""Shape of the intent payload encoded in OIG request justification."""
+"""Shape of an approved inventory action's machine-readable intent."""
 from __future__ import annotations
 
 import json
@@ -38,12 +38,12 @@ class Intent:
 
 
 def encode_justification(human_text: str, intent: Intent) -> str:
-    """Return a justification string with human text plus a fenced JSON block."""
+    """Build the legacy pre-ledger justification format for compatibility."""
     return f"{human_text}\n\n{INTENT_FENCE_START}\n{intent.to_json()}\n{INTENT_FENCE_END}"
 
 
 def decode_intent(justification: str) -> Intent | None:
-    """Extract the Intent from a justification that was built with encode_justification."""
+    """Extract intent from a legacy justification created before ledger storage."""
     match = _INTENT_FENCE_RE.search(justification or "")
     if not match:
         return None

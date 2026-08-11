@@ -657,8 +657,11 @@ AND Scopes: inventory:write
 This rule is used only after a VP approves a Manager's 601+ request. The
 backend authenticates the dedicated executor with `private_key_jwt`, validates
 the five-minute token at the Inventory boundary, and executes idempotently.
-The OIG request retains the requester, approver, governed agent, requested
-scope, quantity, and FGA check so the complete decision remains auditable.
+The OIG request presents the requester, action, threshold reason, required
+approver role, and governed agent in a concise human summary. The backend's
+persistent approval ledger retains the exact scope, quantity, agent identity,
+and FGA check needed for one idempotent execution after approval. Legacy open
+requests with embedded intent JSON remain supported.
 
 **Rule 2: Warehouse Full Access** (Priority 2)
 ```
