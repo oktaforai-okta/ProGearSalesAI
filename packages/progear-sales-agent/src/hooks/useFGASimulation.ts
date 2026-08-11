@@ -5,6 +5,16 @@ import { useCallback, useEffect, useState } from 'react';
 const STORAGE_KEY = 'progear-fga-simulation-v1';
 const CHANGE_EVENT = 'progear:fga-simulation-change';
 
+export function clearFGASimulationPreference() {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // A fresh sign-in still defaults to simple mode when storage is unavailable.
+  }
+  window.dispatchEvent(new Event(CHANGE_EVENT));
+}
+
 function readSimulationPreference(): boolean {
   try {
     return window.localStorage.getItem(STORAGE_KEY) === 'true';
@@ -29,7 +39,11 @@ export function useFGASimulation() {
 
   const updateSimulation = useCallback((enabled: boolean) => {
     try {
-      window.localStorage.setItem(STORAGE_KEY, String(enabled));
+      if (enabled) {
+        window.localStorage.setItem(STORAGE_KEY, 'true');
+      } else {
+        window.localStorage.removeItem(STORAGE_KEY);
+      }
     } catch {
       // The current page still updates when browser storage is unavailable.
     }
