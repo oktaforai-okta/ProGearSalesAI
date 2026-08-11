@@ -10,14 +10,9 @@
 
 ## Live Demo
 
-| | |
-|---|---|
-| **Primary frontend** | [progear-sales-aiagent.vercel.app](https://progear-sales-aiagent.vercel.app) |
-| **Primary backend API** | [progearsalesai-p2wm.onrender.com](https://progearsalesai-p2wm.onrender.com) |
-| **Extension frontend** | [progearsalesaiext.vercel.app](https://progearsalesaiext.vercel.app) |
-| **Extension backend API** | [progearsalesaiext.onrender.com](https://progearsalesaiext.onrender.com) |
+**Production app:** [progear-sales-aiagent.vercel.app](https://progear-sales-aiagent.vercel.app)
 
-All four are deployed from this single repo. `main` is the single deployment branch: both Vercel projects build `packages/progear-sales-agent`, and both Render services build `backend/`. Feature branches may produce temporary previews, but they are not production sources.
+Production deploys from `main`; feature branches may produce temporary previews, but they are not production sources.
 
 ### A customer-owned custom agent in Okta
 
