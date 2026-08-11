@@ -861,7 +861,12 @@ Return ONLY the JSON object, no other text."""
             inventory_config = get_agent_config(AGENT_INVENTORY)
             request_id, intent = await self.approval_service.create_request(
                 user_email=self.user_info.get("email") or "",
-                requester_id=self.user_info.get("sub") or self.user_info.get("id") or "",
+                requester_id=(
+                    self.user_info.get("okta_user_id")
+                    or self.user_info.get("sub")
+                    or self.user_info.get("id")
+                    or ""
+                ),
                 approver_group_name=approver_group,
                 agent=AGENT_INVENTORY,
                 scope="inventory:write",

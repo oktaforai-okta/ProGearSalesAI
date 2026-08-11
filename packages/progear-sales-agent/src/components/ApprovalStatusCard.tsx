@@ -110,7 +110,7 @@ export default function ApprovalStatusCard({ initial, onStatusChange }: Props) {
     };
 
     tick();
-    const handle = setInterval(tick, 5000);
+    const handle = setInterval(tick, 10000);
     return () => {
       cancelled = true;
       clearInterval(handle);

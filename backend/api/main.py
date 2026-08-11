@@ -103,22 +103,22 @@ async def _approval_poller_loop():
     if not req_type_id:
         logger.warning("OKTA_OIG_INVENTORY_REQUEST_TYPE_ID not set; approval poller disabled")
         return
+    bootstrapped = False
     while True:
         try:
             svc = _get_approval_service()
-            # Okta filters server-side only by requeststatus. A freshly-approved
-            # request can appear as either OPEN (approvals done but workflow
-            # still transitioning) or RESOLVED (terminal). Poll both to avoid
-            # missing either. Filter by requestTypeId + decision client-side.
-            raw_open = await svc._oig.list_requests(request_status="OPEN")
-            raw_resolved = await svc._oig.list_requests(request_status="RESOLVED")
-            raw_list = raw_open + raw_resolved
-            for raw in raw_list:
-                if raw.get("requestTypeId") != req_type_id:
-                    continue
-                rid = raw.get("id")
-                if not rid:
-                    continue
+            # Recover this service's open requests once after startup. New
+            # requests register themselves in the persistent ledger. From then
+            # on, poll only those IDs; repeatedly listing every historical OPEN
+            # and RESOLVED tenant request caused avoidable OIG rate limiting.
+            if not bootstrapped:
+                raw_open = await svc._oig.list_requests(request_status="OPEN")
+                for raw in raw_open:
+                    if raw.get("requestTypeId") == req_type_id and raw.get("id"):
+                        svc.track_request(raw["id"])
+                bootstrapped = True
+
+            for rid in svc.pending_request_ids():
                 try:
                     await svc.execute_if_approved(rid)
                 except Exception as exc:
@@ -310,10 +310,11 @@ async def chat(
     # policy dynamically on their next request.
     role_identifier = user_claims.get("sub") or user_claims.get("email")
     try:
-        clearance_level = await OktaRoleResolver(
+        resolved_user = await OktaRoleResolver(
             base_url=os.environ["OKTA_DOMAIN"],
             api_token=os.environ["OKTA_API_TOKEN"],
-        ).resolve(role_identifier or "")
+        ).resolve_identity(role_identifier or "")
+        clearance_level = resolved_user.clearance_level
     except (KeyError, httpx.HTTPError, ValueError) as exc:
         logger.error("Live Okta clearance lookup failed: %s", exc)
         raise HTTPException(
@@ -330,6 +331,7 @@ async def chat(
         "name": user_claims.get("name"),
         "groups": user_claims.get("groups", []),
         "clearance_level": clearance_level,
+        "okta_user_id": resolved_user.user_id,
     }
 
     # Log sanitized ID token metadata only - never the raw JWT or the full
@@ -722,7 +724,8 @@ async def get_approval(request_id: str):
 
     Foreground fast-path: if the request is APPROVED and not yet executed,
     the call synchronously executes the inventory write. Otherwise returns
-    current status without side effects.
+    current status without side effects. Short-lived per-request caching
+    collapses duplicate polling from multiple browser tabs.
     """
     try:
         svc = _get_approval_service()

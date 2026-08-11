@@ -12,11 +12,13 @@ All external I/O lives in those dependencies; the service itself is pure orchest
 from __future__ import annotations
 
 import asyncio
+import copy
 import datetime as dt
 import json
 import logging
 import os
 import tempfile
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -65,6 +67,7 @@ class _LedgerEntry:
     failed_attempts: int = 0
     abandoned: bool = False
     last_error: str | None = None
+    terminal: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -76,6 +79,7 @@ class _LedgerEntry:
             "failed_attempts": self.failed_attempts,
             "abandoned": self.abandoned,
             "last_error": self.last_error,
+            "terminal": self.terminal,
         }
 
     @classmethod
@@ -89,6 +93,7 @@ class _LedgerEntry:
             failed_attempts=int(data.get("failed_attempts") or 0),
             abandoned=bool(data.get("abandoned")),
             last_error=data.get("last_error"),
+            terminal=bool(data.get("terminal")),
         )
 
 
@@ -146,6 +151,16 @@ class _Ledger:
         self._data[request_id] = entry
         self._save()
 
+    def contains(self, request_id: str) -> bool:
+        return request_id in self._data
+
+    def pending_request_ids(self) -> list[str]:
+        return [
+            request_id
+            for request_id, entry in self._data.items()
+            if not entry.executed and not entry.abandoned and not entry.terminal
+        ]
+
 
 class ApprovalService:
     def __init__(
@@ -159,6 +174,7 @@ class ApprovalService:
         justification_field_id: str,
         ledger_path: str | os.PathLike[str],
         quantity_threshold: int = 601,
+        status_cache_ttl_seconds: float = 8.0,
         resolve_approver_level: Callable[[dict], Awaitable[int]] | None = None,
         clock: Callable[[], dt.datetime] = lambda: dt.datetime.now(dt.timezone.utc),
     ):
@@ -169,9 +185,11 @@ class ApprovalService:
         self._request_type_id = request_type_id
         self._justification_field_id = justification_field_id
         self._threshold = quantity_threshold
+        self._status_cache_ttl = max(0.0, status_cache_ttl_seconds)
         self._resolve_approver_level = resolve_approver_level
         self._now = clock
         self._locks: dict[str, asyncio.Lock] = {}
+        self._status_cache: dict[str, tuple[float, ApprovalStatus]] = {}
         self._ledger = _Ledger(ledger_path)
 
     # ---------- gating ----------
@@ -195,7 +213,7 @@ class ApprovalService:
         self,
         *,
         user_email: str,
-        requester_id: str,  # kept for parity with old signature; unused by Okta API
+        requester_id: str,
         approver_group_name: str,
         agent: str,
         scope: str,
@@ -207,7 +225,8 @@ class ApprovalService:
         required_approver_level: int | None = None,
     ) -> tuple[str, Intent]:
         """Create an OIG Access Request and return (request_id, intent)."""
-        _ = requester_id  # explicit: Okta infers requester from API token
+        if not requester_id:
+            raise ValueError("The signed-in employee is missing an Okta user ID")
 
         # Fail before creating a human approval task if the approved action
         # could not actually execute. This preflight uses the same real Okta
@@ -246,6 +265,7 @@ class ApprovalService:
             created = await self._oig.create_request(
                 request_type_id=self._request_type_id,
                 subject=subject,
+                requester_id=requester_id,
                 justification_field_id=self._justification_field_id,
                 justification_value=justification,
             )
@@ -256,6 +276,10 @@ class ApprovalService:
         request_id = created.get("id") or created.get("requestId")
         if not request_id:
             raise RuntimeError(f"OIG response missing request id: {created!r}")
+        # Persist newly-created request IDs so the background worker polls only
+        # this service's active approvals instead of repeatedly scanning every
+        # historical request in the tenant.
+        self._ledger.put(request_id, _LedgerEntry())
         return request_id, intent
 
     # ---------- status ----------
@@ -266,6 +290,27 @@ class ApprovalService:
         except OIGUnavailable:
             return ApprovalStatus(request_id=request_id, status="pending", intent=None, poll_error=True)
         return self._status_from_raw(request_id, raw)
+
+    def track_request(self, request_id: str) -> None:
+        """Register an existing open request for background resolution."""
+        if request_id and not self._ledger.contains(request_id):
+            self._ledger.put(request_id, _LedgerEntry())
+
+    def pending_request_ids(self) -> list[str]:
+        return self._ledger.pending_request_ids()
+
+    def _cached_status(self, request_id: str, *, allow_stale: bool = False) -> ApprovalStatus | None:
+        cached = self._status_cache.get(request_id)
+        if cached is None:
+            return None
+        cached_at, status = cached
+        if not allow_stale and time.monotonic() - cached_at >= self._status_cache_ttl:
+            return None
+        return copy.deepcopy(status)
+
+    def _cache_status(self, status: ApprovalStatus) -> None:
+        status.poll_error = False
+        self._status_cache[status.request_id] = (time.monotonic(), copy.deepcopy(status))
 
     def _extract_intent(self, raw: dict) -> Intent | None:
         """Pull the [INTENT_JSON] fence out of the Justification field."""
@@ -408,15 +453,37 @@ class ApprovalService:
     async def execute_if_approved(self, request_id: str) -> ApprovalStatus:
         lock = self._lock_for(request_id)
         async with lock:
-            raw = await self._oig.get_request(request_id)
+            cached = self._cached_status(request_id)
+            if cached is not None:
+                return cached
+
+            try:
+                raw = await self._oig.get_request(request_id)
+            except OIGUnavailable:
+                stale = self._cached_status(request_id, allow_stale=True)
+                if stale is not None:
+                    stale.poll_error = True
+                    return stale
+                return ApprovalStatus(
+                    request_id=request_id,
+                    status="pending",
+                    intent=None,
+                    poll_error=True,
+                )
             status = self._status_from_raw(request_id, raw)
 
             # Already executed (ledger short-circuit handled inside _status_from_raw).
             if status.status == "executed":
+                self._cache_status(status)
                 return status
 
             # Nothing to do unless approvers have said yes.
             if status.status != "approved":
+                if status.status == "denied":
+                    ledger_entry = self._ledger.get(request_id)
+                    ledger_entry.terminal = True
+                    self._ledger.put(request_id, ledger_entry)
+                self._cache_status(status)
                 return status
 
             ledger_entry = self._ledger.get(request_id)
@@ -425,6 +492,7 @@ class ApprovalService:
                     ledger_entry.last_error
                     or "execution abandoned after repeated failures"
                 )
+                self._cache_status(status)
                 return status
 
             intent = status.intent
@@ -436,6 +504,7 @@ class ApprovalService:
                 ledger_entry.abandoned = True
                 self._ledger.put(request_id, ledger_entry)
                 status.denial_reason = msg
+                self._cache_status(status)
                 return status
 
             required_level = intent.required_approver_level
@@ -443,13 +512,19 @@ class ApprovalService:
                 if self._resolve_approver_level is None:
                     status.status = "denied"
                     status.denial_reason = "The approver role could not be verified in Okta."
+                    ledger_entry.terminal = True
+                    self._ledger.put(request_id, ledger_entry)
+                    self._cache_status(status)
                     return status
                 try:
                     actual_level = await self._resolve_approver_level(status.approver or {})
                 except Exception as exc:  # fail closed on an Okta lookup error
                     logger.warning("Approver role lookup failed for %s: %s", request_id, exc)
-                    status.status = "denied"
-                    status.denial_reason = "The approver role could not be verified in Okta."
+                    status.status = "approved"
+                    status.poll_error = True
+                    status.denial_reason = "The approver role could not be verified in Okta yet."
+                    # A temporary Okta lookup failure remains non-executable
+                    # and non-terminal so a later poll can retry the live role.
                     return status
                 if actual_level < required_level:
                     status.status = "denied"
@@ -457,12 +532,16 @@ class ApprovalService:
                         f"Approval requires {intent.required_approver_role or 'role'} "
                         f"level {required_level}; the Okta approver has level {actual_level}."
                     )
+                    ledger_entry.terminal = True
+                    self._ledger.put(request_id, ledger_entry)
+                    self._cache_status(status)
                     return status
 
             if ledger_entry.failed_attempts >= MAX_EXECUTION_ATTEMPTS:
                 ledger_entry.abandoned = True
                 self._ledger.put(request_id, ledger_entry)
                 status.denial_reason = "execution abandoned after repeated failures"
+                self._cache_status(status)
                 return status
 
             attempt_num = ledger_entry.failed_attempts + 1
@@ -485,6 +564,7 @@ class ApprovalService:
                 ledger_entry.failed_attempts = attempt_num
                 ledger_entry.last_error = str(exc)
                 self._ledger.put(request_id, ledger_entry)
+                self._cache_status(status)
                 return status  # still status='approved'; will retry on next poll
 
             txn_id = f"inv_txn_{request_id[-8:]}_{attempt_num}"
@@ -503,4 +583,5 @@ class ApprovalService:
                 previous_quantity=result.get("previous_quantity", -1),
                 new_quantity=result.get("new_quantity", -1),
             )
+            self._cache_status(status)
             return status

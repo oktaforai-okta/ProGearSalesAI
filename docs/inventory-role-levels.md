@@ -32,6 +32,7 @@ Token issuance is necessary, not sufficient—but a token is not requested when 
 - Demo personas: Sarah Sales = Level 0, Mike Manager = Level 1, Joe VP = Level 2.
 - `ProGear-Managers` contains Managers and VPs as appropriate for ordinary administration.
 - `ProGear-VPs` contains the eligible approvers for Manager requests above 600.
+- Assign the Okta Access Requests app to `ProGear-Managers` and `ProGear-VPs`, push `ProGear-VPs` into Access Requests, and assign the request type's approval task to that pushed group. This makes the route dynamic: any current Level 2 member can receive the task.
 - The Inventory authorization-server rule may issue `inventory:read` and `inventory:write` to the demo personas. The write scope is a coarse resource capability, not direct permission to change inventory.
 - A separate five-minute `client_credentials` rule permits only the dedicated ProGear Approval Executor service client to execute an already-approved inventory write. The application preflights and validates that token before it creates the OIG request; the AI Agent workload principal continues to handle delegated user exchanges.
 
@@ -69,6 +70,7 @@ Every backend serving this frontend must use the same `FGA_STORE_ID` and active 
 ```text
 APPROVAL_QUANTITY_THRESHOLD=601
 OKTA_VP_APPROVER_GROUP_NAME=ProGear-VPs
+APPROVAL_STATUS_CACHE_TTL_SECONDS=8
 ```
 
 The fixed 600/601 boundary is implemented in `backend/auth/inventory_policy.py` and covered by the backend policy test suite.

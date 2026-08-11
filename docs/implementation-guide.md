@@ -779,8 +779,13 @@ Once you have create authorization servers per MCP API, Use managed connections 
 2. Record the store ID and the returned authorization model ID. Configure a client allowed to call that store.
 3. Configure every backend serving the app with the same `FGA_STORE_ID` and `FGA_MODEL_ID`.
 4. In Okta Identity Governance, create or select the Inventory access-request type and required justification field.
-5. Route only Manager changes above 600 units to `ProGear-VPs`. Sales changes never create access requests. The request intent records the required VP role and Level 2, and the backend verifies the approver's live Okta profile before execution.
-6. On the Inventory Authorization Server, allow only the dedicated `ProGear Approval Executor` service client's `client_credentials` grant for `inventory:write`, with a five-minute access-token lifetime. The backend mints and validates this token before creating an OIG request and again before executing an approval.
+5. Assign the **Okta Access Requests** app to `ProGear-Managers` and `ProGear-VPs`. This provisions current and future group members into the approval experience.
+6. In the Okta Access Requests app's **Push Groups** configuration, push `ProGear-VPs`, then confirm the mapping is active under **Access Requests Console → Settings → Pushed Groups**.
+7. Edit the Inventory request type and set its approval task assignee to the pushed `ProGear-VPs` group. Publish the request type. Writing `ProGear-VPs` in the justification does not route a task; the request-type step owns routing.
+8. Route only Manager changes above 600 units to that request type. Sales changes never create access requests. The backend sends the authenticated Manager's Okta subject in `requesterUserIds`, records the required VP role and Level 2 in the intent, and verifies the approver's live Okta profile before execution.
+9. On the Inventory Authorization Server, allow only the dedicated `ProGear Approval Executor` service client's `client_credentials` grant for `inventory:write`, with a five-minute access-token lifetime. The backend mints and validates this token before creating an OIG request and again before executing an approval.
+
+The VP opens **Okta Access Requests → Inbox → Open** from the End-User Dashboard. A request that appears as `Task ... was not assigned` in the System Log indicates that step 7 is incomplete, even if the requester and VP group memberships are correct.
 
 The model provides four application permissions:
 
@@ -1087,6 +1092,7 @@ In Render, go to **Environment** and add these variables:
 | `OKTA_OIG_JUSTIFICATION_FIELD_ID` | Required justification field ID |
 | `APPROVAL_QUANTITY_THRESHOLD` | `601` |
 | `OKTA_VP_APPROVER_GROUP_NAME` | `ProGear-VPs` |
+| `APPROVAL_STATUS_CACHE_TTL_SECONDS` | `8` (collapses duplicate browser polls) |
 | `CORS_ORIGINS` | Your Vercel URL: `https://your-project-name.vercel.app` |
 
 ### Step 4: Deploy
@@ -1402,6 +1408,9 @@ Use this checklist to verify your deployment is complete:
 - [ ] `clearance_level` configured as 0 Sales, 1 Manager, or 2 VP
 - [ ] `ProGear-Managers` rule includes Levels 1 and 2
 - [ ] `ProGear-VPs` rule includes Level 2
+- [ ] Okta Access Requests app assigned to `ProGear-Managers` and `ProGear-VPs`
+- [ ] `ProGear-VPs` group push mapping is active in Access Requests
+- [ ] Inventory request type approval task is assigned to `ProGear-VPs` and published
 - [ ] AI Agent registered with JWK credentials
 - [ ] AI Agent configured for direct User access
 - [ ] 4 authorization servers with scopes configured
@@ -1429,6 +1438,7 @@ Use this checklist to verify your deployment is complete:
 - [ ] Okta login works from frontend
 - [ ] Chat messages get responses
 - [ ] Token exchanges visible in security panel
+- [ ] A Mike 601+ request lists Mike as requester and appears in Joe's **Access Requests → Inbox → Open**
 
 ### Demo Verification
 - [ ] The same ProGear Sales Agent is shown for Sarah, Mike, and Frank

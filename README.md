@@ -49,6 +49,8 @@ With **Simulate FGA** enabled, the three default Okta role levels tell one compl
 
 Sarah, Mike, and Joe are example personas, not hard-coded identities. The backend resolves the authenticated employee's current Okta profile by subject on every request, so any user assigned `clearance_level` 0, 1, or 2 follows the same Sales, Manager, or VP policy. Use your Okta identity-lifecycle or profile-mapping process to assign that value when onboarding additional users.
 
+For the approval demo, assign the **Okta Access Requests** app to the Manager and VP groups, push `ProGear-VPs` into Access Requests, and assign the request type's approval task to that pushed group. The backend sends Mike's Okta user ID in `requesterUserIds`, so OIG shows the signed-in Manager as the requester and the service credential owner separately as the request creator. Joe opens **Okta Access Requests → Inbox → Open** to approve or deny the task.
+
 ## What This Demo Shows
 
 An AI sales agent needs to read and write real business data (inventory, pricing, customer records) on a user's behalf. This demo answers the questions that matter for enterprise AI agent security:

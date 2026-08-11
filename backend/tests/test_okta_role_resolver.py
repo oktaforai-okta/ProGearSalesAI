@@ -12,7 +12,7 @@ class OktaRoleResolverTests(unittest.IsolatedAsyncioTestCase):
         response = httpx.Response(
             200,
             request=request,
-            json={"profile": {"clearance_level": 0}},
+            json={"id": "00u-new-sales", "profile": {"clearance_level": 0}},
         )
         mocked_get = AsyncMock(return_value=response)
 
@@ -31,12 +31,29 @@ class OktaRoleResolverTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(kwargs["headers"]["Authorization"], "SSWS secret-token")
 
+    async def test_resolve_identity_returns_immutable_okta_user_id(self):
+        request = httpx.Request("GET", "https://example.okta.com/api/v1/users/mike@example.com")
+        response = httpx.Response(
+            200,
+            request=request,
+            json={"id": "00u-manager", "profile": {"clearance_level": 1}},
+        )
+
+        with patch("httpx.AsyncClient.get", AsyncMock(return_value=response)):
+            identity = await OktaRoleResolver(
+                "https://example.okta.com",
+                "secret-token",
+            ).resolve_identity("mike@example.com")
+
+        self.assertEqual(identity.user_id, "00u-manager")
+        self.assertEqual(identity.clearance_level, 1)
+
     async def test_any_manager_profile_resolves_to_level_one(self):
         request = httpx.Request("GET", "https://example.okta.com/api/v1/users/00u-new-manager")
         response = httpx.Response(
             200,
             request=request,
-            json={"profile": {"clearance_level": 1}},
+            json={"id": "00u-new-manager", "profile": {"clearance_level": 1}},
         )
 
         with patch("httpx.AsyncClient.get", AsyncMock(return_value=response)):

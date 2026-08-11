@@ -4,18 +4,26 @@ from pathlib import Path
 
 from services.approval_service import ApprovalService
 from services.intent import Intent, encode_justification
+from services.okta_oig_client import OIGUnavailable
 
 
 class _OIG:
     def __init__(self, raw):
         self.raw = raw
         self.create_calls = 0
+        self.create_kwargs = None
+        self.get_calls = 0
+        self.unavailable = False
 
     async def get_request(self, request_id):
+        self.get_calls += 1
+        if self.unavailable:
+            raise OIGUnavailable("rate limited")
         return self.raw
 
     async def create_request(self, **kwargs):
         self.create_calls += 1
+        self.create_kwargs = kwargs
         return {"id": "request-created"}
 
 
@@ -131,6 +139,59 @@ class ApprovalRoleTests(unittest.IsolatedAsyncioTestCase):
                     required_approver_level=2,
                 )
             self.assertEqual(oig.create_calls, 0)
+
+    async def test_request_preserves_signed_in_employee_as_oig_requester(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            oig = _OIG({})
+            service = ApprovalService(
+                oig=oig,
+                demo_store=_Store(),
+                mint_service_token=_mint_token,
+                validate_service_token=_validate_token,
+                request_type_id="request-type",
+                justification_field_id="justification-field",
+                ledger_path=Path(tmp) / "ledger.json",
+            )
+            request_id, _ = await service.create_request(
+                user_email="mike.manager@example.com",
+                requester_id="00u-manager",
+                approver_group_name="ProGear-VPs",
+                agent="inventory",
+                scope="inventory:write",
+                parsed_intent={"quantity_delta": 601, "product_name": "basketball"},
+                original_task="Add 601 basketballs to inventory",
+                required_approver_role="VP",
+                required_approver_level=2,
+            )
+            self.assertEqual(request_id, "request-created")
+            self.assertEqual(oig.create_kwargs["requester_id"], "00u-manager")
+            self.assertEqual(service.pending_request_ids(), ["request-created"])
+
+    async def test_status_cache_collapses_duplicate_oig_polls_and_serves_stale_on_429(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            oig = _OIG({"requestStatus": "OPEN", "approvals": [{"status": "PENDING"}]})
+            service = ApprovalService(
+                oig=oig,
+                demo_store=_Store(),
+                mint_service_token=_mint_token,
+                validate_service_token=_validate_token,
+                request_type_id="request-type",
+                justification_field_id="justification-field",
+                ledger_path=Path(tmp) / "ledger.json",
+                status_cache_ttl_seconds=60,
+            )
+            first = await service.execute_if_approved("request-pending")
+            second = await service.execute_if_approved("request-pending")
+            self.assertEqual(first.status, "pending")
+            self.assertEqual(second.status, "pending")
+            self.assertEqual(oig.get_calls, 1)
+
+            service._status_cache_ttl = 0
+            oig.unavailable = True
+            stale = await service.execute_if_approved("request-pending")
+            self.assertEqual(stale.status, "pending")
+            self.assertTrue(stale.poll_error)
+            self.assertEqual(oig.get_calls, 2)
 
 
 if __name__ == "__main__":
