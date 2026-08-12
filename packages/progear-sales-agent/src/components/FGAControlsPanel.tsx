@@ -145,7 +145,7 @@ export default function FGAControlsPanel({ onApplied }: Props) {
               <p className="mt-1 max-w-xl text-xs leading-relaxed text-slate-600 dark:text-slate-300">
                 Turn this on for the role, quantity threshold, and VP approval demo. It also reveals the guided FGA prompts on the chat page.
                 <span className="mt-1 block font-medium text-purple-700 dark:text-purple-300">
-                  Other engineers using the same account are not affected. Signing out turns the simulation off.
+                  Other engineers using the same account are not affected. Closing this tab ends this demo session.
                 </span>
                 <span className="mt-1 block text-slate-500 dark:text-slate-400">
                   Production uses the live Okta profile. These controls overlay only the hosted demo decision; signed tokens still show the live Okta claims.

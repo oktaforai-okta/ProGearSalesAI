@@ -319,7 +319,11 @@ async def chat(
         ).resolve_identity(role_identifier or "")
         clearance_level = resolved_user.clearance_level
     except (KeyError, httpx.HTTPError, ValueError) as exc:
-        logger.error("Live Okta authorization-context lookup failed: %s", exc)
+        logger.error(
+            "Live Okta authorization-context lookup failed (%s): %r",
+            type(exc).__name__,
+            exc,
+        )
         raise HTTPException(
             status_code=503,
             detail=(

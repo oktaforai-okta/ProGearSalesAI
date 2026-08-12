@@ -114,6 +114,77 @@ class OktaRoleResolverTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(identity.is_a_manager)
         self.assertFalse(identity.is_on_vacation)
 
+    async def test_transient_timeout_is_retried(self):
+        request = httpx.Request("GET", "https://example.okta.com/api/v1/users/00u-retry")
+        response = httpx.Response(
+            200,
+            request=request,
+            json={"id": "00u-retry", "profile": {"clearance_level": 1}},
+        )
+        mocked_get = AsyncMock(
+            side_effect=[
+                httpx.ReadTimeout("temporary timeout", request=request),
+                response,
+            ]
+        )
+
+        with (
+            patch("httpx.AsyncClient.get", mocked_get),
+            patch("services.okta_role_resolver.asyncio.sleep", AsyncMock()) as mocked_sleep,
+        ):
+            identity = await OktaRoleResolver(
+                "https://example.okta.com",
+                "secret-token",
+            ).resolve_identity("00u-retry")
+
+        self.assertEqual(identity.clearance_level, 1)
+        self.assertEqual(mocked_get.await_count, 2)
+        mocked_sleep.assert_awaited_once_with(0.25)
+
+    async def test_rate_limit_is_retried_using_retry_after(self):
+        request = httpx.Request("GET", "https://example.okta.com/api/v1/users/00u-rate")
+        rate_limited = httpx.Response(
+            429,
+            request=request,
+            headers={"Retry-After": "0.1"},
+        )
+        response = httpx.Response(
+            200,
+            request=request,
+            json={"id": "00u-rate", "profile": {"clearance_level": 0}},
+        )
+
+        with (
+            patch("httpx.AsyncClient.get", AsyncMock(side_effect=[rate_limited, response])) as mocked_get,
+            patch("services.okta_role_resolver.asyncio.sleep", AsyncMock()) as mocked_sleep,
+        ):
+            identity = await OktaRoleResolver(
+                "https://example.okta.com",
+                "secret-token",
+            ).resolve_identity("00u-rate")
+
+        self.assertEqual(identity.clearance_level, 0)
+        self.assertEqual(mocked_get.await_count, 2)
+        mocked_sleep.assert_awaited_once_with(0.1)
+
+    async def test_non_retryable_profile_error_fails_closed_immediately(self):
+        request = httpx.Request("GET", "https://example.okta.com/api/v1/users/00u-forbidden")
+        forbidden = httpx.Response(403, request=request)
+        mocked_get = AsyncMock(return_value=forbidden)
+
+        with (
+            patch("httpx.AsyncClient.get", mocked_get),
+            patch("services.okta_role_resolver.asyncio.sleep", AsyncMock()) as mocked_sleep,
+        ):
+            with self.assertRaises(httpx.HTTPStatusError):
+                await OktaRoleResolver(
+                    "https://example.okta.com",
+                    "secret-token",
+                ).resolve_identity("00u-forbidden")
+
+        mocked_get.assert_awaited_once()
+        mocked_sleep.assert_not_awaited()
+
 
 if __name__ == "__main__":
     unittest.main()

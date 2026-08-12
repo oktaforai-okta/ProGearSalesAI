@@ -135,6 +135,29 @@ class _Store:
         }
 
 
+class _ReadStore:
+    def get_inventory_by_category(self, category):
+        if category != "Basketballs":
+            return {}
+        return {
+            "BALL-001": {
+                "name": "Pro Game Basketball",
+                "category": "Basketballs",
+                "quantity": 100,
+                "status": "good",
+            },
+            "BALL-002": {
+                "name": "Youth Basketball",
+                "category": "Basketballs",
+                "quantity": 50,
+                "status": "good",
+            },
+        }
+
+    def search_inventory(self, _query):
+        raise AssertionError("plain basketball reads must use the exact category")
+
+
 class InventoryWriteEnforcementTests(unittest.IsolatedAsyncioTestCase):
     def agent(self):
         agent = InventoryAgent.__new__(InventoryAgent)
@@ -185,6 +208,19 @@ class InventoryWriteEnforcementTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertTrue(result["success"])
         self.assertEqual(store.calls, 1)
+
+    async def test_basketball_read_is_exact_and_does_not_call_an_llm(self):
+        with patch("agents.inventory_agent.demo_store", _ReadStore()):
+            result = await self.agent().process(
+                "How many basketballs are in stock?",
+                context={"scopes": ["inventory:read"]},
+            )
+
+        self.assertTrue(result["success"])
+        self.assertTrue(result["response_is_final"])
+        self.assertIn("**150 basketballs in stock across 2 products**", result["result"])
+        self.assertIn("| Pro Game Basketball | BALL-001 | 100 |", result["result"])
+        self.assertIn("| Youth Basketball | BALL-002 | 50 |", result["result"])
 
 
 if __name__ == "__main__":

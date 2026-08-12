@@ -115,17 +115,23 @@ When processing inventory updates, confirm the action clearly."""
                 "success": not data.startswith("INVENTORY UPDATE FAILED") and data != "Product not found for update",
                 "error": None if data.startswith("INVENTORY UPDATE SUCCESSFUL") else data,
                 "scopes": scopes,
+                "response_is_final": True,
             }
 
-        # Augment the task with data
-        augmented_task = f"""{task}
-
-Available data and action result:
-{data}
-
-Provide a helpful response using this data."""
-
-        return await super().process(augmented_task, context)
+        # Inventory is structured business data. Return the exact store answer
+        # instead of passing it through one LLM here and another in the
+        # orchestrator; those extra hops previously produced conflicting
+        # product counts and totals for identical questions.
+        return {
+            "agent": self.agent_type,
+            "agent_name": self.agent_name,
+            "color": self.color,
+            "result": data,
+            "success": True,
+            "error": None,
+            "scopes": scopes,
+            "response_is_final": True,
+        }
 
     def _get_data(self, task: str, scopes: list = None) -> str:
         """Get data from demo_store based on the task and scopes."""
@@ -219,15 +225,28 @@ Provide a helpful response using this data."""
             search_term = "basketball"
 
         if search_term:
-            results = demo_store.search_inventory(search_term)
+            # "Basketballs" is a real product category. A broad substring
+            # search also matches basketball shoes, hoops, and accessories,
+            # which made a plain stock question report an inflated total.
+            if search_term == "basketball":
+                category_items = demo_store.get_inventory_by_category("Basketballs")
+                results = [
+                    {**item, "sku": sku}
+                    for sku, item in category_items.items()
+                ]
+            else:
+                results = demo_store.search_inventory(search_term)
             if results:
-                lines = [f"Found {len(results)} products matching '{search_term}':\n"]
-                for item in results[:10]:
-                    status_icon = "LOW" if item['status'] == 'low' else "GOOD"
-                    lines.append(f"- {item['name']}: {item['quantity']:,} units - {status_icon}")
-
                 total_qty = sum(item['quantity'] for item in results)
-                lines.append(f"\nTotal {search_term} inventory: {total_qty:,} units")
+                noun = "basketballs" if search_term == "basketball" else f"items matching “{search_term}”"
+                lines = [
+                    f"ProGear currently has **{total_qty:,} {noun} in stock across {len(results)} products**.",
+                    "",
+                    "| Product | SKU | Units in stock |",
+                    "|---|---|---:|",
+                ]
+                for item in results:
+                    lines.append(f"| {item['name']} | {item['sku']} | {item['quantity']:,} |")
                 return "\n".join(lines)
 
         # Default: show summary

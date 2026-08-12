@@ -2,20 +2,13 @@
 
 import { signIn } from 'next-auth/react';
 import { useSearchParams } from 'next/navigation';
-import { Suspense, useEffect } from 'react';
+import { Suspense } from 'react';
 import { ThemeSelector } from '@/components/ThemeProvider';
-import { clearFGASimulationPreference } from '@/hooks/useFGASimulation';
 
 function SignInContent() {
   const searchParams = useSearchParams();
   const callbackUrl = searchParams?.get('callbackUrl') || '/';
   const error = searchParams?.get('error');
-
-  // Also clear stale state after session expiry or an older deployment's
-  // logout, so every unauthenticated entry starts in simple demo mode.
-  useEffect(() => {
-    clearFGASimulationPreference();
-  }, []);
 
   const handleSignIn = () => {
     signIn('okta', { callbackUrl });

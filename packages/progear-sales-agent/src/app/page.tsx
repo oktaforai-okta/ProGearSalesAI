@@ -10,11 +10,7 @@ import remarkGfm from 'remark-gfm';
 import { type ApprovalStatus } from '@/components/ApprovalStatusCard';
 import { ThemeSelector } from '@/components/ThemeProvider';
 import { API_BASE_URL, OKTA_DOMAIN } from '@/lib/config';
-import {
-  clearFGASimulationPreference,
-  getOrCreateFGADemoSessionId,
-  useFGASimulation,
-} from '@/hooks/useFGASimulation';
+import { getOrCreateFGADemoSessionId, useFGASimulation } from '@/hooks/useFGASimulation';
 
 interface Message {
   id: string;
@@ -317,10 +313,6 @@ export default function Home() {
   const handleSignOut = async () => {
     // Get the idToken BEFORE signing out (session will be cleared after signOut)
     const idToken = session?.idToken;
-
-    // Simulation is presentation state, not an authorization grant. Never let
-    // one employee's demo choice carry into the next signed-in session.
-    clearFGASimulationPreference();
 
     // Clear the NextAuth session
     await signOut({ redirect: false });

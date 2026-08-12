@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 
 import httpx
@@ -52,17 +53,44 @@ class OktaRoleResolver:
                 is_a_manager=False,
                 is_on_vacation=False,
             )
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(
-                f"{self._base_url}/api/v1/users/{identifier}",
-                headers={
-                    "Authorization": f"SSWS {self._api_token}",
-                    "Accept": "application/json",
-                },
-            )
-            response.raise_for_status()
-            user = response.json()
-            profile = user.get("profile") or {}
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(5.0, connect=3.0),
+        ) as client:
+            for attempt in range(3):
+                try:
+                    response = await client.get(
+                        f"{self._base_url}/api/v1/users/{identifier}",
+                        headers={
+                            "Authorization": f"SSWS {self._api_token}",
+                            "Accept": "application/json",
+                        },
+                    )
+                    response.raise_for_status()
+                    user = response.json()
+                    profile = user.get("profile") or {}
+                    break
+                except httpx.HTTPError as exc:
+                    status = (
+                        exc.response.status_code
+                        if isinstance(exc, httpx.HTTPStatusError)
+                        else None
+                    )
+                    retryable = (
+                        isinstance(exc, httpx.TransportError)
+                        or status == 429
+                        or (status is not None and status >= 500)
+                    )
+                    if not retryable or attempt == 2:
+                        raise
+
+                    retry_after = None
+                    if isinstance(exc, httpx.HTTPStatusError):
+                        retry_after = exc.response.headers.get("Retry-After")
+                    try:
+                        delay = min(float(retry_after), 2.0) if retry_after else 0.25 * (2 ** attempt)
+                    except ValueError:
+                        delay = 0.25 * (2 ** attempt)
+                    await asyncio.sleep(delay)
         clearance_level = normalize_role_level(profile.get("clearance_level"))
         return ResolvedOktaUser(
             user_id=str(user.get("id") or ""),

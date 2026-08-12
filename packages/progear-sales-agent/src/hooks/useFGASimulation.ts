@@ -7,6 +7,9 @@ const SESSION_ID_KEY = 'progear-fga-demo-session-v1';
 const CHANGE_EVENT = 'progear:fga-simulation-change';
 let volatileSessionId: string | null = null;
 
+// This is intentionally sessionStorage, not a cookie or localStorage. The
+// preference survives navigation, refresh, and sign-out in this tab without
+// becoming shared browser-wide state for other demo engineers.
 export function getOrCreateFGADemoSessionId(): string {
   if (typeof window === 'undefined') return '';
   try {
@@ -23,18 +26,6 @@ export function getOrCreateFGADemoSessionId(): string {
     }
     return volatileSessionId;
   }
-}
-
-export function clearFGASimulationPreference() {
-  if (typeof window === 'undefined') return;
-  try {
-    window.sessionStorage.removeItem(STORAGE_KEY);
-    window.sessionStorage.removeItem(SESSION_ID_KEY);
-  } catch {
-    // A fresh sign-in still defaults to simple mode when storage is unavailable.
-  }
-  volatileSessionId = null;
-  window.dispatchEvent(new Event(CHANGE_EVENT));
 }
 
 function readSimulationPreference(): boolean {

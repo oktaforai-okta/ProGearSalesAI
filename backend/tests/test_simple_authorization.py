@@ -74,6 +74,29 @@ class SimpleAuthorizationTests(unittest.TestCase):
 
 
 class SimpleAuthorizationWorkflowTests(unittest.IsolatedAsyncioTestCase):
+    async def test_exact_resource_response_skips_llm_synthesis(self):
+        orchestrator = Orchestrator.__new__(Orchestrator)
+        exact_response = "ProGear currently has **150 basketballs in stock across 2 products**."
+        state = {
+            "user_message": "How many basketballs are in stock?",
+            "agent_results": {
+                AGENT_INVENTORY: {
+                    "success": True,
+                    "response": exact_response,
+                    "response_is_final": True,
+                    "agent_info": {"name": "Inventory"},
+                }
+            },
+            "agent_flow": [],
+            "fga_checks": [],
+            "pending_approval": None,
+            "delegation_denial_reason": None,
+        }
+
+        result = await orchestrator._generate_response_node(state)
+
+        self.assertEqual(result["final_response"], exact_response)
+
     async def test_vacation_stops_inventory_read_before_exchange(self):
         orchestrator, state = make_workflow_state(
             1,

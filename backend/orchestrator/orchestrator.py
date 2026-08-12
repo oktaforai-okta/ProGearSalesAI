@@ -191,8 +191,10 @@ class Orchestrator:
         # Get multi-agent token exchange manager
         self.token_exchange = get_multi_agent_exchange()
 
-        # Initialize Anthropic client (raw SDK for better control)
-        self.anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        # Keep all model I/O non-blocking. This orchestrator runs inside an
+        # async web request, so the synchronous SDK can starve concurrent Okta
+        # profile requests and cause false authorization-context timeouts.
+        self.anthropic_client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
         logger.info(f"Anthropic client initialized with model: {LLM_MODEL_NAME}")
 
         # Build the workflow
@@ -445,7 +447,7 @@ IMPORTANT: Choose scopes based on the operation type:
 Return ONLY the JSON object, no other text."""
 
             # Use raw Anthropic SDK for routing
-            response = self.anthropic_client.messages.create(
+            response = await self.anthropic_client.messages.create(
                 model=LLM_MODEL_NAME,
                 max_tokens=500,
                 messages=[{"role": "user", "content": routing_prompt}]
@@ -1193,6 +1195,10 @@ Return ONLY the JSON object, no other text."""
                     continue
 
                 agent_results[agent_type]["response"] = agent_outcome["response"]
+                agent_results[agent_type]["response_is_final"] = agent_outcome.get(
+                    "response_is_final",
+                    False,
+                )
                 if decision:
                     decision["outcome"] = "executed"
 
@@ -1279,9 +1285,15 @@ Return ONLY the JSON object, no other text."""
             )
 
             if result.get("success"):
+                response_is_final = bool(result.get("response_is_final"))
                 return {
                     "success": True,
-                    "response": f"[{agent_name}]\n{result['result']}\n(Scopes: {', '.join(scopes)})",
+                    "response": (
+                        result["result"]
+                        if response_is_final
+                        else f"[{agent_name}]\n{result['result']}\n(Scopes: {', '.join(scopes)})"
+                    ),
+                    "response_is_final": response_is_final,
                 }
             else:
                 if agent_type == AGENT_INVENTORY and "inventory:write" in scopes:
@@ -1466,12 +1478,15 @@ Return ONLY the JSON object, no other text."""
         # made real backend/Okta failures look like the AI misunderstanding the
         # prompt.
         responses = []
+        final_responses = []
         denied_requests = []
         system_error_agents = []
 
         for agent_type, result in agent_results.items():
             if result["success"] and "response" in result:
                 responses.append(result["response"])
+                if result.get("response_is_final"):
+                    final_responses.append(result["response"])
             elif result.get("access_denied"):
                 denied_requests.append({
                     "agent_type": agent_type,
@@ -1508,9 +1523,14 @@ Return ONLY the JSON object, no other text."""
 
         # Generate combined response
         if responses:
-            # Use LLM to create natural combined response
             combined_data = "\n\n".join(responses)
-            synthesis_prompt = f"""Based on the following agent responses, provide a helpful, natural answer
+            if len(final_responses) == len(responses):
+                # Structured resource operations already produced the exact
+                # user-facing answer. Preserve it byte-for-byte so an LLM
+                # cannot change counts or imply a write that did not occur.
+                final_response = combined_data
+            else:
+                synthesis_prompt = f"""Based on the following agent responses, provide a helpful, natural answer
 to the user's question: "{state['user_message']}"
 
 Agent responses:
@@ -1521,18 +1541,18 @@ Agent responses:
 Provide a concise, helpful response that combines the available information. Do not mention
 internal agents, MCP servers, policy names, or permission errors; permission guidance is added separately."""
 
-            try:
-                # Use raw Anthropic SDK for response synthesis
-                response = self.anthropic_client.messages.create(
-                    model=LLM_MODEL_NAME,
-                    max_tokens=1024,
-                    system="You are a helpful AI assistant for ProGear Sporting Goods.",
-                    messages=[{"role": "user", "content": synthesis_prompt}]
-                )
-                final_response = response.content[0].text
-            except Exception as e:
-                logger.error(f"Response synthesis failed: {e}")
-                final_response = combined_data
+                try:
+                    # Use raw async Anthropic SDK for response synthesis.
+                    response = await self.anthropic_client.messages.create(
+                        model=LLM_MODEL_NAME,
+                        max_tokens=1024,
+                        system="You are a helpful AI assistant for ProGear Sporting Goods.",
+                        messages=[{"role": "user", "content": synthesis_prompt}]
+                    )
+                    final_response = response.content[0].text
+                except Exception as e:
+                    logger.error(f"Response synthesis failed: {e}")
+                    final_response = combined_data
 
             if denied_requests:
                 final_response += f"\n\n{permission_message}"
