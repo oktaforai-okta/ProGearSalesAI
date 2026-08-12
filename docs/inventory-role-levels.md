@@ -5,7 +5,7 @@
 | Okta value | Role | Manager | Read inventory | Write 1–600 units | Write 601+ units |
 |---:|---|---|---|---|---|
 | 0 | Sales | False | Execute | Deny; contact manager | Deny; contact manager |
-| 1 | Manager | True | Execute | Execute | VP approval with FGA on; deny in simple mode |
+| 1 | Manager | True | Execute | Execute | Execute with FGA off; VP approval with FGA on |
 | 2 | VP | True | Execute | Execute | Execute |
 
 The table assumes **On vacation = False**. When **On vacation = True**, the agent stops before ID-JAG for every role, resource, read, and write. This contains delegated access when an employee is away or their credentials may have been exposed. It does not change the employee's job role.
@@ -18,11 +18,11 @@ Those names are demo personas, not application rules. The backend looks up the a
 
 1. Okta authenticates the employee; the backend reads `clearance_level`, `is_a_manager`, and `is_on_vacation` from the live Okta profile.
 2. If vacation is true, delegation stops globally. The verified sign-in remains visible, but no ID-JAG or resource token is requested.
-3. Otherwise, a known-ineligible inventory write stops immediately. Sarah is told to contact her manager; in simple mode Mike is told to contact a VP for 601+ units. No ID-JAG is requested for that stopped domain.
+3. Otherwise, a known-ineligible inventory write stops immediately. Sarah is told to contact her manager, and no ID-JAG is requested for that stopped domain. Eligible Manager and VP writes continue regardless of quantity when FGA is off.
 4. For a request allowed to continue, ID-JAG carries the employee + agent delegation to the Inventory Authorization Server.
 5. The server issues a coarse, scoped Inventory token and signs the live `Clearance`, `Manager`, and `Vacation` profile claims into it.
 6. Inventory independently validates the token signature, issuer, audience, expiry, agent identity, delegated employee, and required scope.
-7. Simple mode executes only a direct allow. Production FGA maps the validated `Clearance` value to one contextual relationship—`role_sales`, `role_manager`, or `role_vp`—and combines it with the requested quantity. The hosted presentation never substitutes a different role: Sarah remains Sales, Mike remains Manager, and Joe remains VP.
+7. Simple mode executes a valid positive-quantity write when the resource token contains `inventory:write`; it does not apply the 600/601 boundary. Production FGA maps the validated `Clearance` value to one contextual relationship—`role_sales`, `role_manager`, or `role_vp`—and combines it with the requested quantity. The hosted presentation never substitutes a different role: Sarah remains Sales, Mike remains Manager, and Joe remains VP.
 8. The resource mutates inventory only when the final decision is `allow`. Before creating a VP request, the backend proves that it can mint and validate the real execution token; a broken execution path cannot create a theatrical approval card.
 9. A Manager request above 600 is left unchanged while the VP OIG request is pending. The approver sees only the requester, requested change, 600-unit threshold reason, required VP level, and governed-agent label; internal execution JSON is not shown in the request card. After approval, the backend loads the exact intent from its ledger, verifies that the approver currently has Level 2 in Okta, mints and validates a fresh scoped Okta service token for the approval executor, and performs the write once using the request ID as an idempotency key. Older open requests with embedded intent remain compatible.
 
@@ -42,7 +42,7 @@ Token issuance is necessary, not sufficient—but a token is not requested when 
 - A separate five-minute `client_credentials` rule permits only the dedicated ProGear Approval Executor service client to execute an already-approved inventory write. The application preflights and validates that token before it creates the OIG request; the AI Agent workload principal continues to handle delegated user exchanges.
 - The MCP Bridge uses a separate authorization server named **MCP Bridge - ProGear Inventory Write MCP**. It exposes only `inventory:write` and has Manager and VP rules; Sales has no matching write rule.
 
-The demo starts with **Simulate FGA** off. That browser-tab preference shows two everyday examples and hides the advanced controls. A random ID in `sessionStorage` isolates the preference and vacation demonstration to that tab. Refreshing or signing out preserves the choice; closing the tab ends the browser session, and a fresh tab starts in simple mode. In simple mode, Sales writes and Manager writes above 600 are denied; no OIG request is created. Enabling FGA reveals the Read, 1–600, and 601+ prompt tiers and allows the one escalation path from Manager to VP. The role and Manager values are read-only reflections of the live Okta profile. The On vacation True/False control demonstrates the global delegation stop, and Reset restores only that session's starting vacation value.
+The demo starts with **Simulate FGA** off. That browser-tab preference shows two everyday examples and hides the advanced controls. A random ID in `sessionStorage` isolates the preference and vacation demonstration to that tab. Refreshing or signing out preserves the choice; closing the tab ends the browser session, and a fresh tab starts in simple mode. In simple mode, Sales writes are denied, while Manager and VP writes with a validated `inventory:write` token may execute any positive quantity; no OIG request is created. Enabling FGA reveals the Read, 1–600, and 601+ prompt tiers and adds the one escalation path from Manager to VP. The role and Manager values are read-only reflections of the live Okta profile. The On vacation True/False control demonstrates the global delegation stop, and Reset restores only that session's starting vacation value.
 
 The vacation control is intentionally demo-only and never mutates the live Okta profile. The backend keys it by authenticated employee plus browser tab, so two engineers using the same persona do not share state. Role and Manager are never toggleable. In production, keep role, Manager, and vacation attributes administrator- or lifecycle-managed so an employee session—and therefore stolen employee credentials—cannot clear the containment signal.
 

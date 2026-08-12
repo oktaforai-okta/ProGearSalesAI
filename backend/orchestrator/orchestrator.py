@@ -261,11 +261,10 @@ class Orchestrator:
 
         Vacation is a global delegation stop: no selected domain may request
         an ID-JAG while the employee is marked away. Otherwise, Sales writes
-        are always denied here. In simple mode, Manager writes
-        above 600 units also stop here. In FGA mode those Manager requests are
-        allowed to continue because the later FGA/OIG path can request VP
-        approval. No ID-JAG or resource token is requested for a stopped
-        domain.
+        are always denied here. Eligible Manager and VP writes continue in
+        coarse mode regardless of quantity; when FGA is enabled, the later
+        FGA/OIG path applies the 600/601 boundary. No ID-JAG or resource token
+        is requested for a stopped domain.
         """
         agents = list(state.get("agents_to_invoke", []))
         if self.user_info.get("is_on_vacation") is True:
@@ -329,9 +328,7 @@ class Orchestrator:
             self.user_info.get("clearance_level", self.user_info.get("Clearance"))
         )
         policy = decide_inventory_policy(scopes, state["user_message"], clearance_level)
-        should_stop = bool(policy.hard_denial_reason) or (
-            not state.get("simulate_fga", False) and not policy.direct_allowed
-        )
+        should_stop = not policy.coarse_allowed
         if not should_stop:
             return state
 
@@ -730,12 +727,12 @@ Return ONLY the JSON object, no other text."""
         return state
 
     async def _simple_authorization_node(self, state: WorkflowState) -> WorkflowState:
-        """Apply the safe Sarah/Mike policy without calling FGA or OIG.
+        """Apply coarse Okta scope authorization without calling FGA or OIG.
 
-        Simple mode is intentionally at least as restrictive as FGA mode: a
-        role that cannot execute directly is denied instead of being routed
-        to approval. The decision comes from the validated Okta-signed role
-        claim, so a browser flag can never grant extra write permission.
+        Sales remains read-only because Okta cannot issue ``inventory:write``
+        for that role and the pre-exchange guard fails it closed. A validated
+        Manager or VP ``inventory:write`` token permits any positive quantity
+        in this mode. The 600/601 boundary exists only in the opt-in FGA path.
         """
         agents = state["agents_to_invoke"]
         agent_results = state.get("agent_results", {})
@@ -775,14 +772,15 @@ Return ONLY the JSON object, no other text."""
                 state["user_message"],
                 clearance_level,
             )
-            if policy.direct_allowed:
+            coarse_allowed = policy.coarse_allowed
+            if coarse_allowed:
                 allowed_agents.append(agent_type)
                 message = None
             else:
                 denied_count += 1
                 message = simple_authorization_message(policy)
                 if message is None:
-                    # direct_allowed above makes this unreachable; keep the guard
+                    # coarse_allowed above makes this unreachable; keep the guard
                     # so a future policy change cannot accidentally grant access.
                     message = "I can’t complete that request with your current permissions."
                 result["success"] = False
@@ -798,14 +796,15 @@ Return ONLY the JSON object, no other text."""
                 "quantity": policy.quantity,
                 "role_level": clearance_level,
                 "role_name": role_name(clearance_level),
-                "required_level": policy.required_level,
-                "required_role": policy.required_role,
-                "relation": policy.relation,
-                "decision": "allow" if policy.direct_allowed else "deny",
-                "outcome": "authorized" if policy.direct_allowed else "blocked",
+                "required_level": 1 if policy.operation == "write" else 0,
+                "required_role": "Manager" if policy.operation == "write" else "Sales",
+                "relation": f"has_inventory_{policy.operation}_scope",
+                "decision": "allow" if coarse_allowed else "deny",
+                "outcome": "authorized" if coarse_allowed else "blocked",
                 "reason": (
-                    f"{role_name(clearance_level)} satisfies the direct-execution rule."
-                    if policy.direct_allowed
+                    f"The validated inventory:{policy.operation} scope permits this action; "
+                    "FGA quantity checks are off."
+                    if coarse_allowed
                     else message
                 ),
                 "token_issued": bool(inventory_result.get("access_token")),

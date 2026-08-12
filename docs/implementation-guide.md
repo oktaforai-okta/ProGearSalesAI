@@ -435,7 +435,7 @@ For Inventory, `clearance_level` is the authoritative role source. `is_a_manager
 | Value | Role | Manager | Write 1–600 units | Write 601+ units |
 |---:|---|---|---|---|
 | 0 | Sales | False | Deny; contact manager | Deny; contact manager |
-| 1 | Manager | True | Direct | VP approval with FGA enabled |
+| 1 | Manager | True | Direct | Direct with FGA off; VP approval with FGA enabled |
 | 2 | VP | True | Direct | Direct |
 
 1. Add a user-profile property named `clearance_level` and label it **Clearance level**. Its description should state `0 = Sales, 1 = Manager, 2 = VP`.
@@ -1508,7 +1508,7 @@ Use this checklist to verify your deployment is complete:
 - [ ] Mike's request can obtain Inventory scopes only
 - [ ] Frank's request can obtain Pricing scopes only
 - [ ] Sarah read succeeds; every write is denied without creating a request
-- [ ] Mike writes through 600 directly; 601+ requests VP
+- [ ] With FGA off, Mike writes any positive quantity; with FGA on, he writes through 600 directly and 601+ requests VP
 - [ ] VP writes any quantity directly
 - [ ] Okta System Log shows the single agent identity, user, resource, scope, and outcome for token exchange events
 

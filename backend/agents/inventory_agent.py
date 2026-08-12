@@ -5,11 +5,11 @@ Registered as a first-class identity in Okta.
 Uses raw Anthropic SDK for LLM calls.
 Uses demo_store for actual data operations.
 
-IMPORTANT: This agent has FGA (Fine-Grained Authorization) integration.
+IMPORTANT: This agent has optional FGA (Fine-Grained Authorization) integration.
 - Role level is supplied to FGA as a contextual tuple
 - Sales is read-only and never creates an approval request
-- Managers execute 1-600; VPs execute any quantity
-- Manager writes above 600 route to VP approval
+- With FGA on, Managers execute 1-600 and writes above 600 route to VP approval
+- With FGA off, a validated Manager or VP inventory:write scope permits any positive quantity
 """
 
 from typing import Dict, Any, Optional
@@ -60,10 +60,12 @@ IMPORTANT SECURITY CONTEXT:
 You are operating with Okta AI Agent governance:
 - Your identity is registered in Okta's AI Agent Directory
 - Your access is controlled by scopes: inventory:read, inventory:write
-- WRITE operations are additionally protected by FGA (Fine-Grained Authorization)
+- WRITE operations can be additionally protected by FGA (Fine-Grained Authorization)
 - FGA maps Okta clearance_level to Sales (0), Manager (1), or VP (2)
-- Sales is read-only; Managers may write 1-600 units
-- Manager writes of 601+ require VP approval; VPs may write any quantity
+- Sales is always read-only
+- With FGA enabled, Managers may write 1-600 units and 601+ requires VP approval
+- With FGA off, a validated Manager or VP inventory:write scope permits any positive quantity
+- VPs may write any quantity in either mode
 - All your actions are audited through Okta
 
 When processing inventory updates, confirm the action clearly."""

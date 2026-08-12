@@ -177,9 +177,8 @@ class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
     history: Optional[List[ChatMessage]] = []
-    # False is the deliberately simple Sarah/Mike experience. True enables
-    # hosted FGA checks and OIG approval routing; it never weakens a direct
-    # role requirement because simple mode denies instead of routing upward.
+    # False is the coarse Okta-scope experience. True adds hosted FGA quantity
+    # checks and OIG approval routing; it never grants a scope Okta denied.
     simulate_fga: bool = False
     # Opaque id generated in browser sessionStorage. It selects an isolated,
     # server-side FGA demo context and is ignored when simulation is off.

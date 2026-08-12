@@ -65,6 +65,7 @@ class InventoryPolicyTests(unittest.TestCase):
         self.assertEqual(decision.approval_role, "VP")
         self.assertEqual(decision.approval_level, 2)
         self.assertFalse(decision.direct_allowed)
+        self.assertTrue(decision.coarse_allowed)
 
     def test_sales_large_write_is_denied_without_request(self):
         decision = decide_inventory_policy(

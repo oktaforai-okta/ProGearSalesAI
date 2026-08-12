@@ -55,20 +55,20 @@ class InventoryPolicyDecision:
 
     @property
     def direct_allowed(self) -> bool:
-        """Whether the signed role/context can execute without FGA/OIG routing."""
+        """Whether FGA can execute directly without OIG approval routing."""
         return self.hard_denial_reason is None and not self.approval_required
+
+    @property
+    def coarse_allowed(self) -> bool:
+        """Whether the request may execute when only coarse Okta access is active."""
+        return self.hard_denial_reason is None
 
 
 def simple_authorization_message(decision: InventoryPolicyDecision) -> str | None:
-    """Return the simple-mode denial, or None when direct execution is safe."""
-    if decision.direct_allowed:
+    """Return a coarse-mode denial, or None when the scoped request may run."""
+    if decision.coarse_allowed:
         return None
-    if decision.hard_denial_reason:
-        return f"I didn’t change the inventory. {decision.hard_denial_reason}"
-    return (
-        "I didn’t change the inventory. This quantity requires VP permission. "
-        "Please contact a VP for assistance."
-    )
+    return f"I didn’t change the inventory. {decision.hard_denial_reason}"
 
 
 def decide_inventory_policy(

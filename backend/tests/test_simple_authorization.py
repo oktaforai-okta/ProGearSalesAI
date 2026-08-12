@@ -73,10 +73,11 @@ class SimpleAuthorizationTests(unittest.TestCase):
         self.assertTrue(decision.direct_allowed)
         self.assertIsNone(simple_authorization_message(decision))
 
-    def test_manager_large_write_is_denied_not_bypassed(self):
+    def test_manager_large_write_is_coarse_allowed_but_not_fga_direct(self):
         decision = self.decide(1, "Add 601 basketballs to inventory", "inventory:write")
         self.assertFalse(decision.direct_allowed)
-        self.assertIn("requires VP permission", simple_authorization_message(decision) or "")
+        self.assertTrue(decision.coarse_allowed)
+        self.assertIsNone(simple_authorization_message(decision))
 
     def test_vp_large_write_is_direct(self):
         decision = self.decide(2, "Add 601 basketballs to inventory", "inventory:write")
@@ -232,18 +233,18 @@ class SimpleAuthorizationWorkflowTests(unittest.IsolatedAsyncioTestCase):
             "Please contact your manager to make the change.",
         )
 
-    async def test_manager_large_write_stops_before_exchange_in_simple_mode(self):
+    async def test_manager_large_write_continues_to_exchange_in_simple_mode(self):
         orchestrator, state = make_workflow_state(
             1,
-            "Add 605 basketballs to inventory",
+            "Can you increase to 6000 basketballs.",
             "inventory:write",
         )
         state["agent_results"] = {}
         state = await orchestrator._pre_exchange_guard_node(state)
 
-        self.assertEqual(state["agents_to_invoke"], [])
+        self.assertEqual(state["agents_to_invoke"], [AGENT_INVENTORY])
         self.assertEqual(state["token_exchanges"], [])
-        self.assertIn("requires VP permission", state["authorization_decisions"][0]["reason"])
+        self.assertEqual(state["authorization_decisions"], [])
 
     async def test_manager_large_write_continues_to_fga_approval_path(self):
         orchestrator, state = make_workflow_state(
@@ -293,17 +294,28 @@ class SimpleAuthorizationWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state["agents_to_invoke"], [AGENT_INVENTORY])
         self.assertFalse(state["agent_results"][AGENT_INVENTORY]["access_denied"])
 
-    async def test_manager_large_write_cannot_bypass_vp_boundary(self):
+    async def test_manager_large_write_executes_with_coarse_scope_when_fga_is_off(self):
         orchestrator, state = make_workflow_state(
             1,
-            "Add 601 basketballs to inventory",
+            "Can you increase to 6000 basketballs.",
             "inventory:write",
         )
+        state["agent_results"][AGENT_INVENTORY].update({
+            "resource_token_validated": True,
+            "access_token": "signed-resource-token",
+            "token_claims": {"Clearance": 1},
+        })
         state = await orchestrator._simple_authorization_node(state)
-        self.assertEqual(state["agents_to_invoke"], [])
+        self.assertEqual(state["agents_to_invoke"], [AGENT_INVENTORY])
+        self.assertFalse(state["agent_results"][AGENT_INVENTORY]["access_denied"])
+        self.assertEqual(state["authorization_decisions"][0]["decision"], "allow")
+        self.assertEqual(
+            state["authorization_decisions"][0]["relation"],
+            "has_inventory_write_scope",
+        )
         self.assertIn(
-            "requires VP permission",
-            state["agent_results"][AGENT_INVENTORY]["authorization_reason"],
+            "FGA quantity checks are off",
+            state["authorization_decisions"][0]["reason"],
         )
 
     async def test_fga_uses_fixed_live_role_after_token_validation(self):

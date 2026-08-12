@@ -711,7 +711,7 @@ FGA runs on top of the Okta scope check, for the Inventory domain, only after Ok
 
 `inventory:read` maps to `can_read`. Quantity selects `can_update_standard` for 1–600 or `can_update_large` for 601+. `can_request_change` is intentionally Manager-only, so Sales can never manufacture an access request. Low-stock alerts remain reads.
 
-**Concretely:** Sarah (Level 0) may read, but every write is blocked and no request is created. Mike (Level 1) may add 50 directly, but adding 601 creates a VP request. A Level 2 VP may perform either write directly.
+**Concretely:** Sarah (Level 0) may read, but every write is blocked and no request is created. With FGA enabled, Mike (Level 1) may add 50 directly, but adding 601 creates a VP request; with FGA off, his coarse `inventory:write` scope permits either quantity directly. A Level 2 VP may perform either write directly.
 
 ### Why this is a second layer, not duplicated work
 
@@ -723,7 +723,7 @@ Okta and FGA are not answering the same question twice. Okta authenticates the e
 
 An action can have a valid token but still require a higher role before it executes. That is where Okta Identity Governance supplies the human-in-the-loop step.
 
-In this demo, **Sales writes are denied without creating an access request**. **A Manager write of 601 or more requires VP approval**. The backend creates an **Okta Identity Governance (OIG)** request with a concise human summary, keeps the exact execution intent in its approval ledger, makes no inventory change while the request is pending, and verifies the approver's current Level 2 Okta role before executing an approved change.
+In this demo, **Sales writes are denied without creating an access request**. With FGA enabled, **a Manager write of 601 or more requires VP approval**. With FGA off, a validated Manager `inventory:write` token permits any positive quantity. The backend creates an **Okta Identity Governance (OIG)** request with a concise human summary, keeps the exact execution intent in its approval ledger, makes no inventory change while the request is pending, and verifies the approver's current Level 2 Okta role before executing an approved change.
 
 ### Why add a third gate when the first two already said yes?
 
@@ -732,7 +732,7 @@ Because "is this action within policy" and "is this action a good idea right now
 - **Authorization (Okta + FGA) asks:** may this role execute this exact quantity now, or may it submit a request to the next role?
 - **Governance (the approval gate) asks:** did a currently qualified VP approve the queued Manager change?
 
-The 600/601 boundary makes the story deterministic. A Manager is trusted to execute normal inventory adjustments through 600 units. A VP must authorize a Manager's change at 601 or above. Sales cannot execute either class of write and cannot create an approval request.
+When FGA is enabled, the 600/601 boundary makes the story deterministic. A Manager is trusted to execute normal inventory adjustments through 600 units. A VP must authorize a Manager's change at 601 or above. Sales cannot execute either class of write and cannot create an approval request. When FGA is off, the boundary is not evaluated.
 
 Routing this through Okta Identity Governance, rather than a bespoke approval box bolted onto the app, matters for the same reason the rest of this document does: the request, the justification, and the approval decision all land in the same governance system that already owns your access-review and audit story, instead of creating a second, disconnected place your auditors have to go find.
 

@@ -406,7 +406,7 @@ export default function RawTokensCard({ exchanges, decisions, idTokenRaw, stopRe
                     color={exchange.color}
                     defaultOpen={false}
                     blockedReason={blocked}
-                    stageNote="Coarse resource access only. The role/quantity policy still decides whether this action may execute."
+                    stageNote="The resource validates this coarse scope. When FGA is enabled, role and quantity add the action-level decision."
                   />
                 )}
 
