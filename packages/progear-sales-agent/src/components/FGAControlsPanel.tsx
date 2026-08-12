@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import { BadgeCheck, Briefcase, Loader2, PauseCircle, Plane, PlayCircle, RotateCcw, ShieldAlert } from 'lucide-react';
 import { API_BASE_URL } from '@/lib/config';
-import { useFGASimulation } from '@/hooks/useFGASimulation';
+import { getOrCreateFGADemoSessionId, useFGASimulation } from '@/hooks/useFGASimulation';
 
 interface Props {
   onApplied?: () => void;
@@ -33,11 +33,17 @@ export default function FGAControlsPanel({ onApplied }: Props) {
   const [lastResult, setLastResult] = useState<string | null>(null);
   const idToken = session?.idToken;
 
+  const demoHeaders = useCallback((includeJson = false) => ({
+    ...(includeJson ? { 'Content-Type': 'application/json' } : {}),
+    Authorization: `Bearer ${idToken}`,
+    'X-Demo-Session-ID': getOrCreateFGADemoSessionId(),
+  }), [idToken]);
+
   const loadStatus = useCallback(async () => {
     if (!idToken || !isEnabled) return;
     try {
       const response = await fetch(`${API_BASE_URL}/api/admin/demo-status`, {
-        headers: { Authorization: `Bearer ${idToken}` },
+        headers: demoHeaders(),
       });
       if (!response.ok) return;
       const data: DemoStatus = await response.json();
@@ -46,7 +52,7 @@ export default function FGAControlsPanel({ onApplied }: Props) {
     } catch {
       // The controls remain usable after the next successful status refresh.
     }
-  }, [idToken, isEnabled]);
+  }, [demoHeaders, idToken, isEnabled]);
 
   useEffect(() => {
     if (isEnabled) {
@@ -64,7 +70,7 @@ export default function FGAControlsPanel({ onApplied }: Props) {
     try {
       const response = await fetch(`${API_BASE_URL}/api/admin/demo-toggle`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+        headers: demoHeaders(true),
         body: JSON.stringify({ attribute, value }),
       });
       const data = await response.json();
@@ -79,7 +85,7 @@ export default function FGAControlsPanel({ onApplied }: Props) {
       const message = attribute === 'clearance_level'
         ? `Role changed to Level ${data.value} — ${roleForLevel(data.value)?.name ?? 'Unknown'}. Manager is ${data.values?.is_a_manager ? 'True' : 'False'}.`
         : `On vacation is now ${data.value ? 'True' : 'False'}.`;
-      setLastResult(`${message} The next prompt uses the new Okta value.`);
+      setLastResult(`${message} The next FGA prompt in this browser session uses this value.`);
       onApplied?.();
     } catch (error) {
       setLastResult(`Error: ${error instanceof Error ? error.message : 'Update failed'}`);
@@ -95,12 +101,12 @@ export default function FGAControlsPanel({ onApplied }: Props) {
     try {
       const response = await fetch(`${API_BASE_URL}/api/admin/demo-reset`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${idToken}` },
+        headers: demoHeaders(),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || 'Reset failed');
       await loadStatus();
-      setLastResult('Restored this user’s starting role and vacation state. Demo personas return to On vacation False.');
+      setLastResult('Restored this browser session’s starting role and vacation state. Demo personas return to On vacation False.');
       onApplied?.();
     } catch (error) {
       setLastResult(`Error: ${error instanceof Error ? error.message : 'Reset failed'}`);
@@ -117,7 +123,7 @@ export default function FGAControlsPanel({ onApplied }: Props) {
           FGA Demo Controls
         </h2>
         <p className="mt-1 text-xs text-white/80">
-          Changes your live Okta profile{session?.user?.email ? ` — ${session.user.email}` : ''}
+          Isolated to this browser session{session?.user?.email ? ` — ${session.user.email}` : ''}
         </p>
       </div>
 
@@ -139,7 +145,10 @@ export default function FGAControlsPanel({ onApplied }: Props) {
               <p className="mt-1 max-w-xl text-xs leading-relaxed text-slate-600 dark:text-slate-300">
                 Turn this on for the role, quantity threshold, and VP approval demo. It also reveals the guided FGA prompts on the chat page.
                 <span className="mt-1 block font-medium text-purple-700 dark:text-purple-300">
-                  FGA simulation turns off automatically when you sign out.
+                  Other engineers using the same account are not affected. Signing out turns the simulation off.
+                </span>
+                <span className="mt-1 block text-slate-500 dark:text-slate-400">
+                  Production uses the live Okta profile. These controls overlay only the hosted demo decision; signed tokens still show the live Okta claims.
                 </span>
               </p>
             </div>
@@ -219,7 +228,7 @@ export default function FGAControlsPanel({ onApplied }: Props) {
               </span>
             </div>
             <p className="mt-2 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
-              Derived from role: Sales is False; Manager and VP are True. Changing the role synchronizes this Okta attribute automatically.
+              Derived from role: Sales is False; Manager and VP are True. This session keeps the two values synchronized.
             </p>
           </div>
 
@@ -239,7 +248,7 @@ export default function FGAControlsPanel({ onApplied }: Props) {
               True suspends agent delegation before ID-JAG for every resource. False is the default and allows normal policy checks to continue.
             </p>
             <p className="mt-2 text-[11px] font-medium leading-relaxed text-amber-800 dark:text-amber-200">
-              Demo control only. In production, make this an admin or lifecycle-managed attribute—not an employee self-service setting.
+              Demo overlay only. In production, the live Okta attribute remains admin- or lifecycle-managed—not an employee self-service setting.
             </p>
             <div className="mt-3 grid grid-cols-2 gap-2">
               {[true, false].map((value) => (
@@ -273,7 +282,7 @@ export default function FGAControlsPanel({ onApplied }: Props) {
           className="flex w-full items-center justify-center gap-2 rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
         >
           {busy === 'reset' ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
-          Reset my demo attributes
+          Reset this demo session
         </button>
 
         {lastResult ? (

@@ -502,11 +502,13 @@ Return ONLY the JSON object, no other text."""
         return state
 
     async def _fga_check_node(self, state: WorkflowState) -> WorkflowState:
-        """Apply the live Okta role claim to the three-tier FGA model.
+        """Apply the request's trusted authorization context to FGA.
 
-        The role is a contextual tuple, not a stored copy. That makes a role
-        change in Okta effective on the next token exchange and avoids stale
-        authorization data drifting away from ``clearance_level``.
+        In production/simple mode the context comes from live Okta and its
+        signed resource token. Hosted FGA simulation may instead supply the
+        server-side, session-isolated overlay assembled by the API. The
+        overlay cannot manufacture an Okta scope: token exchange and resource
+        validation have already happened before this node.
         """
         agents = state["agents_to_invoke"]
         agent_results = state.get("agent_results", {})
@@ -524,19 +526,13 @@ Return ONLY the JSON object, no other text."""
             "status": "processing"
         })
 
-        clearance_level = -1
-
+        # The API resolves this value from live Okta by default and replaces it
+        # only with an authenticated, server-side browser-session overlay when
+        # the user explicitly enables the hosted simulation.
+        clearance_level = normalize_role_level(
+            self.user_info.get("clearance_level", self.user_info.get("Clearance"))
+        )
         inventory_result = agent_results.get(AGENT_INVENTORY, {})
-        if inventory_result.get("resource_token_validated"):
-            claims = inventory_result.get("token_claims") or {}
-            clearance_level = normalize_role_level(
-                claims.get("Clearance", claims.get("clearance_level"))
-            )
-
-        if clearance_level == -1:
-            clearance_level = normalize_role_level(
-                self.user_info.get("clearance_level", self.user_info.get("Clearance"))
-            )
 
         logger.info(
             "FGA check for %s: role_level=%s (%s)",

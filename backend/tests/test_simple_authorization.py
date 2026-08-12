@@ -1,5 +1,7 @@
 import unittest
+from unittest.mock import AsyncMock, patch
 
+from auth.fga_client import FGACheckResult
 from auth.inventory_policy import decide_inventory_policy, simple_authorization_message
 from auth.multi_agent_auth import AGENT_INVENTORY
 from orchestrator.orchestrator import Orchestrator
@@ -244,6 +246,45 @@ class SimpleAuthorizationWorkflowTests(unittest.IsolatedAsyncioTestCase):
             "requires VP permission",
             state["agent_results"][AGENT_INVENTORY]["authorization_reason"],
         )
+
+    async def test_fga_demo_uses_isolated_context_after_token_validation(self):
+        orchestrator, state = make_workflow_state(
+            2,
+            "Add 601 basketballs to inventory",
+            "inventory:write",
+        )
+        state["simulate_fga"] = True
+        state["agent_results"][AGENT_INVENTORY].update({
+            "resource_token_validated": True,
+            "access_token": "signed-resource-token",
+            # Mike's real token can remain Manager while this browser session
+            # demonstrates the VP FGA decision.
+            "token_claims": {"Clearance": 1},
+        })
+        state["token_exchanges"] = [{
+            "agent": AGENT_INVENTORY,
+            "access_token": "signed-resource-token",
+            "resource_token_validated": True,
+        }]
+        allowed = FGACheckResult(
+            allowed=True,
+            relation="can_update_large",
+            object="inventory_system:warehouse",
+            user="user:persona@atko.email",
+            context={"role_level": 2},
+            reason="VP may update 601+ units",
+            contextual_tuples=[],
+        )
+
+        with patch(
+            "orchestrator.orchestrator.check_agent_access",
+            new=AsyncMock(return_value=allowed),
+        ) as mock_check:
+            state = await orchestrator._fga_check_node(state)
+
+        self.assertEqual(mock_check.await_args.kwargs["role_level"], 2)
+        self.assertEqual(state["authorization_decisions"][0]["role_level"], 2)
+        self.assertEqual(state["authorization_decisions"][0]["decision"], "allow")
 
 
 if __name__ == "__main__":

@@ -52,7 +52,7 @@ export default function FGAPage() {
             </Link>
             <div>
               <h1 className="text-white text-xl font-bold">Fine-Grained Authorization (FGA) Architecture</h1>
-              <p className="text-gray-300 text-xs">Role levels, live context, and approval routing</p>
+              <p className="text-gray-300 text-xs">Role levels, isolated demo context, and approval routing</p>
             </div>
           </div>
           <ThemeSelector />

@@ -10,7 +10,11 @@ import remarkGfm from 'remark-gfm';
 import { type ApprovalStatus } from '@/components/ApprovalStatusCard';
 import { ThemeSelector } from '@/components/ThemeProvider';
 import { API_BASE_URL, OKTA_DOMAIN } from '@/lib/config';
-import { clearFGASimulationPreference, useFGASimulation } from '@/hooks/useFGASimulation';
+import {
+  clearFGASimulationPreference,
+  getOrCreateFGADemoSessionId,
+  useFGASimulation,
+} from '@/hooks/useFGASimulation';
 
 interface Message {
   id: string;
@@ -390,6 +394,7 @@ export default function Home() {
         body: JSON.stringify({
           message: userMessage,
           simulate_fga: isFGASimulationEnabled,
+          demo_session_id: isFGASimulationEnabled ? getOrCreateFGADemoSessionId() : undefined,
         }),
       });
       responseStatus = response.status;

@@ -181,6 +181,9 @@ class ChatRequest(BaseModel):
     # hosted FGA checks and OIG approval routing; it never weakens a direct
     # role requirement because simple mode denies instead of routing upward.
     simulate_fga: bool = False
+    # Opaque id generated in browser sessionStorage. It selects an isolated,
+    # server-side FGA demo context and is ignored when simulation is off.
+    demo_session_id: Optional[str] = None
 
 
 class AgentInfo(BaseModel):
@@ -334,7 +337,35 @@ async def chat(
         "is_a_manager": resolved_user.is_a_manager,
         "is_on_vacation": resolved_user.is_on_vacation,
         "okta_user_id": resolved_user.user_id,
+        "authorization_context_source": "live_okta_profile",
     }
+
+    # Shared Sarah/Mike accounts are used by multiple demo engineers. FGA
+    # controls therefore layer a short-lived, server-side context over the
+    # live Okta baseline for this authenticated browser session only. They do
+    # not mutate Okta and cannot grant a scope that Okta refused to issue.
+    if request.simulate_fga:
+        if not request.demo_session_id:
+            raise HTTPException(status_code=400, detail="FGA simulation session is missing. Refresh the page and try again.")
+        try:
+            demo_context = await get_demo_status(
+                resolved_user.user_id or role_identifier or "",
+                request.demo_session_id,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except httpx.HTTPError as exc:
+            logger.error("FGA demo context lookup failed: %s", exc)
+            raise HTTPException(status_code=502, detail="FGA demo context could not be loaded") from exc
+
+        user_info.update({
+            "clearance_level": demo_context["clearance_level"],
+            "is_a_manager": demo_context["is_a_manager"],
+            "is_on_vacation": demo_context["is_on_vacation"],
+            "authorization_context_source": "isolated_demo_session",
+        })
 
     # Log sanitized ID token metadata only - never the raw JWT or the full
     # decoded claim body (deployed on Render; logs are not a place for token
@@ -633,7 +664,7 @@ async def okta_system_logs(
         }
 
 
-# --- Demo FGA Controls (real Okta profile mutation, scoped to caller) ---
+# --- Demo FGA Controls (isolated by authenticated browser session) ---
 
 class DemoToggleRequest(BaseModel):
     """Body for POST /api/admin/demo-toggle."""
@@ -642,10 +673,9 @@ class DemoToggleRequest(BaseModel):
 
 
 async def _resolve_caller_user_id(authorization: Optional[str]) -> str:
-    """Validate the caller's bearer token and return their Okta login/email.
+    """Validate the caller's bearer token and return its immutable Okta subject.
 
-    Never trust a user id from the request body for demo-admin endpoints -
-    the caller can only ever mutate their own Okta profile.
+    Never trust a user id from the request body for demo-admin endpoints.
     """
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing bearer token")
@@ -656,22 +686,26 @@ async def _resolve_caller_user_id(authorization: Optional[str]) -> str:
     except Exception as e:
         raise HTTPException(status_code=401, detail=f"Invalid token: {e}")
 
-    user_id = user_claims.get("email") or user_claims.get("sub")
+    user_id = user_claims.get("sub") or user_claims.get("email")
     if not user_id:
         raise HTTPException(status_code=401, detail="Token missing subject/email")
     return user_id
 
 
 @app.get("/api/admin/demo-status")
-async def demo_status(authorization: Optional[str] = Header(None, alias="Authorization")):
+async def demo_status(
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+    demo_session_id: Optional[str] = Header(None, alias="X-Demo-Session-ID"),
+):
     """
-    Demo-only, read-only: the signed-in user's current role, derived manager
-    flag, and vacation control so the UI shows the live Okta state.
+    Return the signed-in user's browser-session FGA simulation context.
     """
     user_id = await _resolve_caller_user_id(authorization)
 
     try:
-        return await get_demo_status(user_id)
+        return await get_demo_status(user_id, demo_session_id or "")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
@@ -682,12 +716,12 @@ async def demo_status(authorization: Optional[str] = Header(None, alias="Authori
 @app.post("/api/admin/demo-toggle")
 async def demo_toggle(
     request: DemoToggleRequest,
-    authorization: Optional[str] = Header(None, alias="Authorization")
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+    demo_session_id: Optional[str] = Header(None, alias="X-Demo-Session-ID"),
 ):
     """
-    Demo-only: change the SIGNED-IN user's own role or vacation control. A role
-    change also synchronizes the derived manager profile attribute. See
-    auth/demo_admin.py for the scoping rules.
+    Change only this signed-in browser session's simulated role or vacation
+    context. The employee's live Okta profile is never modified.
     """
     user_id = await _resolve_caller_user_id(authorization)
 
@@ -695,28 +729,38 @@ async def demo_toggle(
         raise HTTPException(status_code=400, detail=f"Attribute must be one of {sorted(ALLOWED_ATTRIBUTES)}")
 
     try:
-        return await toggle_demo_attribute(user_id, request.attribute, request.value)
+        return await toggle_demo_attribute(
+            user_id,
+            demo_session_id or "",
+            request.attribute,
+            request.value,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         logger.error(f"demo_toggle failed: {e}")
-        raise HTTPException(status_code=502, detail=f"Okta update failed: {e}")
+        raise HTTPException(status_code=502, detail=f"Demo context update failed: {e}")
 
 
 @app.post("/api/admin/demo-reset")
-async def demo_reset(authorization: Optional[str] = Header(None, alias="Authorization")):
-    """Restore the signed-in persona's role and set vacation to false."""
+async def demo_reset(
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+    demo_session_id: Optional[str] = Header(None, alias="X-Demo-Session-ID"),
+):
+    """Restore this browser session's starting simulation values."""
     user_id = await _resolve_caller_user_id(authorization)
 
     try:
-        return await reset_demo_attributes(user_id)
+        return await reset_demo_attributes(user_id, demo_session_id or "")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         logger.error(f"demo_reset failed: {e}")
-        raise HTTPException(status_code=502, detail=f"Okta update failed: {e}")
+        raise HTTPException(status_code=502, detail=f"Demo context reset failed: {e}")
 
 
 # --- Approval Resolver Endpoint ---

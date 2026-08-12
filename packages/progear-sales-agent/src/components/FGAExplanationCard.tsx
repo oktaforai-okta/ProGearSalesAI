@@ -120,7 +120,7 @@ export default function FGAExplanationCard({ checks, decisions = [], isLoading =
             <div className="rounded-lg border border-purple-200 bg-purple-50 p-3 dark:border-purple-900 dark:bg-purple-950/40">
               <div className="text-xs font-bold uppercase tracking-wide text-purple-700">3. FGA</div>
               <p className="mt-1 text-xs leading-relaxed text-purple-900 dark:text-purple-100">
-                Combines the signed role with the action and quantity on every request.
+                Combines trusted role context with the action and quantity on every request.
               </p>
             </div>
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/40">

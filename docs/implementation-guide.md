@@ -446,9 +446,9 @@ For Inventory, `clearance_level` is the authoritative role source. `is_a_manager
 
 The three named users are demo fixtures only. ProGear does not match Sarah's, Mike's, or Joe's email address in authorization code; it resolves every authenticated user by Okta subject and applies the current profile values. For repeatable onboarding, assign the role and synchronized Manager value through your Okta identity-lifecycle or profile-mapping process so any new Sales, Manager, or VP user automatically follows the same policy. Maintain vacation separately as live user context.
 
-`clearance_level` remains authoritative for application authorization. The Manager Boolean exists to make role context explicit in Okta, tokens, and demos, and it is updated atomically whenever the demo changes a role.
+`clearance_level` remains authoritative for normal application authorization. The Manager Boolean exists to make role context explicit in Okta, tokens, and demos, and production identity-lifecycle mappings must keep it synchronized with the role.
 
-The `/fga` page exposes self-service profile buttons only to make the customer demo repeatable. Do not copy that mutation pattern into production. Keep these properties read-only to the employee and update them through an administrator, lifecycle workflow, or trusted profile mapping; otherwise stolen employee credentials could clear the vacation containment signal.
+The `/fga` page does not update Okta. Its controls create a short-lived server-side overlay keyed by the validated employee subject and an opaque browser-tab id, making simultaneous demos with shared Sarah/Mike credentials independent. In production, keep the real properties read-only to the employee and update them through an administrator, lifecycle workflow, or trusted profile mapping; otherwise stolen employee credentials could clear the vacation containment signal.
 
 ### Step 3: Register the AI Agent and Configure Access
 
@@ -1097,7 +1097,7 @@ In Render, go to **Environment** and add these variables:
 | `OKTA_CUSTOMER_AUDIENCE` | `api://progear-customer` |
 | `OKTA_PRICING_AUTH_SERVER_ID` | Your Pricing auth server ID |
 | `OKTA_PRICING_AUDIENCE` | `api://progear-pricing` |
-| `OKTA_API_TOKEN` | Admin API token used for scoped profile controls, live role/vacation lookup, and approver-role verification |
+| `OKTA_API_TOKEN` | Admin API token used for live role/vacation lookup and approver-role verification |
 | `FGA_API_URL` | Your FGA API URL |
 | `FGA_STORE_ID` | Your FGA store ID |
 | `FGA_MODEL_ID` | The published role-model ID |
