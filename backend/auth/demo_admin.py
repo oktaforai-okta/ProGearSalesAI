@@ -1,9 +1,9 @@
 """Session-isolated controls for the hosted FGA demo.
 
-Production authorization context still comes from the employee's live Okta
-profile.  The controls on the FGA page deliberately do *not* update that
-profile: shared Sarah/Mike credentials are used by several demo engineers, so
-live profile mutation would make one browser's simulation affect everyone.
+Role authorization always comes from the employee's live Okta profile. The
+FGA page can simulate only the vacation delegation gate. Shared Sarah/Mike
+credentials are used by several demo engineers, so live profile mutation
+would make one browser's simulation affect everyone.
 
 Each authenticated browser tab receives an opaque demo-session id.  Values are
 kept server-side and keyed by both the validated Okta subject and that id.  A
@@ -21,12 +21,7 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-ALLOWED_ATTRIBUTES = {"clearance_level", "is_on_vacation"}
-PERSONA_DEFAULT_LEVELS = {
-    "sarah.sales": 0,
-    "mike.manager": 1,
-    "joe.vp": 2,
-}
+ALLOWED_ATTRIBUTES = {"is_on_vacation"}
 
 _SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{8,128}$")
 _SESSION_TTL_SECONDS = max(300, int(os.getenv("DEMO_SESSION_TTL_SECONDS", "14400")))
@@ -43,15 +38,14 @@ _sessions: Dict[Tuple[str, str], _DemoSession] = {}
 
 
 def _reset_level(profile: Dict[str, Any]) -> Any:
-    login = str(profile.get("login") or profile.get("email") or "").lower()
-    local_part = login.split("@", 1)[0]
-    return PERSONA_DEFAULT_LEVELS.get(local_part, profile.get("clearance_level"))
+    """Return the live role; demo sessions never replace it."""
+    return profile.get("clearance_level")
 
 
 def _reset_vacation(profile: Dict[str, Any]) -> bool:
     login = str(profile.get("login") or profile.get("email") or "").lower()
     local_part = login.split("@", 1)[0]
-    if local_part in PERSONA_DEFAULT_LEVELS:
+    if local_part in {"sarah.sales", "mike.manager", "joe.vp"}:
         return False
     return profile.get("is_on_vacation") is True
 
@@ -157,20 +151,14 @@ async def toggle_demo_attribute(
     attribute: str,
     value: Any,
 ) -> Dict[str, Any]:
-    """Change one value in this browser session without modifying Okta."""
+    """Change the vacation demo value without modifying Okta."""
     if attribute not in ALLOWED_ATTRIBUTES:
         raise ValueError(f"Attribute '{attribute}' is not toggleable")
-    if attribute == "clearance_level" and (
-        isinstance(value, bool) or not isinstance(value, int) or value not in (0, 1, 2)
-    ):
-        raise ValueError("clearance_level must be 0 (Sales), 1 (Manager), or 2 (VP)")
     if attribute == "is_on_vacation" and not isinstance(value, bool):
         raise ValueError("is_on_vacation must be true or false")
 
     session = await _get_session(user_id, demo_session_id)
     session.values[attribute] = value
-    if attribute == "clearance_level":
-        session.values["is_a_manager"] = _manager_for_level(value)
 
     logger.info("Updated isolated FGA demo context for authenticated user")
     return {

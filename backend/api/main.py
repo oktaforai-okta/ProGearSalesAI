@@ -345,9 +345,9 @@ async def chat(
     }
 
     # Shared Sarah/Mike accounts are used by multiple demo engineers. FGA
-    # controls therefore layer a short-lived, server-side context over the
-    # live Okta baseline for this authenticated browser session only. They do
-    # not mutate Okta and cannot grant a scope that Okta refused to issue.
+    # controls may simulate vacation for this browser session, but role and
+    # Manager always remain the live Okta values. The overlay does not mutate
+    # Okta and cannot grant a scope that Okta refused to issue.
     if request.simulate_fga:
         if not request.demo_session_id:
             raise HTTPException(status_code=400, detail="FGA simulation session is missing. Refresh the page and try again.")
@@ -365,10 +365,8 @@ async def chat(
             raise HTTPException(status_code=502, detail="FGA demo context could not be loaded") from exc
 
         user_info.update({
-            "clearance_level": demo_context["clearance_level"],
-            "is_a_manager": demo_context["is_a_manager"],
             "is_on_vacation": demo_context["is_on_vacation"],
-            "authorization_context_source": "isolated_demo_session",
+            "authorization_context_source": "live_okta_role_with_isolated_vacation",
         })
 
     # Log sanitized ID token metadata only - never the raw JWT or the full
@@ -724,8 +722,8 @@ async def demo_toggle(
     demo_session_id: Optional[str] = Header(None, alias="X-Demo-Session-ID"),
 ):
     """
-    Change only this signed-in browser session's simulated role or vacation
-    context. The employee's live Okta profile is never modified.
+    Change only this signed-in browser session's simulated vacation context.
+    Role and Manager remain fixed by the employee's live Okta profile.
     """
     user_id = await _resolve_caller_user_id(authorization)
 

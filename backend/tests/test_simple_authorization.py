@@ -270,7 +270,7 @@ class SimpleAuthorizationWorkflowTests(unittest.IsolatedAsyncioTestCase):
             state["agent_results"][AGENT_INVENTORY]["authorization_reason"],
         )
 
-    async def test_fga_demo_uses_isolated_context_after_token_validation(self):
+    async def test_fga_uses_fixed_live_role_after_token_validation(self):
         orchestrator, state = make_workflow_state(
             2,
             "Add 601 basketballs to inventory",
@@ -280,9 +280,7 @@ class SimpleAuthorizationWorkflowTests(unittest.IsolatedAsyncioTestCase):
         state["agent_results"][AGENT_INVENTORY].update({
             "resource_token_validated": True,
             "access_token": "signed-resource-token",
-            # Mike's real token can remain Manager while this browser session
-            # demonstrates the VP FGA decision.
-            "token_claims": {"Clearance": 1},
+            "token_claims": {"Clearance": 2},
         })
         state["token_exchanges"] = [{
             "agent": AGENT_INVENTORY,

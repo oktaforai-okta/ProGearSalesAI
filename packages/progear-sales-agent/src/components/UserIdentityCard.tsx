@@ -20,10 +20,15 @@ const groupInfo: Record<string, { name: string; color: string; access: string[] 
     color: '#3b82f6',
     access: ['Sales', 'Inventory (read)', 'Customer', 'Pricing (read)']
   },
-  'ProGear-Warehouse': {
-    name: 'Warehouse',
+  'ProGear-Managers': {
+    name: 'Manager',
     color: '#10b981',
-    access: ['Inventory']
+    access: ['Inventory (read/write up to policy threshold)']
+  },
+  'ProGear-VPs': {
+    name: 'VP',
+    color: '#8b5cf6',
+    access: ['Inventory (read/write and VP approval)']
   },
   'ProGear-Finance': {
     name: 'Finance',

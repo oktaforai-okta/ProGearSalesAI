@@ -189,9 +189,9 @@ When your compliance team, security officer, or board asks about AI security, yo
 | "We'd need to review code" | "Here's the exact policy that matched" |
 
 **Example from the demo:**
-- Mike from Warehouse asks about pricing margins
+- Mike Manager asks about pricing margins
 - Okta checks: "Is Mike in a group that allows pricing access?"
-- Answer: No - ProGear-Warehouse group doesn't have pricing permissions
+- Answer: No - ProGear-Managers doesn't have pricing permissions
 - Log shows: `Access DENIED - Reason: User not in required group`
 - You know exactly why it was blocked
 
@@ -290,8 +290,8 @@ Mike types into the AI assistant: "Show me the profit margins on our basketball 
 **Step 1-2:** Same as before - the AI gets Mike's request and asks Okta for permission
 
 **Step 3: Okta checks the rules**
-- Okta looks up Mike: "He's in the ProGear-Warehouse group"
-- Okta checks the policy: "ProGear-Warehouse members can access inventory, but NOT pricing"
+- Okta looks up Mike: "He's in the ProGear-Managers group"
+- Okta checks the policy: "ProGear-Managers members can access inventory, but NOT pricing"
 - Decision: **DENIED**
 
 **Step 4: The AI responds appropriately**
@@ -324,7 +324,7 @@ Sarah Sales (ProGear-Sales)
 ├── 2:15 PM - Pricing access GRANTED - "What's our margin on Pro Game Basketball?"
 └── 4:30 PM - Sales access GRANTED - "Show my pipeline for this quarter"
 
-Mike Manager (ProGear-Warehouse)
+Mike Manager (ProGear-Managers)
 ├── 9:00 AM - Inventory access GRANTED - "Low stock alerts"
 ├── 2:30 PM - Pricing access DENIED - "Show profit margins" (not in allowed group)
 └── 3:45 PM - Inventory access GRANTED - "Update basketball count to 8,000"
@@ -641,7 +641,7 @@ Reason:            User not in required group (needs ProGear-Sales)
 **Meet Mike Manager**
 - Job: Warehouse Manager
 - Team: Warehouse Operations
-- Okta Group: ProGear-Warehouse
+- Okta Group: ProGear-Managers
 
 **What Mike can do with the AI:**
 
@@ -704,7 +704,7 @@ Reason:            User not in required group (needs ProGear-Sales)
 ```
 Friday, December 15
 
-Mike Manager (ProGear-Warehouse):
+Mike Manager (ProGear-Managers):
   3:00 PM - pricing:read - DENIED - "Show profit margins"
   3:02 PM - pricing:read - DENIED - "What's our markup?"
   3:05 PM - customer:read - DENIED - "Show customer list"

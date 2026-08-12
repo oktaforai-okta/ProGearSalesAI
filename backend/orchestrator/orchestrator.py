@@ -506,11 +506,10 @@ Return ONLY the JSON object, no other text."""
     async def _fga_check_node(self, state: WorkflowState) -> WorkflowState:
         """Apply the request's trusted authorization context to FGA.
 
-        In production/simple mode the context comes from live Okta and its
-        signed resource token. Hosted FGA simulation may instead supply the
-        server-side, session-isolated overlay assembled by the API. The
-        overlay cannot manufacture an Okta scope: token exchange and resource
-        validation have already happened before this node.
+        The role context always comes from live Okta and its signed resource
+        token. Hosted FGA simulation can overlay only vacation at the earlier
+        delegation gate. It cannot change role or manufacture an Okta scope:
+        token exchange and resource validation happen before this node.
         """
         agents = state["agents_to_invoke"]
         agent_results = state.get("agent_results", {})
@@ -528,9 +527,8 @@ Return ONLY the JSON object, no other text."""
             "status": "processing"
         })
 
-        # The API resolves this value from live Okta by default and replaces it
-        # only with an authenticated, server-side browser-session overlay when
-        # the user explicitly enables the hosted simulation.
+        # The API always resolves this value from the authenticated employee's
+        # live Okta profile. FGA simulation never replaces the role.
         clearance_level = normalize_role_level(
             self.user_info.get("clearance_level", self.user_info.get("Clearance"))
         )

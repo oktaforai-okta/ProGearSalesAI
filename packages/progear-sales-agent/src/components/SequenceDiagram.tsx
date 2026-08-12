@@ -43,7 +43,7 @@ function buildSteps(agentActive: boolean, fgaEnabled: boolean): Step[] {
     },
     {
       from: 'agent', to: 'okta', label: 'Profile + agent proof',
-      detail: 'Okta supplies live context and authenticates the Workload Principal. The hosted demo may apply a browser-session overlay afterward.',
+      detail: 'Okta supplies the fixed live role and authenticates the Workload Principal. Only vacation may be simulated per browser session.',
     },
   ];
 
@@ -77,7 +77,7 @@ function buildSteps(agentActive: boolean, fgaEnabled: boolean): Step[] {
     steps.push(
       {
         from: 'agent', to: 'fga', label: 'Role + quantity',
-        detail: 'FGA evaluates trusted role context and quantity. The hosted demo may use its isolated overlay.',
+        detail: 'FGA evaluates the fixed live Okta role and requested quantity.',
       },
       {
         from: 'fga', to: 'agent', label: 'Allow · VP approval · block',

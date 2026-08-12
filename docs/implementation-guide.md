@@ -403,7 +403,7 @@ Create four demo users to showcase resource access and the Inventory role levels
 
 ### Step 2: Create User Groups
 
-Create three groups to demonstrate RBAC:
+Create four groups to demonstrate RBAC and the fixed Inventory roles:
 
 1. Navigate to **Directory** → **Groups**
 2. Click **Add Group** and create:
@@ -411,7 +411,8 @@ Create three groups to demonstrate RBAC:
    | Group Name | Description |
    |------------|-------------|
    | `ProGear-Sales` | Sales team - full agent access |
-   | `ProGear-Warehouse` | Warehouse team - inventory only |
+   | `ProGear-Managers` | Managers - Inventory read/write and routine changes |
+   | `ProGear-VPs` | VPs - Inventory read/write and high-impact approval |
    | `ProGear-Finance` | Finance team - pricing only |
 
 3. **Assign users to groups:**
@@ -421,8 +422,8 @@ Create three groups to demonstrate RBAC:
    | User | Group | Access Level |
    |------|-------|--------------|
    | Sarah Sales | `ProGear-Sales` | Agent access across all four resource domains |
-   | Mike Manager | `ProGear-Warehouse` | Agent access to the Inventory domain only |
-   | Joe VP | `ProGear-Warehouse` | Agent access to the Inventory domain; Level 2 controls the VP decision |
+   | Mike Manager | `ProGear-Managers` | Inventory read/write; Level 1 controls the routine-write decision |
+   | Joe VP | `ProGear-VPs` and `ProGear-Managers` | Inventory read/write; Level 2 controls the VP decision |
    | Frank Finance | `ProGear-Finance` | Agent access to the Pricing domain only |
 
    > **Verification:** Click on each user in **Directory** → **People** and check the **Groups** tab to confirm they're in the correct group.
@@ -448,7 +449,7 @@ The three named users are demo fixtures only. ProGear does not match Sarah's, Mi
 
 `clearance_level` remains authoritative for normal application authorization. The Manager Boolean exists to make role context explicit in Okta, tokens, and demos, and production identity-lifecycle mappings must keep it synchronized with the role.
 
-The `/fga` page does not update Okta. Its controls create a short-lived server-side overlay keyed by the validated employee subject and an opaque browser-tab id, making simultaneous demos with shared Sarah/Mike credentials independent. In production, keep the real properties read-only to the employee and update them through an administrator, lifecycle workflow, or trusted profile mapping; otherwise stolen employee credentials could clear the vacation containment signal.
+The `/fga` page does not update Okta. Role and Manager are read-only reflections of the live profile; only the vacation demonstration uses a short-lived server-side overlay keyed by the validated employee subject and an opaque browser-tab id. This keeps simultaneous demos with shared Sarah/Mike credentials independent. In production, keep the real properties read-only to the employee and update them through an administrator, lifecycle workflow, or trusted profile mapping; otherwise stolen employee credentials could clear the vacation containment signal.
 
 ### Step 3: Register the AI Agent and Configure Access
 
@@ -639,7 +640,7 @@ Description: Authorization for Sales Inventory API
 
 **Policy Rules:**
 
-Before adding Rule 1, create one OIDC **API Services** app named
+Before adding the workflow-service rule, create one OIDC **API Services** app named
 `ProGear Approval Executor`:
 
 1. Enable only the `client_credentials` grant.
@@ -653,7 +654,28 @@ Do not add `client_credentials` to the AI Agent workload principal. Workload
 principal OAuth metadata is governed by Okta and isn't an application setting
 to repurpose for background execution.
 
-**Rule 1: Approved Workflow Execution** (Priority 1)
+**Rule 1: VP Inventory Access** (Priority 1)
+```
+IF Grant type is: Authorization Code, Token Exchange, JWT Bearer
+AND User is member of: ProGear-VPs
+AND Scopes: inventory:read, inventory:write
+```
+
+**Rule 2: Manager Inventory Access** (Priority 2)
+```
+IF Grant type is: Authorization Code, Token Exchange, JWT Bearer
+AND User is member of: ProGear-Managers
+AND Scopes: inventory:read, inventory:write
+```
+
+**Rule 3: Sales Inventory Read** (Priority 3)
+```
+IF Grant type is: Authorization Code, Token Exchange, JWT Bearer
+AND User is member of: ProGear-Sales
+AND Scopes: inventory:read
+```
+
+**Rule 4: Approved Workflow Service Execution** (Priority 4)
 ```
 IF Grant type is: Client Credentials
 AND Client is: ProGear Approval Executor
@@ -671,21 +693,9 @@ deployment, that ledger is durable only when `APPROVALS_LEDGER_PATH` points to
 persistent storage. Legacy open requests with embedded intent JSON remain
 supported.
 
-**Rule 2: Warehouse Full Access** (Priority 2)
-```
-IF Grant type is: Authorization Code, Token Exchange, JWT Bearer
-AND User is member of: ProGear-Warehouse
-AND Scopes: inventory:read, inventory:write
-```
-
-**Rule 3: Sales Inventory Access (FGA gated)** (Priority 3)
-```
-IF Grant type is: Authorization Code, Token Exchange, JWT Bearer
-AND User is member of: ProGear-Sales
-AND Scopes: inventory:read, inventory:write
-```
-
-The Sales write scope only lets the request reach the business-policy boundary. It does **not** authorize direct execution. Sales writes are always denied without creating an access request.
+These rules are unchanged when FGA is switched on. Okta remains the coarse
+gate: Sales cannot obtain `inventory:write`, while Managers and VPs can. FGA
+then distinguishes routine Manager writes from 601+ writes that need a VP.
 
 On the Inventory Authorization Server, add these access-token claims:
 
@@ -697,7 +707,28 @@ On the Inventory Authorization Server, add these access-token claims:
 
 The backend enforces Vacation before requesting ID-JAG from any resource. The token claims preserve the same live context as evidence for exchanges that are allowed to continue.
 
-#### 5.3 Customer MCP Authorization Server
+#### 5.3 MCP Bridge Inventory Write Authorization Server
+
+The MCP Bridge protects its write tool with a separate, write-only boundary so
+customers can immediately distinguish it from the hosted application's
+Inventory server:
+
+```
+Name: MCP Bridge - ProGear Inventory Write MCP
+Audience: api://progear-inv-write
+Description: Write-only ProGear Inventory authorization server for MCP Bridge
+```
+
+Define only `inventory:write`, assign the Bridge agent clients to its policy,
+and create these user rules:
+
+1. **VP Inventory Write**: `ProGear-VPs`, `inventory:write`
+2. **Manager Inventory Write**: `ProGear-Managers`, `inventory:write`
+
+Do not create a Sales rule. Sarah can discover and use the read resource, but
+the Bridge cannot obtain or expose the protected write capability for her.
+
+#### 5.4 Customer MCP Authorization Server
 
 ```
 Name: ProGear Customer MCP
@@ -725,7 +756,7 @@ AND User is member of: ProGear-Sales
 AND Scopes: customer:read, customer:lookup, customer:history
 ```
 
-#### 5.4 Pricing MCP Authorization Server
+#### 5.5 Pricing MCP Authorization Server
 
 ```
 Name: ProGear Pricing MCP
@@ -1307,7 +1338,7 @@ Use these talking points when presenting:
 
 ### Demo 3: FGA and human approval
 > "Sarah can read inventory, but every write is blocked and she contacts her manager. Mike can execute through 600 units; at 601, FGA creates a VP request. The same `clearance_level` in Okta drives every outcome."
-> [Show the `/fga` role control, D3 decision diagram, and the pending OIG request]
+> [Show Mike's fixed live role on `/fga`, the D3 decision diagram, and the pending OIG request]
 
 ### Demo 4: Vacation containment
 > "Now set On vacation to True. The employee remains signed in, but the agent stops before ID-JAG for every resource. This is user-context containment if the employee is away or their credentials may have been exposed."
@@ -1431,12 +1462,13 @@ Use this checklist to verify your deployment is complete:
 ### Okta Configuration
 - [ ] A supported direct User access app or delegation-link sign-on app is configured and Token Exchange is enabled
 - [ ] 4 demo users created and can log in
-- [ ] 3 resource-access groups created with correct user assignments
+- [ ] 4 resource-access groups created with correct user assignments
 - [ ] `clearance_level` configured as 0 Sales, 1 Manager, or 2 VP
 - [ ] `is_a_manager` configured and synchronized: False for Level 0, True for Levels 1–2
 - [ ] `is_on_vacation` configured as a Boolean and False for the default personas
 - [ ] `ProGear-Managers` rule includes Levels 1 and 2
 - [ ] `ProGear-VPs` rule includes Level 2
+- [ ] Inventory rules grant Sales only `inventory:read`, and grant Managers/VPs `inventory:read inventory:write`
 - [ ] Okta Access Requests app assigned to `ProGear-Managers` and `ProGear-VPs`
 - [ ] `ProGear-VPs` group push mapping is active in Access Requests
 - [ ] Inventory request type approval task is assigned to `ProGear-VPs` and published
@@ -1472,7 +1504,7 @@ Use this checklist to verify your deployment is complete:
 
 ### Demo Verification
 - [ ] The same ProGear Sales Agent is shown for Sarah, Mike, Joe, and Frank
-- [ ] Sarah's request can obtain the required scopes across all four resource domains
+- [ ] Sarah can obtain Inventory read but cannot obtain Inventory write
 - [ ] Mike's request can obtain Inventory scopes only
 - [ ] Frank's request can obtain Pricing scopes only
 - [ ] Sarah read succeeds; every write is denied without creating a request
@@ -1490,7 +1522,7 @@ If you're cloning this repository to deploy your own instance, here's everything
 - [ ] AI Agent User access → get Client ID and configure a private JWK
 - [ ] AI Agent → get Agent ID & download Private Key
 - [ ] 4 Authorization Servers → get Auth Server IDs
-- [ ] 3 User Groups → configure access policies
+- [ ] 4 User Groups → configure access policies
 
 ### 2. Vercel Environment Variables
 - [ ] `NEXTAUTH_URL` - Your Vercel URL

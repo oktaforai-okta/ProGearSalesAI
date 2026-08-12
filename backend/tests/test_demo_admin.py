@@ -14,16 +14,13 @@ from auth.demo_admin import (
 
 
 class DemoAdminResetTests(unittest.TestCase):
-    def test_named_personas_have_deterministic_reset_levels(self):
-        self.assertEqual(_reset_level({"login": "sarah.sales@atko.email", "clearance_level": 2}), 0)
-        self.assertEqual(_reset_level({"login": "mike.manager@atko.email", "clearance_level": 2}), 1)
-        self.assertEqual(_reset_level({"login": "joe.vp@atko.email", "clearance_level": 0}), 2)
-
-    def test_other_users_reset_to_their_starting_value(self):
+    def test_role_always_uses_the_live_okta_value(self):
+        self.assertEqual(_reset_level({"login": "sarah.sales@atko.email", "clearance_level": 0}), 0)
+        self.assertEqual(_reset_level({"login": "mike.manager@atko.email", "clearance_level": 1}), 1)
+        self.assertEqual(_reset_level({"login": "joe.vp@atko.email", "clearance_level": 2}), 2)
         self.assertEqual(_reset_level({"login": "demo@example.com", "clearance_level": 1}), 1)
 
-    def test_persona_defaults_are_domain_independent(self):
-        self.assertEqual(_reset_level({"login": "mike.manager@customer.example", "clearance_level": 0}), 1)
+    def test_persona_vacation_default_is_domain_independent(self):
         self.assertFalse(_reset_vacation({"login": "mike.manager@customer.example", "is_on_vacation": True}))
 
     def test_other_users_keep_their_original_vacation_value_on_reset(self):
@@ -74,13 +71,12 @@ class DemoAdminSessionIsolationTests(unittest.IsolatedAsyncioTestCase):
         session_a = "11111111-1111-4111-8111-111111111111"
         session_b = "22222222-2222-4222-8222-222222222222"
 
-        await toggle_demo_attribute("00u-mike", session_a, "clearance_level", 2)
         await toggle_demo_attribute("00u-mike", session_a, "is_on_vacation", True)
 
         status_a = await get_demo_status("00u-mike", session_a)
         status_b = await get_demo_status("00u-mike", session_b)
 
-        self.assertEqual(status_a["clearance_level"], 2)
+        self.assertEqual(status_a["clearance_level"], 1)
         self.assertTrue(status_a["is_a_manager"])
         self.assertTrue(status_a["is_on_vacation"])
         self.assertEqual(status_b["clearance_level"], 1)
@@ -93,15 +89,12 @@ class DemoAdminSessionIsolationTests(unittest.IsolatedAsyncioTestCase):
         session_a = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
         session_b = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 
-        await toggle_demo_attribute("00u-mike", session_a, "clearance_level", 2)
-        await toggle_demo_attribute("00u-mike", session_b, "clearance_level", 0)
+        await toggle_demo_attribute("00u-mike", session_a, "is_on_vacation", True)
         reset = await reset_demo_attributes("00u-mike", session_a)
 
         self.assertEqual(reset["values"]["clearance_level"], 1)
-        self.assertEqual(
-            (await get_demo_status("00u-mike", session_b))["clearance_level"],
-            0,
-        )
+        self.assertFalse(reset["values"]["is_on_vacation"])
+        self.assertFalse((await get_demo_status("00u-mike", session_b))["is_on_vacation"])
 
     async def test_missing_or_malformed_session_is_rejected(self):
         for session_id in ("", "short", "contains spaces", "x" * 129):
@@ -111,8 +104,8 @@ class DemoAdminSessionIsolationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_invalid_toggle_values_are_rejected(self):
         session_id = "33333333-3333-4333-8333-333333333333"
-        with self.assertRaisesRegex(ValueError, "clearance_level"):
-            await toggle_demo_attribute("00u-mike", session_id, "clearance_level", True)
+        with self.assertRaisesRegex(ValueError, "not toggleable"):
+            await toggle_demo_attribute("00u-mike", session_id, "clearance_level", 2)
         with self.assertRaisesRegex(ValueError, "is_on_vacation"):
             await toggle_demo_attribute("00u-mike", session_id, "is_on_vacation", "false")
 

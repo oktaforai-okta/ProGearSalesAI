@@ -146,7 +146,7 @@ Traditional OAuth 2.0 token exchange (RFC 8693) between applications. This is wh
 ```
 
 **What You Know:** An app called "AI-Sales-Service" got a token.
-**What You Don't Know:** Which user triggered this? Was it Sarah in Sales or Mike in Warehouse?
+**What You Don't Know:** Which user triggered this? Was it Sarah in Sales or Mike as a Manager?
 
 ### The Governance Gap
 
@@ -279,7 +279,7 @@ This is the design decision that matters most for blast-radius reasoning, so it'
 
 **What four separate Custom Authorization Servers actually buy you:** each domain has its own issuer/audience pair (`api://progear-sales`, `api://progear-inventory`, `api://progear-customer`, `api://progear-pricing`). A token minted for Inventory does not pass `aud` validation against the Pricing API - not because a scope check caught it, but because the token's own shape is wrong for that audience. The isolation is enforced by the token itself, not by application-layer logic that has to get it right every single time. If Pricing's Custom Authorization Server is ever misconfigured, the blast radius is Pricing. It structurally cannot leak into Sales, Inventory, or Customer, because those live behind entirely different issuers.
 
-This is also why the "no down-scoping" behavior you saw in the denied audit log above matters. When the ProGear Sales Agent requests `customer:read customer:lookup` on behalf of Mike Manager (in `ProGear-Warehouse`, not `ProGear-Sales`), the exchange doesn't quietly grant a smaller, safer subset of those scopes and drop the rest - the *entire* token exchange fails (`no_matching_policy`). Okta refuses to partially satisfy a request rather than silently narrowing it. That all-or-nothing behavior is only meaningful *because* each domain's Custom Authorization Server is a genuinely separate trust boundary to begin with. Fail-closed on a shared server still leaves you trusting that scope-checking logic downstream gets every call right, on every domain, forever; fail-closed on four separate servers means the failure is contained to one domain by construction.
+This is also why the "no down-scoping" behavior you saw in the denied audit log above matters. When the ProGear Sales Agent requests `customer:read customer:lookup` on behalf of Mike Manager (in `ProGear-Managers`, not `ProGear-Sales`), the exchange doesn't quietly grant a smaller, safer subset of those scopes and drop the rest - the *entire* token exchange fails (`no_matching_policy`). Okta refuses to partially satisfy a request rather than silently narrowing it. That all-or-nothing behavior is only meaningful *because* each domain's Custom Authorization Server is a genuinely separate trust boundary to begin with. Fail-closed on a shared server still leaves you trusting that scope-checking logic downstream gets every call right, on every domain, forever; fail-closed on four separate servers means the failure is contained to one domain by construction.
 
 ### Admin Console Visibility
 
@@ -523,7 +523,7 @@ A Workload Principal fixes this by giving the AI its own identity that travels *
 │   USERS (People)                GROUPS                            │
 │   ┌────────────────┐            ┌─────────────────────┐           │
 │   │ sarah.sales    │            │ ProGear-Sales       │           │
-│   │ mike.manager   │            │ ProGear-Warehouse   │           │
+│   │ mike.manager   │            │ ProGear-Managers    │           │
 │   │ frank.finance  │            │ ProGear-Finance     │           │
 │   └────────────────┘            └─────────────────────┘           │
 │                                                                   │
@@ -706,8 +706,8 @@ FGA runs on top of the Okta scope check, for the Inventory domain, only after Ok
 | Okta establishes | FGA decides next |
 |---|---|
 | Signed-in user and governed agent identity | Read: all valid role levels may execute |
-| Narrow `inventory:read` or `inventory:write` token | Write 1–600 units: Level 1+ executes; Level 0 is blocked |
-| Validated `Clearance` role claim | Write 601+ units: Level 2 executes; Level 1 may request VP approval; Level 0 is blocked |
+| `inventory:read` for Sales, Manager, or VP; `inventory:write` only for Manager or VP | Write 1–600 units: Level 1+ executes; Sales never reaches the write check |
+| Validated `Clearance` role claim | Write 601+ units: Level 2 executes; Level 1 may request VP approval |
 
 `inventory:read` maps to `can_read`. Quantity selects `can_update_standard` for 1–600 or `can_update_large` for 601+. `can_request_change` is intentionally Manager-only, so Sales can never manufacture an access request. Low-stock alerts remain reads.
 
@@ -715,7 +715,7 @@ FGA runs on top of the Okta scope check, for the Inventory domain, only after Ok
 
 ### Why this is a second layer, not duplicated work
 
-Okta and FGA are not answering the same question twice. Okta authenticates the employee, governs the agent, and supplies the live clearance used to stop known-ineligible writes before delegation. For requests that continue, Okta issues the resource token, the resource validates it, and FGA combines role with quantity for the per-action decision. OIG records the one human escalation when a Manager crosses 600 units.
+Okta and FGA are not answering the same question twice. Okta authenticates the employee, governs the agent, denies Sales the coarse `inventory:write` scope, and supplies the live clearance claim. For eligible Manager and VP requests, Okta issues the resource token, the resource validates it, and FGA combines role with quantity for the per-action decision. OIG records the one human escalation when a Manager crosses 600 units.
 
 ---
 
@@ -762,7 +762,7 @@ Routing this through Okta Identity Governance, rather than a bespoke approval bo
 
 **User Profile:**
 - Name: Mike Manager
-- Group: `ProGear-Warehouse`
+- Group: `ProGear-Managers`
 - Role: Warehouse Manager
 
 **What He Can Access:**
