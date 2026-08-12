@@ -32,7 +32,6 @@ from auth.fga_client import close_fga_client
 from auth.demo_admin import toggle_demo_attribute, reset_demo_attributes, get_demo_status, ALLOWED_ATTRIBUTES
 from orchestrator.orchestrator import Orchestrator
 from dataclasses import asdict
-from data.demo_store import demo_store
 from services.factory import build_approval_service
 from services.okta_role_resolver import OktaRoleResolver
 
@@ -66,7 +65,7 @@ def _get_approval_service():
     """Return the process-wide ApprovalService, constructing on first call."""
     global _approval_service_singleton
     if _approval_service_singleton is None:
-        _approval_service_singleton = build_approval_service(demo_store)
+        _approval_service_singleton = build_approval_service()
     return _approval_service_singleton
 
 
@@ -234,7 +233,7 @@ class ChatResponse(BaseModel):
     fga_checks: List[Dict[str, Any]]
     authorization_decisions: List[Dict[str, Any]]
     user_info: Optional[Dict[str, Any]] = None
-    # Populated when a Manager's 601+ inventory write awaits VP approval.
+    # Populated when a Manager's 601+ inventory write awaits an AI Agent Owner.
     # Null for direct execution and hard denials.
     pending_approval: Optional[Dict[str, Any]] = None
 
@@ -344,8 +343,8 @@ async def chat(
     }
 
     # Shared Sarah/Mike accounts are used by multiple demo engineers. FGA
-    # controls may simulate vacation for this browser session, but role and
-    # Manager always remain the live Okta values. The overlay does not mutate
+    # controls may simulate vacation and let a live Manager compare Manager/VP
+    # policy outcomes inside this browser session. The overlay does not mutate
     # Okta and cannot grant a scope that Okta refused to issue.
     if request.simulate_fga:
         if not request.demo_session_id:
@@ -364,8 +363,10 @@ async def chat(
             raise HTTPException(status_code=502, detail="FGA demo context could not be loaded") from exc
 
         user_info.update({
+            "clearance_level": demo_context["clearance_level"],
+            "is_a_manager": demo_context["is_a_manager"],
             "is_on_vacation": demo_context["is_on_vacation"],
-            "authorization_context_source": "live_okta_role_with_isolated_vacation",
+            "authorization_context_source": "isolated_fga_demo_context",
         })
 
     # Log sanitized ID token metadata only - never the raw JWT or the full
@@ -482,17 +483,18 @@ async def agent_config():
     Resource-domain metadata for UI display.
 
     Okta governs a single AI Agent workload identity for this demo, the
-    ProGear Sales Agent. The four entries below are internal resource
-    domains - each with its own Custom Authorization Server and scope
-    boundary - that the one governed agent performs token exchanges
-    against. They are not four separate registered Okta AI Agent
-    identities, so this response intentionally avoids labeling each domain
-    as its own "Agent".
+    ProGear Sales Agent. The four entries below are native protected MCP
+    resources. Each publishes RFC 9728 metadata naming its Okta authorization
+    server and supported scopes. They are not four separate registered Okta AI
+    Agent identities.
     """
+    configs = get_all_agent_configs()
     domains = [
         {
             "type": "sales",
             "domain": "Sales",
+            "resource_name": configs["sales"].name,
+            "mcp_url": configs["sales"].mcp_url,
             "description": "Orders, quotes, and sales pipeline",
             "color": "#3b82f6",
             "icon": "ShoppingCart",
@@ -500,6 +502,8 @@ async def agent_config():
         {
             "type": "inventory",
             "domain": "Inventory",
+            "resource_name": configs["inventory"].name,
+            "mcp_url": configs["inventory"].mcp_url,
             "description": "Stock levels, products, and warehouse",
             "color": "#10b981",
             "icon": "Package",
@@ -507,6 +511,8 @@ async def agent_config():
         {
             "type": "customer",
             "domain": "Customer",
+            "resource_name": configs["customer"].name,
+            "mcp_url": configs["customer"].mcp_url,
             "description": "Accounts, contacts, and purchase history",
             "color": "#8b5cf6",
             "icon": "Users",
@@ -514,6 +520,8 @@ async def agent_config():
         {
             "type": "pricing",
             "domain": "Pricing",
+            "resource_name": configs["pricing"].name,
+            "mcp_url": configs["pricing"].mcp_url,
             "description": "Pricing, margins, and discounts",
             "color": "#f59e0b",
             "icon": "DollarSign",
@@ -521,9 +529,8 @@ async def agent_config():
     ]
     identity_note = (
         "One Okta AI Agent identity (the ProGear Sales Agent) performs "
-        "token exchanges across these four resource domains. Each domain "
-        "has its own Custom Authorization Server and scope boundary, not "
-        "its own Okta agent identity."
+        "native Cross App Access across four protected MCP resources. Each MCP "
+        "resource advertises its own Okta authorization server and scopes."
     )
 
     return {
@@ -721,8 +728,9 @@ async def demo_toggle(
     demo_session_id: Optional[str] = Header(None, alias="X-Demo-Session-ID"),
 ):
     """
-    Change only this signed-in browser session's simulated vacation context.
-    Role and Manager remain fixed by the employee's live Okta profile.
+    Change only this signed-in browser session's allowed FGA demo context.
+    Sales cannot simulate a higher role; a live Manager may compare Manager
+    and VP outcomes without changing the shared Okta profile.
     """
     user_id = await _resolve_caller_user_id(authorization)
 

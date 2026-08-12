@@ -341,7 +341,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--domain", required=True)
     parser.add_argument("--app-id", required=True)
     parser.add_argument("--agent-id", required=True)
-    parser.add_argument("--authorization-server-id", required=True)
+    parser.add_argument(
+        "--resource-url",
+        required=True,
+        help="Protected MCP URL whose RFC 9728 metadata names the test org authorization server.",
+    )
     parser.add_argument("--allowed-group-id", required=True)
     parser.add_argument("--allowed-scope", required=True)
     parser.add_argument("--denied-scope", required=True)
@@ -366,7 +370,42 @@ def main() -> int:
     suffix = secrets.token_hex(4)
     original_app = okta.request("GET", f"/api/v1/apps/{args.app_id}").json()
     agent = okta.request("GET", f"/workload-principals/api/v1/ai-agents/{args.agent_id}").json()
-    auth_server = okta.request("GET", f"/api/v1/authorizationServers/{args.authorization_server_id}").json()
+    resource_url = args.resource_url.rstrip("/")
+    parsed_resource = urlparse(resource_url)
+    metadata_url = urlunparse(
+        parsed_resource._replace(
+            path=f"/.well-known/oauth-protected-resource{parsed_resource.path.rstrip('/')}",
+            params="",
+            query="",
+            fragment="",
+        )
+    )
+    metadata_response = requests.get(metadata_url, timeout=20)
+    if not metadata_response.ok:
+        raise RuntimeError(
+            f"MCP discovery failed: HTTP {metadata_response.status_code}"
+        )
+    protected_resource = metadata_response.json()
+    if protected_resource.get("resource", "").rstrip("/") != resource_url:
+        raise RuntimeError("MCP metadata identifies a different resource")
+    issuers = [
+        value.rstrip("/")
+        for value in protected_resource.get("authorization_servers", [])
+        if value.rstrip("/").startswith(f"{okta.domain}/oauth2/")
+    ]
+    if len(issuers) != 1:
+        raise RuntimeError(
+            "MCP metadata must name exactly one authorization server in the test org"
+        )
+    authorization_server_id = issuers[0].rsplit("/", 1)[-1]
+    auth_server = okta.request(
+        "GET", f"/api/v1/authorizationServers/{authorization_server_id}"
+    ).json()
+    advertised_scopes = set(protected_resource.get("scopes_supported", []))
+    if args.allowed_scope not in advertised_scopes:
+        raise RuntimeError(
+            f"MCP metadata does not advertise allowed scope {args.allowed_scope}"
+        )
     test_user = None
     test_key = None
     test_client_secret = None
@@ -395,13 +434,14 @@ def main() -> int:
             "OKTA_DOMAIN": okta.domain,
             "AGENT_NAME": agent["profile"]["name"],
             "RESOURCE_NAME": auth_server["name"],
-            "RESOURCE_URL": "",
+            "RESOURCE_URL": resource_url,
             "RESOURCE_AUDIENCE": auth_server["audiences"][0],
             "RESOURCE_SCOPE": args.allowed_scope,
+            "MCP_TOOL_NAME": "get_inventory_summary",
+            "MCP_TOOL_ARGUMENTS": "{}",
             "REDIRECT_URI": args.redirect_uri,
             "MODE": "Live Okta",
             "SIGN_IN_CLIENT_ID_INPUT": args.app_id,
-            "AUTHORIZATION_SERVER_ID_INPUT": args.authorization_server_id,
             "AGENT_CLIENT_ID_INPUT": args.agent_id,
             "AGENT_KEY_ID_INPUT": key_material["kid"],
             "PREVIEW_USER_EMAIL": test_user["profile"]["login"],

@@ -48,7 +48,7 @@ cells = [
           <b>→</b>
           <span style="padding:8px 12px;border:1px solid #bfdbfe;border-radius:10px;background:#eff6ff"><b>Okta ID-JAG</b><br><small>user + agent + target</small></span>
           <b>→</b>
-          <span style="padding:8px 12px;border:1px solid #bbf7d0;border-radius:10px;background:#f0fdf4"><b>Your API</b><br><small>one scoped token</small></span>
+          <span style="padding:8px 12px;border:1px solid #bbf7d0;border-radius:10px;background:#f0fdf4"><b>Your MCP server</b><br><small>discovery + scoped tool call</small></span>
         </div>
 
         ProGear is the worked example. Replace its names with your agent, API, audience, and scope. No FGA or approval workflow is required for this walkthrough.
@@ -64,7 +64,7 @@ cells = [
         |---|---|---|
         | User-facing app | OIDC sign-in app linked to the agent | Verified user ID token |
         | Custom agent runtime | Registered AI agent + public key | Agent authenticates as itself |
-        | Protected API or MCP server | One Custom Authorization Server + resource connection | Short-lived scoped access token |
+        | Protected MCP server | Registered MCP resource + one Custom Authorization Server | Short-lived token sent in `tools/call` |
         '''
     ),
     code(
@@ -72,18 +72,21 @@ cells = [
         # @title Name your first integration
         OKTA_DOMAIN = "https://your-org.oktapreview.com" # @param {type:"string"}
         AGENT_NAME = "My Custom Agent" # @param {type:"string"}
-        RESOURCE_NAME = "My Protected API" # @param {type:"string"}
-        RESOURCE_URL = "" # @param {type:"string"}
-        RESOURCE_AUDIENCE = "api://my-protected-api" # @param {type:"string"}
-        RESOURCE_SCOPE = "resource.read" # @param {type:"string"}
+        RESOURCE_NAME = "ProGear Inventory MCP" # @param {type:"string"}
+        RESOURCE_URL = "https://progear-mcp-servers-m2f3.onrender.com/inventory/mcp" # @param {type:"string"}
+        RESOURCE_AUDIENCE = "api://progear-inventory" # @param {type:"string"}
+        RESOURCE_SCOPE = "inventory:read" # @param {type:"string"}
+        MCP_TOOL_NAME = "get_inventory_summary" # @param {type:"string"}
+        MCP_TOOL_ARGUMENTS = "{}" # @param {type:"string"}
         REDIRECT_URI = "http://localhost:8080/authorization-code/callback" # @param {type:"string"}
 
         print(f"Okta org:  {OKTA_DOMAIN}")
         print(f"Agent:     {AGENT_NAME}")
         print(f"Resource:  {RESOURCE_NAME}")
-        print(f"API URL:   {RESOURCE_URL or '(add later)'}")
+        print(f"MCP URL:   {RESOURCE_URL}")
         print(f"Audience:  {RESOURCE_AUDIENCE}")
         print(f"Scope:     {RESOURCE_SCOPE}")
+        print(f"Tool:      {MCP_TOOL_NAME} {MCP_TOOL_ARGUMENTS}")
         print(f"Callback:  {REDIRECT_URI}")
         '''
     ),
@@ -153,7 +156,7 @@ cells = [
         | Audience | `RESOURCE_AUDIENCE` from the planning cell |
         | Description | What API or MCP server this boundary protects |
 
-        **Save:** Authorization Server ID. You will paste it into `AUTHORIZATION_SERVER_ID` in Part 2.
+        **Save:** the issuer URI. Your MCP server publishes that URI in its protected-resource metadata, so the agent runtime does not need a copied authorization-server ID.
 
         One server is enough for this walkthrough. Add more only when you truly need separate security domains.
 
@@ -185,23 +188,30 @@ cells = [
     ),
     markdown(
         r'''
-        ## 5. Connect the agent to the resource
+        ## 5. Register the MCP server and connect the agent for XAA
 
         **Purpose:** cap the agent's maximum downstream access.
 
         | Connection setting | Use this value |
         |---|---|
-        | Menu | **Directory → AI Agents → your agent → Resource connections** |
+        | Register resource | **AI Agent Governance → Resources → MCP servers → Add MCP server** |
+        | MCP server URL | `RESOURCE_URL` from the planning cell |
+        | Connect agent | **Directory → AI Agents → your agent → Resource connections** |
         | Resource type | **Authorization server** |
-        | Authorization server | Server from Step 3 |
+        | Authorization server | The Custom Authorization Server from Step 3 |
+        | Resource indicator | `RESOURCE_AUDIENCE` |
         | Scope control | **Only allow** |
         | Allowed scope | `RESOURCE_SCOPE` |
 
         **Check:** activate the resource connection, its credential, and the AI agent. A deactivated agent cannot start a new exchange.
 
-        The resource connection says what the agent may request. The authorization-server policy still decides whether this user receives it.
+        The MCP registration gives Okta standards-based inventory and discovery for the protected endpoint. The **Authorization server** connection keeps this walkthrough on native Cross-App Access (`IDENTITY_ASSERTION_CUSTOM_AS`): it says what the agent may request, and the authorization-server policy decides whether this user receives it.
 
-        **Official help:** [Connect AI agents to resources](https://help.okta.com/oie/en-us/content/topics/ai-agents/ai-agent-connected-resource.htm) · [AI agent resource connections](https://help.okta.com/oie/en-us/content/topics/ai-agents/ai-agent-secure.htm)
+        Do not replace this XAA connection with an **MCP server** connection for this walkthrough. That connection type uses the STS access-token model in the current Okta resource-connection API; it is useful for OAuth-connected third-party MCP services, but it is not the ID-JAG flow being demonstrated here.
+
+        The MCP server must expose `/.well-known/oauth-protected-resource/...` metadata that names the Step 3 authorization server and supported scope.
+
+        **Official help:** [Add MCP servers](https://help.okta.com/oie/en-us/content/topics/ai-agents/ai-agent-mcp-server.htm) · [Connect AI agents to resources](https://help.okta.com/oie/en-us/content/topics/ai-agents/ai-agent-connected-resource.htm) · [Secure MCP servers](https://developer.okta.com/docs/api/secures-ai/mcp-servers)
         '''
     ),
     markdown(
@@ -215,10 +225,10 @@ cells = [
         | Okta domain | Your Okta org |
         | Sign-in client ID + redirect URI | OIDC app |
         | Agent client ID + key ID + private JWK | AI agent registration |
-        | Authorization Server ID | Custom Authorization Server |
-        | Audience + scope | Resource server configuration |
+        | MCP URL | Registered MCP server |
+        | Audience + scope | MCP server and authorization-server configuration |
 
-        You already entered your Okta domain, audience, scope, redirect URI, agent, and resource. Enter only the identifiers Okta generated while you completed Steps 1–3. The runtime cells reuse this receipt automatically.
+        You already entered the MCP URL, audience, scope, redirect URI, agent, and resource. Enter only the identifiers Okta generated for sign-in and the agent. The runtime discovers the target authorization server from the MCP URL.
         '''
     ),
     code(
@@ -226,7 +236,6 @@ cells = [
         # @title Record the Okta-generated IDs once
         MODE = "Guided preview" # @param ["Guided preview", "Live Okta"]
         SIGN_IN_CLIENT_ID_INPUT = "your-sign-in-client-id" # @param {type:"string"}
-        AUTHORIZATION_SERVER_ID_INPUT = "your-authorization-server-id" # @param {type:"string"}
         AGENT_CLIENT_ID_INPUT = "your-workload-principal-id" # @param {type:"string"}
         AGENT_KEY_ID_INPUT = "your-agent-key-id" # @param {type:"string"}
         PREVIEW_USER_EMAIL = "alex@example.com" # @param {type:"string"}
@@ -318,6 +327,15 @@ cells = [
                 code, detail = "request_failed", "Okta returned a non-JSON response"
             return RuntimeError(f"{label} ({response.status_code}, {code}): {detail}")
 
+        def protected_resource_metadata_url(resource_url: str) -> str:
+            parsed = urlparse(resource_url.rstrip("/"))
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                raise ValueError("RESOURCE_URL must be an absolute HTTP URL.")
+            return (
+                f"{parsed.scheme}://{parsed.netloc}"
+                f"/.well-known/oauth-protected-resource{parsed.path}"
+            )
+
         print("Runtime helpers ready.")
         '''
     ),
@@ -332,7 +350,6 @@ cells = [
         r'''
         LIVE = MODE == "Live Okta"
         SIGN_IN_CLIENT_ID = SIGN_IN_CLIENT_ID_INPUT
-        AUTHORIZATION_SERVER_ID = AUTHORIZATION_SERVER_ID_INPUT
         AGENT_CLIENT_ID = AGENT_CLIENT_ID_INPUT
         AGENT_KEY_ID = AGENT_KEY_ID_INPUT
         USER_CLIENT_SECRET = None
@@ -369,15 +386,34 @@ cells = [
                 raise RuntimeError("AGENT_PRIVATE_JWK must contain valid JSON.") from exc
 
         OKTA_DOMAIN = OKTA_DOMAIN.rstrip("/")
-        CUSTOM_ISSUER = f"{OKTA_DOMAIN}/oauth2/{AUTHORIZATION_SERVER_ID}"
         ORG_TOKEN_URL = f"{OKTA_DOMAIN}/oauth2/v1/token"
+        METADATA_URL = protected_resource_metadata_url(RESOURCE_URL)
+        if LIVE:
+            metadata_response = requests.get(METADATA_URL, timeout=15)
+            if not metadata_response.ok:
+                raise oauth_error(metadata_response, "MCP discovery failed")
+            protected_resource = metadata_response.json()
+            if protected_resource.get("resource", "").rstrip("/") != RESOURCE_URL.rstrip("/"):
+                raise ValueError("MCP metadata identifies a different resource URL.")
+            advertised_scopes = protected_resource.get("scopes_supported", [])
+            if RESOURCE_SCOPE not in advertised_scopes:
+                raise ValueError(f"MCP metadata does not advertise {RESOURCE_SCOPE}.")
+            matching_issuers = [
+                value.rstrip("/")
+                for value in protected_resource.get("authorization_servers", [])
+                if value.rstrip("/").startswith(f"{OKTA_DOMAIN}/oauth2/")
+            ]
+            if len(matching_issuers) != 1:
+                raise ValueError("MCP metadata must name exactly one authorization server in this Okta org.")
+            CUSTOM_ISSUER = matching_issuers[0]
+        else:
+            CUSTOM_ISSUER = "https://preview.okta.local/oauth2/resource"
         CUSTOM_TOKEN_URL = f"{CUSTOM_ISSUER}/v1/token"
 
         if LIVE:
             values = {
                 "OKTA_DOMAIN": OKTA_DOMAIN,
                 "SIGN_IN_CLIENT_ID": SIGN_IN_CLIENT_ID,
-                "AUTHORIZATION_SERVER_ID": AUTHORIZATION_SERVER_ID,
                 "AGENT_CLIENT_ID": AGENT_CLIENT_ID,
                 "AGENT_KEY_ID": AGENT_KEY_ID,
             }
@@ -390,9 +426,11 @@ cells = [
             ("Agent", AGENT_NAME),
             ("Agent client", AGENT_CLIENT_ID if LIVE else "wlp-preview-custom-agent"),
             ("Resource", RESOURCE_NAME),
+            ("MCP URL", RESOURCE_URL),
+            ("Well-known", METADATA_URL),
             ("Audience", RESOURCE_AUDIENCE),
             ("Scope", RESOURCE_SCOPE),
-            ("Authorization server", CUSTOM_ISSUER if LIVE else "preview authorization server"),
+            ("Authorization server", CUSTOM_ISSUER),
         ])
         '''
     ),
@@ -686,9 +724,9 @@ cells = [
     ),
     markdown(
         r'''
-        ## 10. Validate the token and call your resource
+        ## 10. Validate the token and call the MCP tool
 
-        The API—not the model—must validate the token's signature, issuer, audience, expiry, and scope before doing any work.
+        The MCP resource—not the model—must validate the token's signature, issuer, audience, expiry, and scope before doing any work. The client then uses the standard JSON-RPC `tools/call` method.
         '''
     ),
     code(
@@ -726,15 +764,34 @@ cells = [
                 ("Granted scope", ", ".join(granted_scopes)),
                 ("Expires", datetime.fromtimestamp(resource_claims["exp"], timezone.utc).isoformat()),
             ])
-            if RESOURCE_URL:
-                api_response = requests.get(
+            if LIVE:
+                try:
+                    tool_arguments = json.loads(MCP_TOOL_ARGUMENTS)
+                except json.JSONDecodeError as exc:
+                    raise ValueError("MCP_TOOL_ARGUMENTS must be a JSON object.") from exc
+                if not isinstance(tool_arguments, dict):
+                    raise ValueError("MCP_TOOL_ARGUMENTS must be a JSON object.")
+                rpc_id = str(uuid.uuid4())
+                api_response = requests.post(
                     RESOURCE_URL,
-                    headers={"Authorization": f"Bearer {RESOURCE_TOKEN}"},
+                    headers={
+                        "Authorization": f"Bearer {RESOURCE_TOKEN}",
+                        "Content-Type": "application/json",
+                        "Accept": "application/json, text/event-stream",
+                    },
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": rpc_id,
+                        "method": "tools/call",
+                        "params": {"name": MCP_TOOL_NAME, "arguments": tool_arguments},
+                    },
                     timeout=15,
                 )
-                print(f"Protected resource response: HTTP {api_response.status_code}")
+                print(f"MCP tools/call response: HTTP {api_response.status_code}")
+                if not api_response.ok:
+                    raise oauth_error(api_response, "MCP tool call failed")
             else:
-                print("Token verified. Add a read-only RESOURCE_URL when your API is ready.")
+                print(f"Preview: would call MCP tool {MCP_TOOL_NAME} with a Bearer token.")
         else:
             print("No resource token exists. Your agent must not call the protected resource.")
         '''
@@ -748,23 +805,24 @@ cells = [
         ```python
         # Trusted backend boundary
         user_id_token = signed_in_session.id_token
+        metadata = discover_oauth_protected_resource(mcp_url)
         id_jag = okta.exchange_user_token(
             user_id_token=user_id_token,
-            audience=resource_authorization_server,
+            audience=metadata.authorization_servers[0],
             scope=required_scope,
         )
         access_token = okta.exchange_id_jag(id_jag)
         verify_access_token(access_token, audience, required_scope)
 
         # Only now may the tool call the resource
-        result = protected_tool.call(access_token=access_token)
+        result = mcp.tools_call(access_token=access_token, name=tool_name, arguments=args)
         ```
 
         | Component | Responsibility |
         |---|---|
         | Browser or client | Sign in the user and protect the session |
         | Agent backend | Hold the private key and perform both exchanges |
-        | Protected resource | Validate every access token and enforce the scope |
+        | MCP resource | Publish RFC 9728 metadata, validate tokens, and enforce tool scopes |
         | Okta | Govern the agent, delegation, resource connection, policy, and audit evidence |
 
         The repository's reusable implementation is [`examples/token_exchange.py`](../examples/token_exchange.py).
@@ -798,8 +856,10 @@ cells = [
         | Your design choice | ProGear value |
         |---|---|
         | Custom agent | ProGear Sales Agent |
-        | Protected resource | Inventory API |
-        | One authorization server | ProGear Inventory Authorization Server |
+        | Protected resource | ProGear Inventory MCP |
+        | MCP URL | `https://progear-mcp-servers-m2f3.onrender.com/inventory/mcp` |
+        | Discovery | `/.well-known/oauth-protected-resource/inventory/mcp` |
+        | One authorization server | ProGear Inventory MCP Custom Authorization Server |
         | Audience | `api://progear-inventory` |
         | First scope | `inventory:read` |
 
@@ -812,7 +872,7 @@ cells = [
 
         You configured and wired the complete path:
 
-        **OIDC sign-in → registered agent identity → ID-JAG → one Custom Authorization Server → one scoped resource token → protected API**
+        **OIDC sign-in → registered agent identity → MCP discovery → ID-JAG → scoped token → native MCP tools/call**
 
         ### Core references
 
@@ -820,6 +880,8 @@ cells = [
         - [Register a custom AI agent](https://help.okta.com/oie/en-us/content/topics/ai-agents/ai-agent-add-manually.htm)
         - [Connect an AI agent to resources](https://help.okta.com/oie/en-us/content/topics/ai-agents/ai-agent-connected-resource.htm)
         - [Set up AI agent token exchange](https://developer.okta.com/docs/guides/ai-agent-token-exchange/-/main/)
+        - [Secure MCP servers with Okta](https://developer.okta.com/docs/api/secures-ai/mcp-servers)
+        - [RFC 9728 OAuth Protected Resource Metadata](https://www.rfc-editor.org/rfc/rfc9728)
         - [IETF Identity Assertion JWT Authorization Grant](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-identity-assertion-authz-grant)
         - [Cross App Access](https://xaa.dev/)
         '''

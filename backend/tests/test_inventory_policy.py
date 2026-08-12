@@ -57,13 +57,13 @@ class InventoryPolicyTests(unittest.TestCase):
         self.assertFalse(decision.approval_required)
         self.assertTrue(decision.direct_allowed)
 
-    def test_manager_601_write_routes_to_vp(self):
+    def test_manager_601_write_routes_to_ai_agent_owner(self):
         decision = decide_inventory_policy(
             ["inventory:write"], "Add 601 basketballs to inventory", 1
         )
         self.assertEqual(decision.relation, "can_update_large")
-        self.assertEqual(decision.approval_role, "VP")
-        self.assertEqual(decision.approval_level, 2)
+        self.assertEqual(decision.approval_role, "AI Agent Owner")
+        self.assertIsNone(decision.approval_level)
         self.assertFalse(decision.direct_allowed)
         self.assertTrue(decision.coarse_allowed)
 

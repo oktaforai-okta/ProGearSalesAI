@@ -11,7 +11,7 @@ type NodeId =
   | 'user'
   | 'agent'
   | 'okta'
-  | 'resourceAs'
+  | 'discovery'
   | 'fga'
   | 'audit'
   | 'inventory'
@@ -81,13 +81,13 @@ function graphNodes(fgaEnabled: boolean): GraphNode[] {
       x: 225, y: 220, w: 185, h: 104, color: COLORS.agent,
     },
     {
-      id: 'okta', label: 'Okta', sublabel: 'Identity + delegation',
-      detail: 'Checks live user context, governs the agent, and issues ID-JAG.',
+      id: 'okta', label: 'Okta', sublabel: 'ID-JAG + scoped token',
+      detail: 'Governs the agent, preserves the employee subject, applies policy, and issues the scoped token.',
       x: 490, y: 45, w: 180, h: 82, color: COLORS.okta,
     },
     {
-      id: 'resourceAs', label: 'Resource AS', sublabel: 'Policy + scoped token',
-      detail: 'Validates ID-JAG, applies local policy, and issues a resource token.',
+      id: 'discovery', label: 'MCP discovery', sublabel: 'RFC 9728 well-known',
+      detail: 'The MCP resource publishes its URL, protecting Okta authorization server, and supported scopes.',
       x: 490, y: 225, w: 180, h: 94, color: COLORS.authz,
     },
     {
@@ -96,22 +96,22 @@ function graphNodes(fgaEnabled: boolean): GraphNode[] {
       x: 490, y: 410, w: 180, h: 64, color: COLORS.audit,
     },
     {
-      id: 'inventory', label: 'Inventory', sublabel: 'read / write',
-      detail: 'Inventory accepts only a valid token with the required scope.',
+      id: 'inventory', label: 'Inventory MCP', sublabel: 'read / write / alert',
+      detail: 'Inventory accepts a Bearer token and executes the authorized MCP tools/call.',
       x: 1000, y: 50, w: 175, h: 70, color: COLORS.resource, resource: true,
     },
     {
-      id: 'customer', label: 'Customer', sublabel: 'read',
-      detail: 'Customer data has its own resource boundary and scope.',
+      id: 'customer', label: 'Customer MCP', sublabel: 'read / lookup / history',
+      detail: 'Customer tools have their own protected-resource metadata and scopes.',
       x: 1000, y: 155, w: 175, h: 70, color: COLORS.resource, resource: true,
     },
     {
-      id: 'pricing', label: 'Pricing', sublabel: 'read / margin / discount',
+      id: 'pricing', label: 'Pricing MCP', sublabel: 'read / margin / discount',
       detail: 'Pricing has its own scopes and resource policy.',
       x: 1000, y: 260, w: 175, h: 70, color: COLORS.resource, resource: true,
     },
     {
-      id: 'sales', label: 'Sales', sublabel: 'read / quote / order',
+      id: 'sales', label: 'Sales MCP', sublabel: 'read / quote / order',
       detail: 'Sales has its own scopes and resource policy.',
       x: 1000, y: 365, w: 175, h: 70, color: COLORS.resource, resource: true,
     },
@@ -143,19 +143,25 @@ function graphEdges(fgaEnabled: boolean, agentActive: boolean): GraphEdge[] {
     {
       id: 'agent-okta', from: 'agent', to: 'okta',
       path: 'M318 220 C318 158 402 86 490 86',
-      label: agentActive ? 'profile + auth' : 'exchange stopped', labelX: 410, labelY: 148,
+      label: agentActive ? 'agent + user' : 'exchange stopped', labelX: 410, labelY: 148,
       blocked: !agentActive,
     },
     {
-      id: 'okta-resource', from: 'okta', to: 'resourceAs',
-      path: 'M580 127 L580 225',
-      label: 'ID-JAG', labelX: 620, labelY: 181,
+      id: 'agent-discovery', from: 'agent', to: 'discovery',
+      path: curve([[410, 272], [490, 272]]),
+      label: 'GET .well-known', labelX: 450, labelY: 251,
       downstream: true,
     },
     {
-      id: 'resource-audit', from: 'resourceAs', to: 'audit',
-      path: 'M580 319 L580 410',
-      label: 'log', labelX: 610, labelY: 369,
+      id: 'discovery-okta', from: 'discovery', to: 'okta',
+      path: 'M580 225 L580 127',
+      label: 'AS + scopes', labelX: 622, labelY: 181,
+      downstream: true,
+    },
+    {
+      id: 'okta-audit', from: 'okta', to: 'audit',
+      path: 'M670 86 C710 86 710 442 670 442',
+      label: 'audit', labelX: 710, labelY: 367,
       downstream: true,
     },
   ];
@@ -164,9 +170,9 @@ function graphEdges(fgaEnabled: boolean, agentActive: boolean): GraphEdge[] {
   if (fgaEnabled) {
     edges.push(
       {
-        id: 'resource-fga', from: 'resourceAs', to: 'fga',
-        path: curve([[resourceStartX, 246], [755, 85]]),
-        label: 'inventory token', labelX: 720, labelY: 150,
+        id: 'okta-fga', from: 'okta', to: 'fga',
+        path: curve([[resourceStartX, 86], [755, 85]]),
+        label: 'role + quantity', labelX: 712, labelY: 65,
         downstream: true,
       },
       {
@@ -178,16 +184,17 @@ function graphEdges(fgaEnabled: boolean, agentActive: boolean): GraphEdge[] {
     );
   } else {
     edges.push({
-      id: 'resource-inventory', from: 'resourceAs', to: 'inventory',
-      path: curve([[resourceStartX, 244], [1000, 85]]),
+      id: 'okta-inventory', from: 'okta', to: 'inventory',
+      path: curve([[resourceStartX, 86], [1000, 85]]),
+      label: 'scoped access', labelX: 835, labelY: 65,
       downstream: true,
     });
   }
 
   edges.push(
-    { id: 'resource-customer', from: 'resourceAs', to: 'customer', path: curve([[resourceStartX, 265], [1000, 190]]), downstream: true },
-    { id: 'resource-pricing', from: 'resourceAs', to: 'pricing', path: curve([[resourceStartX, 283], [1000, 295]]), downstream: true },
-    { id: 'resource-sales', from: 'resourceAs', to: 'sales', path: curve([[resourceStartX, 302], [1000, 400]]), downstream: true }
+    { id: 'okta-customer', from: 'okta', to: 'customer', path: curve([[resourceStartX, 95], [1000, 190]]), downstream: true },
+    { id: 'okta-pricing', from: 'okta', to: 'pricing', path: curve([[resourceStartX, 105], [1000, 295]]), downstream: true },
+    { id: 'okta-sales', from: 'okta', to: 'sales', path: curve([[resourceStartX, 115], [1000, 400]]), downstream: true }
   );
 
   return edges;
@@ -208,7 +215,7 @@ export default function D3ArchitectureDiagram({ title = 'System architecture' }:
   const selectedNode = nodes.find((node) => node.id === selectedId) ?? nodes[2];
   const activeId = hoveredId ?? selectedId;
 
-  const isDownstream = (id: NodeId) => ['okta', 'resourceAs', 'fga', 'audit', 'inventory', 'customer', 'pricing', 'sales'].includes(id);
+  const isDownstream = (id: NodeId) => ['okta', 'discovery', 'fga', 'audit', 'inventory', 'customer', 'pricing', 'sales'].includes(id);
 
   return (
     <div className="space-y-6">
@@ -252,7 +259,7 @@ export default function D3ArchitectureDiagram({ title = 'System architecture' }:
             viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
             className="block min-w-[900px] w-full"
             role="img"
-            aria-label="ProGear architecture showing the user, governed AI agent, Okta ID-JAG exchange, Resource Authorization Server, optional FGA decision, audit trail, and business resources"
+            aria-label="ProGear architecture showing the employee, governed AI agent, native MCP discovery, Okta ID-JAG exchange, optional FGA decision, audit trail, and protected MCP resources"
           >
             <defs>
               <marker id="arch-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
@@ -383,6 +390,7 @@ export default function D3ArchitectureDiagram({ title = 'System architecture' }:
         <a className="hover:text-blue-600 hover:underline dark:hover:text-blue-300" href="https://developer.okta.com/docs/api/secures-ai/ai-agents" target="_blank" rel="noreferrer">Workload Principal</a>
         <a className="hover:text-blue-600 hover:underline dark:hover:text-blue-300" href="https://datatracker.ietf.org/doc/html/draft-ietf-oauth-identity-assertion-authz-grant" target="_blank" rel="noreferrer">ID-JAG</a>
         <a className="hover:text-blue-600 hover:underline dark:hover:text-blue-300" href="https://xaa.dev/" target="_blank" rel="noreferrer">Cross App Access</a>
+        <a className="hover:text-blue-600 hover:underline dark:hover:text-blue-300" href="https://www.rfc-editor.org/rfc/rfc9728" target="_blank" rel="noreferrer">RFC 9728</a>
       </div>
     </div>
   );

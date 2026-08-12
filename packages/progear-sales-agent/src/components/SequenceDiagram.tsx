@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { CheckCircle2, ShieldX } from 'lucide-react';
 
-type ActorId = 'user' | 'agent' | 'okta' | 'resourceAs' | 'fga' | 'api';
+type ActorId = 'user' | 'agent' | 'mcp' | 'okta' | 'fga';
 
 interface Actor {
   id: ActorId;
@@ -28,9 +28,8 @@ interface SequenceDiagramProps {
 const BASE_ACTORS: Actor[] = [
   { id: 'user', label: 'Employee', sublabel: 'subject', color: '#8b5cf6' },
   { id: 'agent', label: 'ProGear Agent', sublabel: 'Workload Principal', color: '#f97316' },
-  { id: 'okta', label: 'Okta', sublabel: 'Identity Provider', color: '#3b82f6' },
-  { id: 'resourceAs', label: 'Resource AS', sublabel: 'local policy', color: '#0f766e' },
-  { id: 'api', label: 'Inventory API', sublabel: 'protected resource', color: '#4d9f45' },
+  { id: 'mcp', label: 'Inventory MCP', sublabel: 'protected resource', color: '#4d9f45' },
+  { id: 'okta', label: 'Okta', sublabel: 'identity + access', color: '#3b82f6' },
 ];
 
 const FGA_ACTOR: Actor = { id: 'fga', label: 'FGA', sublabel: 'context decision', color: '#7c3aed' };
@@ -43,7 +42,7 @@ function buildSteps(agentActive: boolean, fgaEnabled: boolean): Step[] {
     },
     {
       from: 'agent', to: 'okta', label: 'Profile + agent proof',
-      detail: 'Okta supplies the fixed live role and authenticates the Workload Principal. Only vacation may be simulated per browser session.',
+      detail: 'Okta supplies the live employee context and authenticates the Workload Principal. The demo can isolate Manager/VP comparisons by browser session.',
     },
   ];
 
@@ -60,15 +59,23 @@ function buildSteps(agentActive: boolean, fgaEnabled: boolean): Step[] {
   const steps: Step[] = [
     ...opening,
     {
+      from: 'agent', to: 'mcp', label: 'GET .well-known',
+      detail: 'RFC 9728 metadata identifies the MCP resource, its protecting Okta authorization server, and its scopes.',
+    },
+    {
+      from: 'mcp', to: 'agent', label: 'AS + supported scopes',
+      detail: 'The agent validates the resource identifier and discovers where to request access.',
+    },
+    {
       from: 'okta', to: 'agent', label: 'ID-JAG',
-      detail: 'Signed grant: sub=user · client_id=agent · aud=Resource AS.',
+      detail: 'Signed grant preserves the employee subject and identifies the ProGear Workload Principal.',
     },
     {
-      from: 'agent', to: 'resourceAs', label: 'ID-JAG + scope',
-      detail: 'The Resource AS validates the grant and applies its local policy.',
+      from: 'agent', to: 'okta', label: 'ID-JAG + MCP scope',
+      detail: 'The discovered authorization server validates the grant and applies its resource policy.',
     },
     {
-      from: 'resourceAs', to: 'agent', label: 'Scoped access token',
+      from: 'okta', to: 'agent', label: 'Scoped access token',
       detail: 'A short-lived inventory:read or inventory:write token is returned.',
     },
   ];
@@ -77,22 +84,22 @@ function buildSteps(agentActive: boolean, fgaEnabled: boolean): Step[] {
     steps.push(
       {
         from: 'agent', to: 'fga', label: 'Role + quantity',
-        detail: 'FGA evaluates the fixed live Okta role and requested quantity.',
+        detail: 'FGA evaluates the role context and requested quantity. Production uses the live Okta role; the demo can preview Manager or VP.',
       },
       {
-        from: 'fga', to: 'agent', label: 'Allow · VP approval · block',
-        detail: 'The action executes, waits for a VP, or stops.',
+        from: 'fga', to: 'agent', label: 'Allow · owner approval · block',
+        detail: 'The action executes, waits for an AI Agent Owner, or stops.',
       }
     );
   }
 
   steps.push(
     {
-      from: 'agent', to: 'api', label: 'Bearer token',
-      detail: 'Inventory validates the token before executing the authorized action.',
+      from: 'agent', to: 'mcp', label: 'tools/call + Bearer token',
+      detail: 'The agent calls the real MCP tool only after token validation and the optional FGA decision.',
     },
     {
-      from: 'api', to: 'agent', label: 'Result + audit',
+      from: 'mcp', to: 'agent', label: 'Tool result + audit',
       detail: 'The response returns with user, agent, resource, scope, and outcome traceable.',
     }
   );
@@ -102,7 +109,7 @@ function buildSteps(agentActive: boolean, fgaEnabled: boolean): Step[] {
 
 export default function SequenceDiagram({ agentActive = true, fgaEnabled = false }: SequenceDiagramProps) {
   const actors = useMemo(
-    () => (fgaEnabled ? [...BASE_ACTORS.slice(0, 4), FGA_ACTOR, BASE_ACTORS[4]] : BASE_ACTORS),
+    () => (fgaEnabled ? [...BASE_ACTORS, FGA_ACTOR] : BASE_ACTORS),
     [fgaEnabled]
   );
   const steps = useMemo(() => buildSteps(agentActive, fgaEnabled), [agentActive, fgaEnabled]);

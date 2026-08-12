@@ -8,7 +8,7 @@ the next request without stale stored roles.
 FGA evaluates these application relations on ``inventory_system:warehouse``:
 
 * ``can_read``: Sales, Manager, or VP
-* ``can_request_change``: Manager only, for a 601+ VP request
+* ``can_request_change``: Manager only, for a 601+ AI Agent Owner request
 * ``can_update_standard``: Manager or VP (1-600 units)
 * ``can_update_large``: VP (601+ units)
 
@@ -255,7 +255,7 @@ def get_fga_model_info() -> Dict[str, Any]:
         },
         "key_relations": {
             "can_read": "Sales or Manager or VP",
-            "can_request_change": "Manager only, for VP approval above 600",
+            "can_request_change": "Manager only, for AI Agent Owner approval above 600",
             "can_update_standard": "Manager or VP (1-600)",
             "can_update_large": "VP (601+)",
         },

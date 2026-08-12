@@ -103,7 +103,7 @@ SCOPE_DEFINITIONS = {
             "description": "Modify inventory"
         },
         "alert": {
-            "scope": "inventory:read",
+            "scope": "inventory:alert",
             "keywords": ["alert", "notify", "reorder", "low stock", "warning"],
             "description": "View inventory alerts"
         },
@@ -503,10 +503,10 @@ Return ONLY the JSON object, no other text."""
     async def _fga_check_node(self, state: WorkflowState) -> WorkflowState:
         """Apply the request's trusted authorization context to FGA.
 
-        The role context always comes from live Okta and its signed resource
-        token. Hosted FGA simulation can overlay only vacation at the earlier
-        delegation gate. It cannot change role or manufacture an Okta scope:
-        token exchange and resource validation happen before this node.
+        Production role context comes from live Okta. In the hosted demo, a
+        live Manager may compare Manager and VP outcomes through a session-only
+        overlay. That overlay cannot manufacture an Okta scope: token exchange
+        and resource validation still happen before this node.
         """
         agents = state["agents_to_invoke"]
         agent_results = state.get("agent_results", {})
@@ -524,8 +524,8 @@ Return ONLY the JSON object, no other text."""
             "status": "processing"
         })
 
-        # The API always resolves this value from the authenticated employee's
-        # live Okta profile. FGA simulation never replaces the role.
+        # The API starts with the authenticated employee's live Okta profile.
+        # A Manager-only demo overlay may change this value for the FGA check.
         clearance_level = normalize_role_level(
             self.user_info.get("clearance_level", self.user_info.get("Clearance"))
         )
@@ -831,10 +831,10 @@ Return ONLY the JSON object, no other text."""
         return state
 
     async def _approval_gate_node(self, state: WorkflowState) -> WorkflowState:
-        """Create the VP OIG request selected by the FGA policy.
+        """Create the AI Agent Owner request selected by the FGA policy.
 
-        Only a Manager write of 601+ routes to a VP. Sales and malformed
-        requests are hard denials and never turn into approval requests.
+        Only a Manager write of 601+ routes to AIAgentOwners. Sales and
+        malformed requests are hard denials and never create requests.
         """
         from services.intent import parse_inventory_intent  # local import — same style as existing backend modules
 
@@ -899,9 +899,10 @@ Return ONLY the JSON object, no other text."""
             })
             return state
 
-        approval_role = str(policy.get("approval_role") or "VP")
-        approval_level = int(policy.get("approval_level") or 2)
-        approver_group = os.getenv("OKTA_VP_APPROVER_GROUP_NAME", "ProGear-VPs")
+        approval_role = str(policy.get("approval_role") or "AI Agent Owner")
+        approval_level_raw = policy.get("approval_level")
+        approval_level = int(approval_level_raw) if approval_level_raw is not None else None
+        approver_group = os.getenv("OKTA_APPROVER_GROUP_NAME", "AIAgentOwners")
         try:
             fga_check_id = None
             if state.get("fga_checks"):
@@ -1079,6 +1080,9 @@ Return ONLY the JSON object, no other text."""
                 "id_jag_claims": result.get("id_jag_claims"),  # Decoded ID-JAG claims
                 "resource_token_validated": result.get("resource_token_validated", False),
                 "resource_token_kid": result.get("resource_token_kid"),
+                "mcp_resource": result.get("mcp_resource"),
+                "protected_resource_metadata": result.get("protected_resource_metadata"),
+                "authorization_server_issuer": result.get("authorization_server_issuer"),
                 "resource_validation_error": (
                     result.get("error")
                     if result.get("token_issued") and not result.get("resource_token_validated")
@@ -1136,8 +1140,7 @@ Return ONLY the JSON object, no other text."""
             "status": "processing"
         })
 
-        # For each agent with access, simulate processing
-        # In a full implementation, this would call MCP tools
+        # Each authorized domain now calls its native protected MCP endpoint.
         for agent_type, exchange_result in agent_results.items():
             # Use display_name for Agent Flow card
             display_name = exchange_result["agent_info"].get("display_name", exchange_result["agent_info"]["name"])
@@ -1262,11 +1265,9 @@ Return ONLY the JSON object, no other text."""
 
         agent_class = agent_classes.get(agent_type)
         if not agent_class:
-            # Fallback to demo data if agent class not found
-            data = self._get_demo_data(agent_type, message, scopes)
             return {
-                "success": True,
-                "response": f"[{agent_name}]\n{data}\n(Scopes: {', '.join(scopes)})",
+                "success": False,
+                "error": f"No native MCP adapter is configured for {agent_type}.",
             }
 
         try:
@@ -1278,6 +1279,7 @@ Return ONLY the JSON object, no other text."""
                     "scopes": scopes,
                     "resource_token_validated": exchange_result.get("resource_token_validated", False),
                     "authorization_decision": authorization_decision,
+                    "mcp_access_token": exchange_result.get("access_token"),
                 },
             )
 
@@ -1293,29 +1295,14 @@ Return ONLY the JSON object, no other text."""
                     "response_is_final": response_is_final,
                 }
             else:
-                if agent_type == AGENT_INVENTORY and "inventory:write" in scopes:
-                    return {
-                        "success": False,
-                        "error": result.get("error") or result.get("result") or "Inventory write failed",
-                    }
-                # Agent LLM call failed, use demo data as fallback
-                logger.warning(f"Agent {agent_type} LLM call failed: {result.get('error')}")
-                data = self._get_demo_data(agent_type, message, scopes)
                 return {
-                    "success": True,
-                    "response": f"[{agent_name}]\n{data}\n(Scopes: {', '.join(scopes)})",
+                    "success": False,
+                    "error": result.get("error") or result.get("result") or "MCP operation failed",
                 }
 
         except Exception as e:
             logger.error(f"Error invoking agent {agent_type}: {e}")
-            if agent_type == AGENT_INVENTORY and "inventory:write" in scopes:
-                return {"success": False, "error": str(e)}
-            # Fallback to demo data
-            data = self._get_demo_data(agent_type, message, scopes)
-            return {
-                "success": True,
-                "response": f"[{agent_name}]\n{data}\n(Scopes: {', '.join(scopes)})",
-            }
+            return {"success": False, "error": str(e)}
 
     def _get_demo_data(self, agent_type: str, message: str, scopes: List[str] = None) -> str:
         """Get demo data for an agent based on message context and scopes."""
@@ -1444,7 +1431,7 @@ Return ONLY the JSON object, no other text."""
         if state.get("pending_approval") is not None:
             pa = state["pending_approval"]
             intent = pa.get("intent") or {}
-            approval_role = pa.get("approver_role") or "VP"
+            approval_role = pa.get("approver_role") or "AI Agent Owner"
             state["final_response"] = (
                 "I didn’t change the inventory. "
                 f"This request requires {approval_role} approval, so I created Okta request "

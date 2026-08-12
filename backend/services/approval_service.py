@@ -2,7 +2,7 @@
 
 Depends on:
 - OktaOIGClient   (HTTP)
-- A demo_store-like object supporting update_inventory_quantity(sku, qty, op, idempotency_key)
+- An async Inventory MCP executor for the approved write
 - A service-token minter: callable(scope: str) -> str returning an access token
 - A clock:  callable() -> datetime.datetime (UTC)
 - A file path for the idempotency ledger (durable only on persistent storage)
@@ -170,7 +170,6 @@ class ApprovalService:
         self,
         *,
         oig: OktaOIGClient,
-        demo_store: Any,
         mint_service_token: Callable[[str], Awaitable[str]],
         validate_service_token: Callable[[str, str], Awaitable[Any]],
         request_type_id: str,
@@ -179,10 +178,12 @@ class ApprovalService:
         quantity_threshold: int = 601,
         status_cache_ttl_seconds: float = 8.0,
         resolve_approver_level: Callable[[dict], Awaitable[int]] | None = None,
+        verify_approver_group: Callable[[dict, str], Awaitable[bool]] | None = None,
         clock: Callable[[], dt.datetime] = lambda: dt.datetime.now(dt.timezone.utc),
+        execute_inventory_write: Callable[..., Awaitable[dict[str, Any]]] | None = None,
+        demo_store: Any = None,
     ):
         self._oig = oig
-        self._store = demo_store
         self._mint_token = mint_service_token
         self._validate_token = validate_service_token
         self._request_type_id = request_type_id
@@ -190,10 +191,27 @@ class ApprovalService:
         self._threshold = quantity_threshold
         self._status_cache_ttl = max(0.0, status_cache_ttl_seconds)
         self._resolve_approver_level = resolve_approver_level
+        self._verify_approver_group = verify_approver_group
         self._now = clock
         self._locks: dict[str, asyncio.Lock] = {}
         self._status_cache: dict[str, tuple[float, ApprovalStatus]] = {}
         self._ledger = _Ledger(ledger_path)
+        if execute_inventory_write is not None:
+            self._execute_inventory_write = execute_inventory_write
+        elif demo_store is not None:
+            # Test/backward-compatibility adapter. Production construction uses
+            # the native MCP executor from services.factory.
+            async def _legacy_store_executor(**kwargs):
+                return demo_store.update_inventory_quantity(
+                    sku=kwargs["sku"],
+                    quantity_change=kwargs["quantity"],
+                    operation=kwargs["operation"],
+                    idempotency_key=kwargs.get("idempotency_key"),
+                )
+
+            self._execute_inventory_write = _legacy_store_executor
+        else:
+            raise ValueError("An Inventory MCP executor is required.")
 
     # ---------- gating ----------
 
@@ -251,6 +269,7 @@ class ApprovalService:
             fga_check_id=fga_check_id,
             required_approver_role=required_approver_role,
             required_approver_level=required_approver_level,
+            required_approver_group=approver_group_name,
         )
         unit_name = product if qty == 1 or product.endswith("s") else f"{product}s"
         subject = f"Inventory write: +{qty} {unit_name}"
@@ -258,8 +277,8 @@ class ApprovalService:
             f"Requested for: {user_email}\n"
             f"Action: Add {qty} {unit_name} to inventory\n"
             f"Reason: Exceeds the Manager limit of {self._threshold - 1} units\n"
-            f"Required approval: {required_approver_role or 'VP'} "
-            f"(Level {required_approver_level or 2})\n"
+            f"Required approval: {required_approver_role or 'AI Agent Owner'} "
+            f"({approver_group_name})\n"
             "Governed agent: ProGear Sales Agent"
         )
 
@@ -521,8 +540,37 @@ class ApprovalService:
                 self._cache_status(status)
                 return status
 
+            required_group = intent.required_approver_group
+            if required_group:
+                if self._verify_approver_group is None:
+                    status.status = "denied"
+                    status.denial_reason = "The approver's Okta group membership could not be verified."
+                    ledger_entry.terminal = True
+                    self._ledger.put(request_id, ledger_entry)
+                    self._cache_status(status)
+                    return status
+                try:
+                    is_member = await self._verify_approver_group(
+                        status.approver or {}, required_group
+                    )
+                except Exception as exc:  # fail closed on an Okta lookup error
+                    logger.warning("Approver group lookup failed for %s: %s", request_id, exc)
+                    status.status = "approved"
+                    status.poll_error = True
+                    status.denial_reason = "The approver's Okta group membership could not be verified yet."
+                    return status
+                if not is_member:
+                    status.status = "denied"
+                    status.denial_reason = (
+                        f"Approval requires current membership in {required_group}."
+                    )
+                    ledger_entry.terminal = True
+                    self._ledger.put(request_id, ledger_entry)
+                    self._cache_status(status)
+                    return status
+
             required_level = intent.required_approver_level
-            if required_level:
+            if required_level and not required_group:
                 if self._resolve_approver_level is None:
                     status.status = "denied"
                     status.denial_reason = "The approver role could not be verified in Okta."
@@ -562,11 +610,12 @@ class ApprovalService:
             try:
                 service_token = await self._mint_token(intent.scope)
                 await self._validate_token(service_token, intent.scope)
-                result = self._store.update_inventory_quantity(
+                result = await self._execute_inventory_write(
                     sku=intent.product_name,
-                    quantity_change=intent.quantity_delta,
+                    quantity=intent.quantity_delta,
                     operation="increase",
                     idempotency_key=request_id,
+                    access_token=service_token,
                 )
                 if "error" in result:
                     raise RuntimeError(result["error"])

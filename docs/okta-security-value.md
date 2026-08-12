@@ -691,7 +691,7 @@ If an AI agent is compromised or behaving unexpectedly:
 
 Everything above - Workload Principals, ID-JAG, four Custom Authorization Servers - answers one question well: **may this governed agent obtain a token for this resource and scope while acting for this user?** For Inventory, both read and write scopes let the request reach the resource. A write scope is not permission to bypass the next decision.
 
-That question is necessary, but it is not sufficient for every access decision. Before requesting ID-JAG, ProGear also evaluates the employee's live delegation context: `is_on_vacation=true` stops every agent action, while `is_a_manager` remains synchronized with the authoritative role for clear profile and audit context. Known Sales writes then stop at the live Okta clearance guard. For eligible requests, this demo adds a second layer—**FGA** (Fine-Grained Authorization)—after token exchange to answer: **given this live Okta role and this quantity, may the request execute, stop, or require VP approval?**
+That question is necessary, but it is not sufficient for every access decision. Before requesting ID-JAG, ProGear also evaluates the employee's live delegation context: `is_on_vacation=true` stops every agent action, while `is_a_manager` remains synchronized with the authoritative role for clear profile and audit context. Known Sales writes then stop at the live Okta clearance guard. For eligible requests, this demo adds a second layer—**FGA** (Fine-Grained Authorization)—after token exchange to answer: **given this role and quantity, may the request execute, stop, or require AI Agent Owner approval?**
 
 ### Why not just make Okta's policy more granular?
 
@@ -707,11 +707,11 @@ FGA runs on top of the Okta scope check, for the Inventory domain, only after Ok
 |---|---|
 | Signed-in user and governed agent identity | Read: all valid role levels may execute |
 | `inventory:read` for Sales, Manager, or VP; `inventory:write` only for Manager or VP | Write 1–600 units: Level 1+ executes; Sales never reaches the write check |
-| Validated `Clearance` role claim | Write 601+ units: Level 2 executes; Level 1 may request VP approval |
+| Validated `Clearance` role claim | Write 601+ units: Level 2 executes; Level 1 may request AI Agent Owner approval |
 
 `inventory:read` maps to `can_read`. Quantity selects `can_update_standard` for 1–600 or `can_update_large` for 601+. `can_request_change` is intentionally Manager-only, so Sales can never manufacture an access request. Low-stock alerts remain reads.
 
-**Concretely:** Sarah (Level 0) may read, but every write is blocked and no request is created. With FGA enabled, Mike (Level 1) may add 50 directly, but adding 601 creates a VP request; with FGA off, his coarse `inventory:write` scope permits either quantity directly. A Level 2 VP may perform either write directly.
+**Concretely:** Sarah (Level 0) may read, but every write is blocked and no request is created. With FGA enabled, Mike (Level 1) may add 50 directly, but adding 601 creates an `AIAgentOwners` request; with FGA off, his coarse `inventory:write` scope permits either quantity directly. A Level 2 VP may perform either write directly. The hosted demo can preview that VP outcome inside Mike's isolated browser session.
 
 ### Why this is a second layer, not duplicated work
 
@@ -723,16 +723,16 @@ Okta and FGA are not answering the same question twice. Okta authenticates the e
 
 An action can have a valid token but still require a higher role before it executes. That is where Okta Identity Governance supplies the human-in-the-loop step.
 
-In this demo, **Sales writes are denied without creating an access request**. With FGA enabled, **a Manager write of 601 or more requires VP approval**. With FGA off, a validated Manager `inventory:write` token permits any positive quantity. The backend creates an **Okta Identity Governance (OIG)** request with a concise human summary, keeps the exact execution intent in its approval ledger, makes no inventory change while the request is pending, and verifies the approver's current Level 2 Okta role before executing an approved change.
+In this demo, **Sales writes are denied without creating an access request**. With FGA enabled, **a Manager write of 601 or more requires AI Agent Owner approval**. With FGA off, a validated Manager `inventory:write` token permits any positive quantity. The backend creates an **Okta Identity Governance (OIG)** request with a concise human summary, keeps the exact execution intent in its approval ledger, makes no inventory change while the request is pending, and verifies the approver's current `AIAgentOwners` membership before executing an approved change.
 
 ### Why add a third gate when the first two already said yes?
 
 Because "is this action within policy" and "is this action a good idea right now" are different questions, answered by different mechanisms:
 
 - **Authorization (Okta + FGA) asks:** may this role execute this exact quantity now, or may it submit a request to the next role?
-- **Governance (the approval gate) asks:** did a currently qualified VP approve the queued Manager change?
+- **Governance (the approval gate) asks:** did a current owner of the governed AI agent approve the queued Manager change?
 
-When FGA is enabled, the 600/601 boundary makes the story deterministic. A Manager is trusted to execute normal inventory adjustments through 600 units. A VP must authorize a Manager's change at 601 or above. Sales cannot execute either class of write and cannot create an approval request. When FGA is off, the boundary is not evaluated.
+When FGA is enabled, the 600/601 boundary makes the story deterministic. A Manager is trusted to execute normal inventory adjustments through 600 units. An AI Agent Owner must authorize a Manager's change at 601 or above. Sales cannot execute either class of write and cannot create an approval request. When FGA is off, the boundary is not evaluated.
 
 Routing this through Okta Identity Governance, rather than a bespoke approval box bolted onto the app, matters for the same reason the rest of this document does: the request, the justification, and the approval decision all land in the same governance system that already owns your access-review and audit story, instead of creating a second, disconnected place your auditors have to go find.
 
@@ -776,7 +776,7 @@ Routing this through Okta Identity Governance, rather than a bespoke approval bo
 
 **Audit Trail:** 1 success, 3 denials - all logged with Mike Manager as the user.
 
-**Note on the `inventory:write` grant above:** token issuance is necessary, not sufficient. Inventory validates the token and FGA still applies Mike's Level 1 role plus the requested quantity. He can execute 1–600; 601+ creates a Level 2 VP request. See [Layer Two](#layer-two-fine-grained-authorization) and [Layer Three](#layer-three-human-approval-for-high-risk-actions-okta-identity-governance) above.
+**Note on the `inventory:write` grant above:** token issuance is necessary, not sufficient. Inventory validates the token and FGA still applies Mike's Level 1 role plus the requested quantity. He can execute 1–600; 601+ creates an AI Agent Owner request. See [Layer Two](#layer-two-fine-grained-authorization) and [Layer Three](#layer-three-human-approval-for-high-risk-actions-okta-identity-governance) above.
 
 ---
 
@@ -834,7 +834,7 @@ Routing this through Okta Identity Governance, rather than a bespoke approval bo
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-No single layer above is sufficient by itself. Identity establishes the user, agent, role, and resource boundary. FGA combines role and quantity for each action. OIG records the qualified VP decision when escalation is required. The value is the enforced chain, not any one control in isolation.
+No single layer above is sufficient by itself. Identity establishes the user, agent, role, and resource boundary. FGA combines role and quantity for each action. OIG records the AI Agent Owner decision when escalation is required. The value is the enforced chain, not any one control in isolation.
 
 ---
 
@@ -842,7 +842,7 @@ No single layer above is sufficient by itself. Identity establishes the user, ag
 
 1. **Run the Demo** - See Scenario 2 in action with real token exchanges
 2. **Check the Logs** - Verify the audit trail in your Okta System Log
-3. **Try Different Users** - Log in as Sarah, Mike, Joe, and Frank to see different access levels
+3. **Try Different Users** - Log in as Sarah, Mike, and Frank to see different access levels; use Mike's isolated FGA control to preview VP
 4. **Plan for Scenarios 3 & 4** - Same infrastructure, expanding scope
 
 ---

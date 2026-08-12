@@ -3,12 +3,13 @@ Sales Agent - The orchestrator for ProGear sales operations.
 
 Registered as a first-class identity in Okta's AI Agent Directory.
 Uses raw Anthropic SDK for LLM calls.
-Uses demo_store for customer and pricing data.
+Calls the protected ProGear Sales MCP for business data.
 """
 
 from typing import Dict, Any, Optional
 from .base_agent import BaseAgent
-from data.demo_store import demo_store
+from auth.agent_config import AGENT_SALES, get_agent_config
+from mcp.client import MCPToolError, get_mcp_client
 
 
 class SalesAgent(BaseAgent):
@@ -58,11 +59,20 @@ You are operating with Okta AI Agent governance:
 When responding, be helpful, professional, and accurate. Focus on sales-related information."""
 
     async def process(self, task: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Process a sales-related task with real data."""
+        """Process a sales task with data from the native Sales MCP."""
         context = context or {}
-
-        # Get data from demo_store
-        data = self._get_data(task)
+        try:
+            data = await self._get_data(task, context)
+        except MCPToolError as exc:
+            return {
+                "agent": self.agent_type,
+                "agent_name": self.agent_name,
+                "color": self.color,
+                "result": f"Sales MCP operation failed: {exc}",
+                "success": False,
+                "error": str(exc),
+                "scopes": context.get("scopes", self.scopes),
+            }
 
         # Augment the task with data
         augmented_task = f"""{task}
@@ -74,39 +84,25 @@ Provide a helpful response using this data."""
 
         return await super().process(augmented_task, context)
 
-    def _get_data(self, task: str) -> str:
-        """Get sales-related data from demo_store."""
+    async def _get_data(self, task: str, context: Dict[str, Any]) -> Any:
+        """Select and invoke one Sales MCP tool."""
+        if not context.get("resource_token_validated") or not context.get("mcp_access_token"):
+            raise MCPToolError("The Sales MCP requires a validated access token.")
+        config = get_agent_config(AGENT_SALES)
+        if config is None:
+            raise MCPToolError("The Sales MCP resource is not configured.")
         task_lower = task.lower()
-
-        # Get customer summary for sales context
-        customer_summary = demo_store.get_customer_summary()
-
-        if "order" in task_lower or "recent" in task_lower:
-            # Simulate recent orders using top customers
-            platinum_customers = demo_store.get_customers_by_tier("Platinum")
-            lines = ["Recent Orders:\n"]
-            for i, cust in enumerate(platinum_customers[:4], 1):
-                # Simulate order data
-                order_value = cust['total_spent'] * 0.05  # ~5% of lifetime as recent order
-                status = ["shipped", "processing", "pending", "shipped"][i-1]
-                lines.append(f"- ORD-2024-{i:03d}: {cust['name']} - ${order_value:,.2f} ({status})")
-
-            total_pipeline = sum(c['total_spent'] * 0.05 for c in platinum_customers[:4])
-            lines.append(f"\nPipeline Value: ${total_pipeline:,.2f} this week")
-            return "\n".join(lines)
-
-        if "quote" in task_lower:
-            # Get pricing for quote context
-            discounts = demo_store.get_discount_structure()
-            return f"""Quote Information:
-- Volume Discounts: {', '.join(f'{qty}+ units: {disc}%' for qty, disc in sorted(discounts['volume_discounts'].items(), key=lambda x: int(x[0])))}
-- Tier Discounts: {', '.join(f'{tier}: {disc}%' for tier, disc in discounts['tier_discounts'].items())}
-- Top customer (Platinum): {demo_store.get_customers_by_tier('Platinum')[0]['name']}"""
-
-        # Default: sales summary
-        return f"""Sales Summary:
-- Total Customers: {customer_summary['total_customers']}
-- Total Revenue: ${customer_summary['total_revenue']:,}
-- Platinum Accounts: {customer_summary['by_tier'].get('Platinum', {}).get('count', 0)}
-- Gold Accounts: {customer_summary['by_tier'].get('Gold', {}).get('count', 0)}
-- Top Customer: {demo_store.get_customers_by_tier('Platinum')[0]['name']} (${demo_store.get_customers_by_tier('Platinum')[0]['total_spent']:,} lifetime)"""
+        scopes = context.get("scopes", [])
+        if any(scope in scopes for scope in ("sales:quote", "sales:order")):
+            raise MCPToolError(
+                "Creating a quote or order requires a customer ID and product line items."
+            )
+        tool_name = "get_pipeline" if any(
+            word in task_lower for word in ("pipeline", "revenue", "summary", "total")
+        ) else "list_orders"
+        return await get_mcp_client().call_tool(
+            resource_url=config.mcp_url,
+            access_token=str(context["mcp_access_token"]),
+            tool_name=tool_name,
+            arguments={},
+        )

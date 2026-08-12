@@ -185,6 +185,27 @@ class OktaRoleResolverTests(unittest.IsolatedAsyncioTestCase):
         mocked_get.assert_awaited_once()
         mocked_sleep.assert_not_awaited()
 
+    async def test_approver_group_membership_is_checked_live(self):
+        request = httpx.Request(
+            "GET", "https://example.okta.com/api/v1/users/00u-owner/groups"
+        )
+        response = httpx.Response(
+            200,
+            request=request,
+            json=[
+                {"id": "00g-other", "profile": {"name": "Everyone"}},
+                {"id": "00g-owner", "profile": {"name": "AIAgentOwners"}},
+            ],
+        )
+
+        with patch("httpx.AsyncClient.get", AsyncMock(return_value=response)):
+            is_member = await OktaRoleResolver(
+                "https://example.okta.com",
+                "secret-token",
+            ).is_group_member({"id": "00u-owner"}, "aiagentowners")
+
+        self.assertTrue(is_member)
+
 
 if __name__ == "__main__":
     unittest.main()

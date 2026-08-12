@@ -5,7 +5,8 @@ Okta governs a single AI Agent workload identity for this demo: the
 ProGear Sales Agent. This module defines the per-resource-domain settings
 that agent uses when performing ID-JAG token exchanges for each of the
 four resource domains (sales, inventory, customer, pricing):
-- Custom Authorization Server ID
+- Native MCP protected-resource URL (the RFC 9728 document supplies the
+  protecting Custom Authorization Server)
 - API audience
 - Scopes
 - Display metadata (name, color) for the UI
@@ -19,8 +20,8 @@ Environment variables:
   per-domain overrides. Only needed if a deployment provisions a separate
   Okta AI Agent identity per resource domain instead of the one-agent
   model above; unset by default.
-- OKTA_[TYPE]_AUTH_SERVER_ID - Custom Authorization Server ID for this
-  resource domain's scopes.
+- PROGEAR_MCP_BASE_URL - Base URL for the four native ProGear MCP resources.
+- PROGEAR_[TYPE]_MCP_URL - Optional full URL override for one MCP resource.
 - OKTA_[TYPE]_AUDIENCE - API audience for this resource domain.
 """
 
@@ -46,7 +47,7 @@ class AgentConfig:
     agent_type: str  # resource domain: sales, inventory, customer, pricing
     agent_id: str  # Governed agent entity ID (wlp...), shared unless overridden
     private_key: Optional[Dict[str, Any]]  # JWK private key, shared unless overridden
-    auth_server_id: str  # aus... (Custom Authorization Server for this domain)
+    mcp_url: str  # Native MCP protected-resource URL; its metadata supplies the AS
     audience: str  # api://progear-...
     scopes: List[str]  # All possible scopes for this resource domain
     description: str
@@ -58,6 +59,16 @@ AGENT_SALES = "sales"
 AGENT_INVENTORY = "inventory"
 AGENT_CUSTOMER = "customer"
 AGENT_PRICING = "pricing"
+
+DEFAULT_MCP_BASE_URL = "https://progear-mcp-servers-m2f3.onrender.com"
+
+
+def _mcp_url(agent_type: str) -> str:
+    override = os.getenv(f"PROGEAR_{agent_type.upper()}_MCP_URL", "").strip()
+    if override:
+        return override.rstrip("/")
+    base = os.getenv("PROGEAR_MCP_BASE_URL", DEFAULT_MCP_BASE_URL).strip().rstrip("/")
+    return f"{base}/{agent_type}/mcp"
 
 
 def _parse_private_key(key_str: str) -> Optional[Dict[str, Any]]:
@@ -83,7 +94,7 @@ def get_agent_config(agent_type: str) -> Optional[AgentConfig]:
     """
     configs = {
         AGENT_SALES: AgentConfig(
-            name="Sales MCP",
+            name="ProGear Sales MCP",
             display_name="Sales Agent",
             agent_type=AGENT_SALES,
             agent_id=os.getenv("OKTA_AI_AGENT_SALES_ID", os.getenv("OKTA_AI_AGENT_ID", "")),
@@ -91,14 +102,14 @@ def get_agent_config(agent_type: str) -> Optional[AgentConfig]:
                 os.getenv("OKTA_AI_AGENT_SALES_PRIVATE_KEY",
                          os.getenv("OKTA_AI_AGENT_PRIVATE_KEY", ""))
             ),
-            auth_server_id=os.getenv("OKTA_SALES_AUTH_SERVER_ID", ""),
+            mcp_url=_mcp_url(AGENT_SALES),
             audience=os.getenv("OKTA_SALES_AUDIENCE", "api://progear-sales"),
             scopes=["sales:read", "sales:quote", "sales:order"],
             description="Orders, quotes, and sales pipeline",
             color="#3b82f6",  # Blue
         ),
         AGENT_INVENTORY: AgentConfig(
-            name="Inventory MCP",
+            name="ProGear Inventory MCP",
             display_name="Inventory Agent",
             agent_type=AGENT_INVENTORY,
             agent_id=os.getenv("OKTA_AI_AGENT_INVENTORY_ID", os.getenv("OKTA_AI_AGENT_ID", "")),
@@ -106,14 +117,14 @@ def get_agent_config(agent_type: str) -> Optional[AgentConfig]:
                 os.getenv("OKTA_AI_AGENT_INVENTORY_PRIVATE_KEY",
                          os.getenv("OKTA_AI_AGENT_PRIVATE_KEY", ""))
             ),
-            auth_server_id=os.getenv("OKTA_INVENTORY_AUTH_SERVER_ID", ""),
+            mcp_url=_mcp_url(AGENT_INVENTORY),
             audience=os.getenv("OKTA_INVENTORY_AUDIENCE", "api://progear-inventory"),
-            scopes=["inventory:read", "inventory:write"],
+            scopes=["inventory:read", "inventory:write", "inventory:alert"],
             description="Stock levels, products, and warehouse",
             color="#10b981",  # Green
         ),
         AGENT_CUSTOMER: AgentConfig(
-            name="Customer MCP",
+            name="ProGear Customer MCP",
             display_name="Customer Agent",
             agent_type=AGENT_CUSTOMER,
             agent_id=os.getenv("OKTA_AI_AGENT_CUSTOMER_ID", os.getenv("OKTA_AI_AGENT_ID", "")),
@@ -121,14 +132,14 @@ def get_agent_config(agent_type: str) -> Optional[AgentConfig]:
                 os.getenv("OKTA_AI_AGENT_CUSTOMER_PRIVATE_KEY",
                          os.getenv("OKTA_AI_AGENT_PRIVATE_KEY", ""))
             ),
-            auth_server_id=os.getenv("OKTA_CUSTOMER_AUTH_SERVER_ID", ""),
+            mcp_url=_mcp_url(AGENT_CUSTOMER),
             audience=os.getenv("OKTA_CUSTOMER_AUDIENCE", "api://progear-customer"),
             scopes=["customer:read", "customer:lookup", "customer:history"],
             description="Accounts, contacts, and purchase history",
             color="#8b5cf6",  # Purple
         ),
         AGENT_PRICING: AgentConfig(
-            name="Pricing MCP",
+            name="ProGear Pricing MCP",
             display_name="Pricing Agent",
             agent_type=AGENT_PRICING,
             agent_id=os.getenv("OKTA_AI_AGENT_PRICING_ID", os.getenv("OKTA_AI_AGENT_ID", "")),
@@ -136,7 +147,7 @@ def get_agent_config(agent_type: str) -> Optional[AgentConfig]:
                 os.getenv("OKTA_AI_AGENT_PRICING_PRIVATE_KEY",
                          os.getenv("OKTA_AI_AGENT_PRIVATE_KEY", ""))
             ),
-            auth_server_id=os.getenv("OKTA_PRICING_AUTH_SERVER_ID", ""),
+            mcp_url=_mcp_url(AGENT_PRICING),
             audience=os.getenv("OKTA_PRICING_AUDIENCE", "api://progear-pricing"),
             scopes=["pricing:read", "pricing:margin", "pricing:discount"],
             description="Pricing, margins, and discounts",
@@ -161,8 +172,8 @@ def is_agent_configured(agent_type: str) -> bool:
     config = get_agent_config(agent_type)
     if not config:
         return False
-    # At minimum, need agent_id and auth_server_id
-    return bool(config.agent_id and config.auth_server_id)
+    # The resource's RFC 9728 metadata supplies the authorization server.
+    return bool(config.agent_id and config.mcp_url)
 
 
 def get_configured_agents() -> List[str]:
@@ -178,25 +189,25 @@ def get_configured_agents() -> List[str]:
 # demo values (one entry per resource domain).
 DEMO_AGENTS = {
     AGENT_SALES: {
-        "name": "Sales MCP",
+        "name": "ProGear Sales MCP",
         "display_name": "Sales Agent",
         "scopes": ["sales:read", "sales:quote", "sales:order"],
         "color": "#3b82f6",
     },
     AGENT_INVENTORY: {
-        "name": "Inventory MCP",
+        "name": "ProGear Inventory MCP",
         "display_name": "Inventory Agent",
-        "scopes": ["inventory:read", "inventory:write"],
+        "scopes": ["inventory:read", "inventory:write", "inventory:alert"],
         "color": "#10b981",
     },
     AGENT_CUSTOMER: {
-        "name": "Customer MCP",
+        "name": "ProGear Customer MCP",
         "display_name": "Customer Agent",
         "scopes": ["customer:read", "customer:lookup", "customer:history"],
         "color": "#8b5cf6",
     },
     AGENT_PRICING: {
-        "name": "Pricing MCP",
+        "name": "ProGear Pricing MCP",
         "display_name": "Pricing Agent",
         "scopes": ["pricing:read", "pricing:margin", "pricing:discount"],
         "color": "#f59e0b",

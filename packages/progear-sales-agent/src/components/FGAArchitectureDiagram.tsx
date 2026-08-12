@@ -26,10 +26,10 @@ type DiagramLink = {
 const NODES: DiagramNode[] = [
   { id: 'okta', x: 20, y: 132, width: 165, height: 86, title: 'Okta profile', detail: ['Clearance 0, 1, or 2', 'Manager + vacation'], color: '#2563eb' },
   { id: 'delegation', x: 230, y: 112, width: 185, height: 126, title: 'Delegation gate', detail: ['Vacation = False', 'Agent may continue'], color: '#0f766e' },
-  { id: 'token', x: 470, y: 132, width: 165, height: 86, title: 'Inventory token', detail: ['Signed live role', 'Scoped resource access'], color: '#0284c7' },
+  { id: 'token', x: 470, y: 132, width: 165, height: 86, title: 'Inventory token', detail: ['Signed resource scope', 'Employee + agent chain'], color: '#0284c7' },
   { id: 'fga', x: 690, y: 112, width: 185, height: 126, title: 'FGA', detail: ['Role + action', '+ quantity'], color: '#7c3aed' },
   { id: 'allow', x: 950, y: 24, width: 180, height: 76, title: 'Execute', detail: ['Role meets the tier'], color: '#059669' },
-  { id: 'approve', x: 950, y: 144, width: 180, height: 76, title: 'Ask for approval', detail: ['Manager 601+ → VP'], color: '#d97706' },
+  { id: 'approve', x: 950, y: 144, width: 180, height: 76, title: 'Ask for approval', detail: ['Manager 601+ → Owners'], color: '#d97706' },
   { id: 'deny', x: 950, y: 264, width: 180, height: 76, title: 'Block the write', detail: ['Sales is read-only'], color: '#dc2626' },
   { id: 'away', x: 230, y: 300, width: 185, height: 76, title: 'Stop delegation', detail: ['Vacation = True', 'No ID-JAG requested'], color: '#dc2626' },
 ];
@@ -134,7 +134,7 @@ export default function FGAArchitectureDiagram() {
         viewBox="0 0 1150 400"
         className="w-full min-w-[760px]"
         role="img"
-        aria-label="Okta profile context reaches a delegation gate. Vacation true stops before ID-JAG. Vacation false allows a scoped Inventory token, then FGA uses role, action, and quantity to execute, request VP approval, or block the write."
+        aria-label="Okta profile context reaches a delegation gate. Vacation true stops before ID-JAG. Vacation false allows a scoped Inventory token, then FGA uses role, action, and quantity to execute, request AI Agent Owner approval, or block the write."
       />
     </div>
   );

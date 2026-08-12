@@ -42,7 +42,7 @@ interface AuthorizationDecision {
 
 const ROLE_ROWS = [
   { level: '0 — Sales', manager: 'False', read: 'Yes', standard: 'Contact manager', large: 'Contact manager' },
-  { level: '1 — Manager', manager: 'True', read: 'Yes', standard: 'Execute', large: 'VP approval' },
+  { level: '1 — Manager', manager: 'True', read: 'Yes', standard: 'Execute', large: 'Owner approval' },
   { level: '2 — VP', manager: 'True', read: 'Yes', standard: 'Execute', large: 'Execute' },
 ] as const;
 
@@ -126,7 +126,7 @@ export default function FGAExplanationCard({ checks, decisions = [], isLoading =
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/40">
               <div className="text-xs font-bold uppercase tracking-wide text-amber-700">4. Okta OIG</div>
               <p className="mt-1 text-xs leading-relaxed text-amber-900 dark:text-amber-100">
-                Collects VP approval when a Manager requests more than 600 units.
+                Routes a Manager’s 601+ request to the AI Agent Owners group.
               </p>
             </div>
           </div>
@@ -172,7 +172,7 @@ export default function FGAExplanationCard({ checks, decisions = [], isLoading =
             </div>
             {latest && claims ? (
               <p className="mt-1 text-xs">
-                Okta sent Level {claims.clearance_level} — {claims.role_name ?? 'Unknown'} · FGA checked <code>{latest.relation}</code>
+                FGA evaluated Level {claims.clearance_level} — {claims.role_name ?? 'Unknown'} · checked <code>{latest.relation}</code>
                 {policy?.quantity ? ` for ${policy.quantity.toLocaleString()} units` : ''}.
               </p>
             ) : null}

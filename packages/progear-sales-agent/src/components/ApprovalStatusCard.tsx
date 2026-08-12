@@ -26,6 +26,7 @@ type Intent = {
   original_task?: string;
   required_approver_role?: string;
   required_approver_level?: number;
+  required_approver_group?: string;
 };
 
 type ExecutionResult = {
@@ -182,19 +183,23 @@ export default function ApprovalStatusCard({ initial, onStatusChange }: Props) {
               </div>
             )}
 
-          {status.approver_group && (
+          {(status.approver_group || intent.required_approver_group) && (
             <div>
               <span className="text-gray-500">Approver group:</span>{' '}
-              <span className="font-medium">{status.approver_group}</span>
+              <span className="font-medium">
+                {status.approver_group || intent.required_approver_group}
+              </span>
             </div>
           )}
 
           {(status.approver_role || intent.required_approver_role) && (
             <div>
-              <span className="text-gray-500">Required role:</span>{' '}
+              <span className="text-gray-500">Required approver:</span>{' '}
               <span className="font-medium">
-                {status.approver_role || intent.required_approver_role} (Level{' '}
-                {status.approver_level || intent.required_approver_level}+)
+                {status.approver_role || intent.required_approver_role}
+                {(status.approver_level || intent.required_approver_level)
+                  ? ` (Level ${status.approver_level || intent.required_approver_level}+)`
+                  : ''}
               </span>
             </div>
           )}

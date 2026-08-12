@@ -28,7 +28,7 @@ const groupInfo: Record<string, { name: string; color: string; access: string[] 
   'ProGear-VPs': {
     name: 'VP',
     color: '#8b5cf6',
-    access: ['Inventory (read/write and VP approval)']
+    access: ['Inventory (read/write, including large changes)']
   },
   'ProGear-Finance': {
     name: 'Finance',

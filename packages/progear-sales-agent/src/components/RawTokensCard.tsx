@@ -23,6 +23,9 @@ interface TokenExchange {
   resource_token_validated?: boolean;
   resource_token_kid?: string;
   resource_validation_error?: string;
+  mcp_resource?: string;
+  protected_resource_metadata?: string;
+  authorization_server_issuer?: string;
 }
 
 interface AuthorizationDecision {
@@ -372,6 +375,16 @@ export default function RawTokensCard({ exchanges, decisions, idTokenRaw, stopRe
               : undefined;
             return (
               <div key={exchange.agent} className="space-y-2">
+                {exchange.mcp_resource && exchange.protected_resource_metadata ? (
+                  <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
+                    <div className="font-semibold">MCP protected-resource discovery</div>
+                    <div className="mt-1 break-all font-mono text-[10px]">{exchange.protected_resource_metadata}</div>
+                    <div className="mt-1 break-all text-[10px]">Resource: {exchange.mcp_resource}</div>
+                    {exchange.authorization_server_issuer ? (
+                      <div className="mt-1 break-all text-[10px]">Authorization server: {exchange.authorization_server_issuer}</div>
+                    ) : null}
+                  </div>
+                ) : null}
                 {systemError && (
                   <div className="border border-amber-200 rounded-lg overflow-hidden">
                     <div className="flex items-center gap-2 px-3 py-2 bg-amber-50 text-amber-800 text-sm">

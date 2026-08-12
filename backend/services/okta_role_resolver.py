@@ -110,3 +110,25 @@ class OktaRoleResolver:
     async def __call__(self, approver: dict) -> int:
         identifier = approver.get("id") or approver.get("email")
         return await self.resolve(identifier or "")
+
+    async def is_group_member(self, approver: dict, group_name: str) -> bool:
+        """Return whether the live Okta approver belongs to ``group_name``."""
+        identifier = approver.get("id") or approver.get("email")
+        if not identifier or not group_name:
+            return False
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(5.0, connect=3.0),
+        ) as client:
+            response = await client.get(
+                f"{self._base_url}/api/v1/users/{identifier}/groups",
+                headers={
+                    "Authorization": f"SSWS {self._api_token}",
+                    "Accept": "application/json",
+                },
+            )
+            response.raise_for_status()
+        expected = group_name.casefold()
+        return any(
+            str((group.get("profile") or {}).get("name") or "").casefold() == expected
+            for group in response.json()
+        )

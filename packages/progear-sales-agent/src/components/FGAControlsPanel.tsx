@@ -12,6 +12,8 @@ interface Props {
 
 interface DemoStatus {
   clearance_level: number;
+  live_clearance_level: number;
+  role_simulation_allowed: boolean;
   is_a_manager: boolean;
   is_on_vacation: boolean;
 }
@@ -61,15 +63,15 @@ export default function FGAControlsPanel({ onApplied }: Props) {
     }
   }, [isEnabled, loadStatus]);
 
-  async function callToggle(value: boolean) {
+  async function callToggle(attribute: 'clearance_level' | 'is_on_vacation', value: number | boolean) {
     if (!idToken) return;
-    setBusy('is_on_vacation');
+    setBusy(attribute);
     setLastResult(null);
     try {
       const response = await fetch(`${API_BASE_URL}/api/admin/demo-toggle`, {
         method: 'POST',
         headers: demoHeaders(true),
-        body: JSON.stringify({ attribute: 'is_on_vacation', value }),
+        body: JSON.stringify({ attribute, value }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || 'Update failed');
@@ -77,9 +79,12 @@ export default function FGAControlsPanel({ onApplied }: Props) {
       if (values) {
         setStatus(values);
       } else {
-        setStatus((previous) => (previous ? { ...previous, is_on_vacation: data.value } : previous));
+        setStatus((previous) => previous ? { ...previous, [attribute]: data.value } : previous);
       }
-      setLastResult(`On vacation is now ${data.value ? 'True' : 'False'}. The next FGA prompt in this browser session uses this value.`);
+      const result = attribute === 'clearance_level'
+        ? `FGA demo role is now ${roleForLevel(Number(data.value))?.name}. The next FGA prompt in this browser session uses this role.`
+        : `On vacation is now ${data.value ? 'True' : 'False'}. The next FGA prompt in this browser session uses this value.`;
+      setLastResult(result);
       onApplied?.();
     } catch (error) {
       setLastResult(`Error: ${error instanceof Error ? error.message : 'Update failed'}`);
@@ -100,7 +105,7 @@ export default function FGAControlsPanel({ onApplied }: Props) {
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || 'Reset failed');
       await loadStatus();
-      setLastResult('Restored this browser session’s vacation state. Demo personas return to On vacation False.');
+      setLastResult('Restored this browser session’s starting role and vacation state.');
       onApplied?.();
     } catch (error) {
       setLastResult(`Error: ${error instanceof Error ? error.message : 'Reset failed'}`);
@@ -137,12 +142,12 @@ export default function FGAControlsPanel({ onApplied }: Props) {
                 </span>
               </div>
               <p className="mt-1 max-w-xl text-xs leading-relaxed text-slate-600 dark:text-slate-300">
-                Turn this on for the fixed-role, quantity threshold, and VP approval demo. It also reveals the guided FGA prompts on the chat page.
+                Turn this on for the role, quantity threshold, and human approval demo. It also reveals the guided FGA prompts on the chat page.
                 <span className="mt-1 block font-medium text-purple-700 dark:text-purple-300">
                   Other engineers using the same account are not affected. Closing this tab ends this demo session.
                 </span>
                 <span className="mt-1 block text-slate-500 dark:text-slate-400">
-                  Sarah remains Sales, Mike remains Manager, and Joe remains VP. Their role and Manager values always come from the live Okta profile.
+                  Sarah remains read-only. Mike can compare Manager and VP outcomes without affecting another engineer’s session.
                 </span>
               </p>
             </div>
@@ -166,7 +171,7 @@ export default function FGAControlsPanel({ onApplied }: Props) {
         <div className="rounded-lg border border-blue-200 bg-blue-50/70 p-3 dark:border-blue-900 dark:bg-blue-950/25">
           <div className="flex items-center gap-2 text-sm font-medium text-gray-800 dark:text-slate-100">
             <BadgeCheck className="h-4 w-4 text-blue-600" />
-            Okta role
+            FGA demo role
             {status ? (
               <span className="ml-auto rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-blue-700 dark:bg-blue-950 dark:text-blue-300">
                 Current: {status.clearance_level} — {roleForLevel(status.clearance_level)?.name}
@@ -174,9 +179,39 @@ export default function FGAControlsPanel({ onApplied }: Props) {
             ) : null}
           </div>
           <p className="mt-2 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
-            {status ? roleForLevel(status.clearance_level)?.summary : 'Loading the signed-in employee’s live Okta role.'}
-            {' '}The FGA simulation never changes this role.
+            {status ? roleForLevel(status.clearance_level)?.summary : 'Loading the signed-in employee’s role.'}
           </p>
+          {status?.role_simulation_allowed ? (
+            <>
+              <p className="mt-2 text-[11px] leading-relaxed text-blue-800 dark:text-blue-200">
+                Mike’s live Okta role is Manager. This isolated control previews Manager or VP FGA outcomes without changing his shared Okta profile.
+              </p>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                {[1, 2].map((level) => (
+                  <button
+                    key={level}
+                    type="button"
+                    aria-pressed={status.clearance_level === level}
+                    onClick={() => callToggle('clearance_level', level)}
+                    disabled={busy !== null || status.clearance_level === level}
+                    className={`rounded-lg border px-3 py-2 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                      status.clearance_level === level
+                        ? 'border-blue-300 bg-blue-100 text-blue-700 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-300'
+                        : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    {busy === 'clearance_level' && status.clearance_level !== level
+                      ? <Loader2 className="mx-auto h-4 w-4 animate-spin" />
+                      : roleForLevel(level)?.name}
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : (
+            <p className="mt-2 text-[11px] text-blue-800 dark:text-blue-200">
+              Sales stays Sales. This control never elevates a Sales session.
+            </p>
+          )}
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2">
@@ -193,7 +228,7 @@ export default function FGAControlsPanel({ onApplied }: Props) {
               </span>
             </div>
             <p className="mt-2 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
-              Derived from the live Okta role: Sales is False; Manager and VP are True. The simulation cannot change it.
+              Derived from the role selected above: Sales is False; Manager and VP are True.
             </p>
           </div>
 
@@ -221,7 +256,7 @@ export default function FGAControlsPanel({ onApplied }: Props) {
                   key={String(value)}
                   type="button"
                   aria-pressed={status?.is_on_vacation === value}
-                  onClick={() => callToggle(value)}
+                  onClick={() => callToggle('is_on_vacation', value)}
                   disabled={busy !== null || status?.is_on_vacation === value}
                   className={`rounded-lg border px-3 py-2 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
                     status?.is_on_vacation === value
@@ -265,7 +300,7 @@ export default function FGAControlsPanel({ onApplied }: Props) {
           </>
         ) : (
           <p className="rounded-lg border border-dashed border-slate-300 px-4 py-3 text-center text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
-            Fixed-role FGA details are hidden until you choose <strong>Simulate FGA</strong>.
+            FGA details are hidden until you choose <strong>Simulate FGA</strong>.
           </p>
         )}
       </div>

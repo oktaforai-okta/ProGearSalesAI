@@ -413,11 +413,11 @@ def add_cover(document: Document) -> None:
 
 def add_demo_map(document: Document) -> None:
     document.add_page_break()
-    add_page_title(document, "01", "Know the story before you click", "Three people, one clear authorization boundary")
+    add_page_title(document, "01", "Know the story before you click", "Two personas and one clear approval role")
     add_callout(
         document,
         "THE STORY",
-        "Sarah can read but never write. Mike can add 1–600 units. A 601+ request requires Joe, the VP.",
+        "Sarah can read but never write. With FGA on, Mike can add 1–600 units and a 601+ request requires a Level 2 VP.",
         fill=ORANGE_PALE,
         accent=ORANGE,
     )
@@ -428,7 +428,7 @@ def add_demo_map(document: Document) -> None:
         [
             ["Sarah Sales", "Clearance 0 • Manager False", "Reads Inventory. Every write is denied with manager guidance."],
             ["Mike Manager", "Clearance 1 • Manager True", "Writes 1–600 units. A 601+ request requires a VP."],
-            ["Joe VP", "Clearance 2 • Manager True", "Approves Mike's 601+ request and may write directly."],
+            ["Existing VP approver", "Clearance 2 • Manager True", "Approves Mike's 601+ request and may write directly."],
         ],
         [1.3, 2.0, 3.75],
     )
@@ -438,11 +438,11 @@ def add_demo_map(document: Document) -> None:
         [
             "Sign in as Sarah and run the inventory read prompt.",
             "Ask Sarah to add 50 basketballs; show the clear Sales denial.",
-            "Sign out and sign in as Mike; FGA starts off again.",
+            "Open Mike in the intended demo tab; a fresh tab starts with FGA off.",
             "Ask Mike to add 50 basketballs; show the successful write.",
-            "Ask Mike to add 601 basketballs; show the VP boundary.",
+            "In simple mode, ask Mike for a large positive write; show coarse Okta access succeeds.",
             "Open Architecture, then Request sequence, and walk left to right.",
-            "Optional: enable FGA and route Mike's 601+ request to Joe for approval.",
+            "Enable FGA and route Mike's 601+ request to AIAgentOwners.",
         ],
         compact=True,
     )
@@ -473,15 +473,15 @@ def add_sarah_page(document: Document) -> None:
 
 def add_mike_page(document: Document) -> None:
     document.add_page_break()
-    add_page_title(document, "03", "Mike: normal write succeeds, 601+ stops", "The quantity changes the required authorization tier")
+    add_page_title(document, "03", "Mike: coarse access first, then FGA", "The quantity boundary applies only after FGA is enabled")
     add_label(document, "1–600 units: execute", color=GREEN)
     add_picture(document, "06-mike-write-allowed.png", 6.62, "Mike adds 50 units. The response confirms the previous and new totals.")
-    add_label(document, "601+ units: VP required", color=PURPLE)
-    add_picture(document, "07-mike-601-simple-denied.png", 6.62, "In simple mode, Mike's 601-unit request is denied with clear VP guidance.")
+    add_label(document, "FGA on — 601+ units: owner approval", color=PURPLE)
+    add_picture(document, "07-mike-601-simple-denied.png", 6.62, "With FGA enabled, Mike's 601-unit request routes to AIAgentOwners.")
     add_callout(
         document,
         "SAY THIS",
-        "Mike is a Manager, Clearance 1. He can make routine changes up to 600 units. The optional FGA demo turns the 601+ boundary into a VP approval route.",
+        "Mike is a Manager, Clearance 1. Coarse Okta grants inventory:write without a quantity tier. The optional FGA demo adds the 600/601 boundary and AI Agent Owner approval route.",
         fill=PURPLE_PALE,
         accent=PURPLE,
     )
@@ -527,12 +527,12 @@ def add_sequence_page(document: Document) -> None:
 def add_fga_controls_page(document: Document) -> None:
     add_new_section(document, landscape=False)
     add_page_title(document, "06", "Optional FGA demo: turn on the advanced path", "FGA is intentionally off until the presenter selects Simulate FGA")
-    add_picture(document, "10-fga-controls.png", 5.92, "Open FGA as Mike, select Simulate FGA, and confirm Manager / Clearance 1 / On vacation False.")
+    add_picture(document, "10-fga-controls.png", 5.92, "Open FGA as Mike, select Simulate FGA, and confirm Manager / Clearance 1 / On vacation False. Mike can also preview VP in this tab.")
     add_picture(document, "12-fga-prompts.png", 5.92, "The chat home now shows one prompt for each policy boundary: Read, 1–600, and 601+.")
     add_callout(
         document,
         "RESET RULE",
-        "Signing out turns off FGA simulation. It does not modify the user's Okta profile attributes.",
+        "FGA is isolated to the current browser tab and survives refresh or sign-out. A new tab starts with FGA off. It does not modify Okta profile attributes.",
         fill=BLUE_PALE,
         accent=BLUE,
     )
@@ -540,7 +540,7 @@ def add_fga_controls_page(document: Document) -> None:
 
 def add_hitl_page(document: Document) -> None:
     document.add_page_break()
-    add_page_title(document, "07", "Human In The Loop: one approval boundary", "Okta controls delegation; FGA controls the Inventory action; OIG records the VP decision")
+    add_page_title(document, "07", "Human In The Loop: one approval boundary", "Okta controls delegation; FGA controls the Inventory action; OIG records the owner decision")
     add_picture(document, "11-fga-policy.png", 6.25, "The policy combines live Okta attributes with role, action, and quantity.")
     add_simple_table(
         document,
@@ -548,8 +548,8 @@ def add_hitl_page(document: Document) -> None:
         [
             ["Sarah • any write", "Deny. Contact a Manager. Never create an approval request."],
             ["Mike • 1–600 units", "Execute directly."],
-            ["Mike • 601+ units", "Create one VP approval request; do not change Inventory while pending."],
-            ["Joe • any quantity", "Execute directly because Joe is Clearance 2 / VP."],
+            ["Mike • 601+ units", "Create one AIAgentOwners request; do not change Inventory while pending."],
+            ["Mike • VP preview", "Execute any quantity directly in this isolated demo session."],
         ],
         [2.0, 5.05],
     )
@@ -557,16 +557,16 @@ def add_hitl_page(document: Document) -> None:
 
 def add_approval_page(document: Document) -> None:
     document.add_page_break()
-    add_page_title(document, "08", "Complete the VP approval and reset", "Joe approves in Okta; the backend verifies the live VP role and executes once")
-    add_picture(document, "13-oig-vp-approval.png", 6.72, "Joe's Okta Access Requests task shows Mike as the requester and presents Approve / Deny actions.")
+    add_page_title(document, "08", "Complete the owner approval and reset", "An AI Agent Owner approves in Okta; the backend verifies live group membership")
+    add_picture(document, "13-oig-vp-approval.png", 6.72, "The Okta Access Requests task shows Mike as requester and presents Approve / Deny actions.")
     add_steps(
         document,
         [
             "As Mike with FGA enabled, select Add 601 basketballs to inventory.",
             "Copy the Okta request ID shown by ProGear.",
-            "Sign in as joe.vp@atko.email and open Okta Access Requests → Inbox → Open.",
+            "Open Okta Access Requests → Inbox → Open as Johnathan or another AI Agent Owner in a separate browser profile.",
             "Open Mike's request and select Approve.",
-            "Return to ProGear. The backend verifies Joe's live VP role and executes the change once.",
+            "Return to ProGear. The backend verifies the approver's live AIAgentOwners membership and executes the change.",
         ],
         compact=True,
     )
@@ -582,9 +582,9 @@ def add_approval_page(document: Document) -> None:
         document,
         ["RESET", "CONFIRM"],
         [
-            ["Okta attributes", "Vacation False; Sarah 0, Mike 1, Joe 2; Manager False / True / True."],
+            ["Okta attributes", "Vacation False; Sarah 0, Mike 1; Manager False / True."],
             ["OIG", "Resolve or deny test requests that should not remain open."],
-            ["Session", "Sign out and confirm the next session starts with FGA off."],
+            ["Session", "Close the tab when finished; a new tab starts with FGA off."],
         ],
         [1.5, 5.55],
     )

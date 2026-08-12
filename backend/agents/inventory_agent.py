@@ -3,18 +3,19 @@ Inventory Agent - Handles stock levels and products.
 
 Registered as a first-class identity in Okta.
 Uses raw Anthropic SDK for LLM calls.
-Uses demo_store for actual data operations.
+Calls the protected ProGear Inventory MCP for actual data operations.
 
 IMPORTANT: This agent has optional FGA (Fine-Grained Authorization) integration.
 - Role level is supplied to FGA as a contextual tuple
 - Sales is read-only and never creates an approval request
-- With FGA on, Managers execute 1-600 and writes above 600 route to VP approval
+- With FGA on, Managers execute 1-600 and writes above 600 route to AI Agent Owner approval
 - With FGA off, a validated Manager or VP inventory:write scope permits any positive quantity
 """
 
 from typing import Dict, Any, Optional
 from .base_agent import BaseAgent
-from data.demo_store import demo_store
+from auth.agent_config import AGENT_INVENTORY, get_agent_config
+from mcp.client import MCPToolError, get_mcp_client
 from services.intent import parse_inventory_intent
 
 
@@ -63,7 +64,7 @@ You are operating with Okta AI Agent governance:
 - WRITE operations can be additionally protected by FGA (Fine-Grained Authorization)
 - FGA maps Okta clearance_level to Sales (0), Manager (1), or VP (2)
 - Sales is always read-only
-- With FGA enabled, Managers may write 1-600 units and 601+ requires VP approval
+- With FGA enabled, Managers may write 1-600 units and 601+ requires AI Agent Owner approval
 - With FGA off, a validated Manager or VP inventory:write scope permits any positive quantity
 - VPs may write any quantity in either mode
 - All your actions are audited through Okta
@@ -71,7 +72,7 @@ You are operating with Okta AI Agent governance:
 When processing inventory updates, confirm the action clearly."""
 
     async def process(self, task: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Process an inventory-related task with real data from demo_store."""
+        """Process an inventory task through the native protected MCP server."""
         context = context or {}
         scopes = context.get("scopes", self.scopes)
         task_lower = task.lower()
@@ -103,8 +104,30 @@ When processing inventory updates, confirm the action clearly."""
                     "scopes": scopes,
                 }
 
-        # Get data from demo_store based on task and scopes
-        data = self._get_data(task, scopes)
+        access_token = str(context.get("mcp_access_token") or "")
+        if not context.get("resource_token_validated") or not access_token:
+            return {
+                "agent": self.agent_type,
+                "agent_name": self.agent_name,
+                "color": self.color,
+                "result": "The Inventory MCP request was blocked because no validated resource token was available.",
+                "success": False,
+                "error": "The Inventory MCP requires a validated access token.",
+                "scopes": scopes,
+            }
+
+        try:
+            data = await self._get_data(task, scopes, access_token)
+        except MCPToolError as exc:
+            return {
+                "agent": self.agent_type,
+                "agent_name": self.agent_name,
+                "color": self.color,
+                "result": f"Inventory MCP operation failed: {exc}",
+                "success": False,
+                "error": str(exc),
+                "scopes": scopes,
+            }
 
         # Writes are deterministic resource operations. Return the exact store
         # result instead of asking an LLM to paraphrase success after mutation.
@@ -135,10 +158,22 @@ When processing inventory updates, confirm the action clearly."""
             "response_is_final": True,
         }
 
-    def _get_data(self, task: str, scopes: list = None) -> str:
-        """Get data from demo_store based on the task and scopes."""
+    async def _get_data(self, task: str, scopes: list, access_token: str) -> str:
+        """Call a native Inventory MCP tool and render its structured result."""
         task_lower = task.lower()
         scopes = scopes or []
+        config = get_agent_config(AGENT_INVENTORY)
+        if config is None:
+            raise MCPToolError("The Inventory MCP resource is not configured.")
+        client = get_mcp_client()
+
+        async def call(tool_name: str, arguments: dict | None = None):
+            return await client.call_tool(
+                resource_url=config.mcp_url,
+                access_token=access_token,
+                tool_name=tool_name,
+                arguments=arguments or {},
+            )
 
         # Check if this is a WRITE operation
         has_write_scope = "inventory:write" in scopes
@@ -153,35 +188,24 @@ When processing inventory updates, confirm the action clearly."""
             quantity = parsed["quantity_delta"] if parsed else 30
             product_name = parsed["product_name"] if parsed else "basketball"
 
-            product = demo_store.get_inventory_by_name(product_name)
-            if not product:
-                # Preserve the existing fallback: some demo data uses the full product name.
-                product = demo_store.get_inventory_by_name("Pro Game Basketball")
-
-            if product:
-                # Perform the update
-                result = demo_store.update_inventory_quantity(
-                    product["sku"],
-                    quantity,
-                    operation="increase"
-                )
-
-                if "error" not in result:
-                    return f"""INVENTORY UPDATE SUCCESSFUL:
+            result = await call(
+                "update_inventory_quantity",
+                {"sku": product_name, "quantity": quantity, "operation": "increase"},
+            )
+            if isinstance(result, dict) and "error" not in result:
+                return f"""INVENTORY UPDATE SUCCESSFUL:
 - Action: Added {quantity} units to inventory
 - Product: {result['name']} (SKU: {result['sku']})
 - Previous count: {result['previous_quantity']:,} units
 - New count: {result['new_quantity']:,} units
 - Status: {result['status'].upper()}
 - Change: {'+' if result['change'] > 0 else ''}{result['change']} units"""
-                else:
-                    return f"INVENTORY UPDATE FAILED: {result['error']}"
-
-            return "Product not found for update"
+            raise MCPToolError(str(result))
 
         # Read operations - search or list
         if "low stock" in task_lower or "alert" in task_lower:
-            low_stock = demo_store.get_low_stock_items()
+            response = await call("get_low_stock_alerts")
+            low_stock = response.get("items", []) if isinstance(response, dict) else []
             if not low_stock:
                 return "No low stock alerts - all inventory levels are good!"
 
@@ -191,7 +215,7 @@ When processing inventory updates, confirm the action clearly."""
             return "\n".join(lines)
 
         if "summary" in task_lower or "overview" in task_lower:
-            summary = demo_store.get_inventory_summary()
+            summary = await call("get_inventory_summary")
             return f"""Inventory Summary:
 - Total Products: {summary['total_products']}
 - Total Items in Stock: {summary['total_items']:,}
@@ -231,13 +255,11 @@ When processing inventory updates, confirm the action clearly."""
             # search also matches basketball shoes, hoops, and accessories,
             # which made a plain stock question report an inflated total.
             if search_term == "basketball":
-                category_items = demo_store.get_inventory_by_category("Basketballs")
-                results = [
-                    {**item, "sku": sku}
-                    for sku, item in category_items.items()
-                ]
+                response = await call("list_products", {"category": "Basketballs"})
+                results = response.get("products", []) if isinstance(response, dict) else []
             else:
-                results = demo_store.search_inventory(search_term)
+                response = await call("search_inventory", {"query": search_term})
+                results = response.get("results", []) if isinstance(response, dict) else []
             if results:
                 total_qty = sum(item['quantity'] for item in results)
                 noun = "basketballs" if search_term == "basketball" else f"items matching “{search_term}”"
@@ -252,7 +274,7 @@ When processing inventory updates, confirm the action clearly."""
                 return "\n".join(lines)
 
         # Default: show summary
-        summary = demo_store.get_inventory_summary()
+        summary = await call("get_inventory_summary")
         lines = ["Inventory Overview:\n"]
         for category, data in summary['by_category'].items():
             lines.append(f"- {category}: {data['total_quantity']:,} units ({data['count']} SKUs)")

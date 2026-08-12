@@ -2,7 +2,7 @@ import base64
 import json
 import os
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from cryptography.hazmat.primitives.asymmetric import rsa
 from jose import jwt
@@ -84,7 +84,17 @@ class ServiceTokenTests(unittest.IsolatedAsyncioTestCase):
         }
         with patch.dict(os.environ, env, clear=False), patch(
             "services.service_token.httpx.AsyncClient", _Client
-        ):
+        ), patch("services.service_token.get_mcp_client") as get_client:
+            metadata = type(
+                "Metadata",
+                (),
+                {
+                    "authorization_server_for": lambda _self, _domain: (
+                        "https://example.okta.com/oauth2/aus-inventory"
+                    )
+                },
+            )()
+            get_client.return_value.discover = AsyncMock(return_value=metadata)
             token = await mint_service_token("inventory:write")
 
         self.assertEqual(token, "signed-resource-token")

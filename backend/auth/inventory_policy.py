@@ -51,7 +51,7 @@ class InventoryPolicyDecision:
 
     @property
     def approval_required(self) -> bool:
-        return self.approval_level is not None
+        return self.approval_role is not None
 
     @property
     def direct_allowed(self) -> bool:
@@ -151,12 +151,12 @@ def decide_inventory_policy(
 
     approval_level = None
     approval_role = None
-    # Only a Manager crossing the 600-unit boundary may request approval.
+    # Only a Manager crossing the 600-unit boundary may request approval from
+    # the governed agent's human owners. A VP may execute directly.
     # Sales never creates an OIG request; a manager performs the ordinary
     # change on Sarah's behalf.
     if level == 1 and required_level == 2:
-        approval_level = required_level
-        approval_role = required_role
+        approval_role = "AI Agent Owner"
 
     return InventoryPolicyDecision(
         operation="write",

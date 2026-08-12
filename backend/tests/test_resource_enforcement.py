@@ -2,7 +2,7 @@ import base64
 import os
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -47,8 +47,21 @@ class ResourceTokenValidationTests(unittest.IsolatedAsyncioTestCase):
         self.validator = ResourceTokenValidator()
         self.issuer = "https://example.okta.com/oauth2/aus-inventory"
         self.validator._jwks_cache[self.issuer] = (time.monotonic(), [self.public_jwk])
+        metadata = type(
+            "Metadata",
+            (),
+            {"authorization_server_for": lambda _self, _domain: self.issuer},
+        )()
+        discovery_client = type("DiscoveryClient", (), {})()
+        discovery_client.discover = AsyncMock(return_value=metadata)
+        self.discovery_patch = patch(
+            "auth.resource_token.get_mcp_client",
+            return_value=discovery_client,
+        )
+        self.discovery_patch.start()
 
     def tearDown(self):
+        self.discovery_patch.stop()
         self.env.stop()
 
     def token(self, *, scopes=None, actor="wlp-agent"):
@@ -116,46 +129,30 @@ class ResourceTokenValidationTests(unittest.IsolatedAsyncioTestCase):
             )
 
 
-class _Store:
+class _MCPClient:
     def __init__(self):
         self.calls = 0
+        self.last_call = None
 
-    def get_inventory_by_name(self, _name):
-        return {"sku": "BALL-001"}
-
-    def update_inventory_quantity(self, sku, quantity_change, operation):
+    async def call_tool(self, **kwargs):
         self.calls += 1
+        self.last_call = kwargs
+        if kwargs["tool_name"] == "list_products":
+            return {
+                "count": 2,
+                "products": [
+                    {"sku": "BALL-001", "name": "Pro Game Basketball", "quantity": 100},
+                    {"sku": "BALL-002", "name": "Youth Basketball", "quantity": 50},
+                ],
+            }
         return {
-            "sku": sku,
+            "sku": "BALL-001",
             "name": "Pro Game Basketball",
             "previous_quantity": 100,
-            "new_quantity": 100 + quantity_change,
-            "change": quantity_change,
+            "new_quantity": 150,
+            "change": 50,
             "status": "good",
         }
-
-
-class _ReadStore:
-    def get_inventory_by_category(self, category):
-        if category != "Basketballs":
-            return {}
-        return {
-            "BALL-001": {
-                "name": "Pro Game Basketball",
-                "category": "Basketballs",
-                "quantity": 100,
-                "status": "good",
-            },
-            "BALL-002": {
-                "name": "Youth Basketball",
-                "category": "Basketballs",
-                "quantity": 50,
-                "status": "good",
-            },
-        }
-
-    def search_inventory(self, _query):
-        raise AssertionError("plain basketball reads must use the exact category")
 
 
 class InventoryWriteEnforcementTests(unittest.IsolatedAsyncioTestCase):
@@ -168,8 +165,8 @@ class InventoryWriteEnforcementTests(unittest.IsolatedAsyncioTestCase):
         return agent
 
     async def test_write_without_validated_token_does_not_touch_store(self):
-        store = _Store()
-        with patch("agents.inventory_agent.demo_store", store):
+        mcp = _MCPClient()
+        with patch("agents.inventory_agent.get_mcp_client", return_value=mcp):
             result = await self.agent().process(
                 "Add 50 basketballs to inventory",
                 context={
@@ -179,41 +176,50 @@ class InventoryWriteEnforcementTests(unittest.IsolatedAsyncioTestCase):
                 },
             )
         self.assertFalse(result["success"])
-        self.assertEqual(store.calls, 0)
+        self.assertEqual(mcp.calls, 0)
 
     async def test_write_without_allow_decision_does_not_touch_store(self):
-        store = _Store()
-        with patch("agents.inventory_agent.demo_store", store):
+        mcp = _MCPClient()
+        with patch("agents.inventory_agent.get_mcp_client", return_value=mcp):
             result = await self.agent().process(
                 "Add 50 basketballs to inventory",
                 context={
                     "scopes": ["inventory:write"],
                     "resource_token_validated": True,
+                    "mcp_access_token": "signed-token",
                     "authorization_decision": {"decision": "deny"},
                 },
             )
         self.assertFalse(result["success"])
-        self.assertEqual(store.calls, 0)
+        self.assertEqual(mcp.calls, 0)
 
     async def test_validated_allowed_write_changes_store_once(self):
-        store = _Store()
-        with patch("agents.inventory_agent.demo_store", store):
+        mcp = _MCPClient()
+        with patch("agents.inventory_agent.get_mcp_client", return_value=mcp):
             result = await self.agent().process(
                 "Add 50 basketballs to inventory",
                 context={
                     "scopes": ["inventory:write"],
                     "resource_token_validated": True,
+                    "mcp_access_token": "signed-token",
                     "authorization_decision": {"decision": "allow"},
                 },
             )
         self.assertTrue(result["success"])
-        self.assertEqual(store.calls, 1)
+        self.assertEqual(mcp.calls, 1)
+        self.assertEqual(mcp.last_call["tool_name"], "update_inventory_quantity")
+        self.assertEqual(mcp.last_call["arguments"]["quantity"], 50)
 
     async def test_basketball_read_is_exact_and_does_not_call_an_llm(self):
-        with patch("agents.inventory_agent.demo_store", _ReadStore()):
+        mcp = _MCPClient()
+        with patch("agents.inventory_agent.get_mcp_client", return_value=mcp):
             result = await self.agent().process(
                 "How many basketballs are in stock?",
-                context={"scopes": ["inventory:read"]},
+                context={
+                    "scopes": ["inventory:read"],
+                    "resource_token_validated": True,
+                    "mcp_access_token": "signed-token",
+                },
             )
 
         self.assertTrue(result["success"])
@@ -221,6 +227,7 @@ class InventoryWriteEnforcementTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("**150 basketballs in stock across 2 products**", result["result"])
         self.assertIn("| Pro Game Basketball | BALL-001 | 100 |", result["result"])
         self.assertIn("| Youth Basketball | BALL-002 | 50 |", result["result"])
+        self.assertEqual(mcp.last_call["tool_name"], "list_products")
 
 
 if __name__ == "__main__":

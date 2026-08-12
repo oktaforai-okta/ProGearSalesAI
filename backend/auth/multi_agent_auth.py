@@ -22,6 +22,12 @@ from .agent_config import (
     AGENT_SALES, AGENT_INVENTORY, AGENT_CUSTOMER, AGENT_PRICING,
     DEMO_AGENTS
 )
+from mcp.client import (
+    MCPDiscoveryError,
+    authorization_server_id,
+    get_mcp_client,
+    protected_resource_metadata_url,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,39 +61,57 @@ class MultiAgentTokenExchange:
 
         self.main_auth_server_id = os.getenv("OKTA_MAIN_AUTH_SERVER_ID", "default").strip()
 
-        # SDK instances per resource domain
-        self._sdks: Dict[str, OktaAISDK] = {}
-        self._configs: Dict[str, OktaAIConfig] = {}
+        # The MCP resource metadata, not an application environment variable,
+        # selects each resource's authorization server. SDKs are built lazily
+        # after that discovery and cached by resource domain + issuer.
+        self._sdks: Dict[tuple[str, str], Any] = {}
+        self._configs: Dict[tuple[str, str], Any] = {}
 
-        if SDK_AVAILABLE:
-            self._initialize_sdks()
+    async def _sdk_for_resource(
+        self,
+        agent_type: str,
+        config: AgentConfig,
+        scopes: List[str],
+    ) -> tuple[Any, Any, str, str]:
+        if not SDK_AVAILABLE:
+            raise RuntimeError("The Okta AI SDK is unavailable.")
+        if not config.agent_id or not config.private_key:
+            raise RuntimeError(f"The {agent_type} agent identity is not configured.")
 
-    def _initialize_sdks(self):
-        """Initialize SDK instances for each configured resource domain."""
-        for agent_type in [AGENT_SALES, AGENT_INVENTORY, AGENT_CUSTOMER, AGENT_PRICING]:
-            config = get_agent_config(agent_type)
-            if not config or not config.agent_id or not config.private_key:
-                logger.info(f"Resource domain {agent_type} not fully configured, skipping SDK init")
-                continue
-
-            try:
-                okta_config = OktaAIConfig(
-                    oktaDomain=self.okta_domain,
-                    clientId=config.agent_id,
-                    clientSecret="",  # Not used with JWT bearer
-                    authorizationServerId=config.auth_server_id,
-                    principalId=config.agent_id,
-                    privateJWK=config.private_key
-                )
-                self._configs[agent_type] = okta_config
-                self._sdks[agent_type] = OktaAISDK(okta_config)
-                logger.info(f"Initialized SDK for {agent_type} resource domain")
-            except Exception as e:
-                logger.error(f"Failed to initialize SDK for {agent_type}: {e}")
+        metadata = await get_mcp_client().discover(
+            config.mcp_url,
+            required_scopes=scopes,
+        )
+        issuer = metadata.authorization_server_for(self.okta_domain)
+        auth_server_id = authorization_server_id(issuer, self.okta_domain)
+        cache_key = (agent_type, issuer)
+        if cache_key not in self._sdks:
+            okta_config = OktaAIConfig(
+                oktaDomain=self.okta_domain,
+                clientId=config.agent_id,
+                clientSecret="",
+                authorizationServerId=auth_server_id,
+                principalId=config.agent_id,
+                privateJWK=config.private_key,
+            )
+            self._configs[cache_key] = okta_config
+            self._sdks[cache_key] = OktaAISDK(okta_config)
+            logger.info(
+                "Initialized Okta SDK for %s from MCP metadata issuer %s",
+                agent_type,
+                issuer,
+            )
+        return (
+            self._sdks[cache_key],
+            self._configs[cache_key],
+            issuer,
+            auth_server_id,
+        )
 
     def is_agent_available(self, agent_type: str) -> bool:
-        """Check if the governed agent's SDK is properly initialized for this resource domain."""
-        return agent_type in self._sdks
+        """Check whether the governed identity can be initialized for a resource."""
+        config = get_agent_config(agent_type)
+        return bool(SDK_AVAILABLE and config and config.agent_id and config.private_key and config.mcp_url)
 
     async def exchange_token_for_agent(
         self,
@@ -119,16 +143,13 @@ class MultiAgentTokenExchange:
 
         scopes = requested_scopes or config.scopes
 
-        # Check if SDK is available for this agent
-        if agent_type not in self._sdks:
-            return self._demo_result(agent_type, user_id_token, scopes)
-
-        sdk = self._sdks[agent_type]
-        okta_config = self._configs[agent_type]
-
         try:
+            sdk, okta_config, target_audience, auth_server_id = await self._sdk_for_resource(
+                agent_type,
+                config,
+                scopes,
+            )
             # Step 1: Exchange ID token for ID-JAG token
-            target_audience = f"{self.okta_domain}/oauth2/{config.auth_server_id}"
             scope_string = " ".join(scopes)
 
             logger.info(f"[{agent_type}] Step 1: ID token -> ID-JAG, audience={target_audience}")
@@ -166,7 +187,7 @@ class MultiAgentTokenExchange:
 
             auth_server_request = AuthServerTokenRequest(
                 id_jag_token=id_jag_result.access_token,
-                authorization_server_id=config.auth_server_id,
+                authorization_server_id=auth_server_id,
                 principal_id=okta_config.principal_id,
                 private_jwk=okta_config.private_jwk
             )
@@ -206,8 +227,11 @@ class MultiAgentTokenExchange:
                     "agent_id": config.agent_id,
                     "color": config.color,
                 },
-                "auth_server": config.auth_server_id,
+                "auth_server": auth_server_id,
+                "authorization_server_issuer": target_audience,
                 "audience": config.audience,
+                "mcp_resource": config.mcp_url,
+                "protected_resource_metadata": protected_resource_metadata_url(config.mcp_url),
                 "demo_mode": False,
                 "exchanged_at": datetime.now().isoformat(),
                 "token_claims": auth_token_claims,  # Decoded access token claims for UI
@@ -271,7 +295,10 @@ class MultiAgentTokenExchange:
             # Other errors - genuine infrastructure/system failures, distinct from
             # both of the above so callers never mistake this for "access denied"
             # or "AI didn't understand the request".
-            logger.error(f"[{agent_type}] Token exchange failed: {e}")
+            if isinstance(e, MCPDiscoveryError):
+                logger.error("[%s] MCP discovery failed: %s", agent_type, e)
+            else:
+                logger.error(f"[{agent_type}] Token exchange failed: {e}")
             return self._error_result(agent_type, config, str(e), scopes)
 
     def _get_main_sdk(self, agent_config: AgentConfig):

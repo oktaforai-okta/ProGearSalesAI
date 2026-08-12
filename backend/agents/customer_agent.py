@@ -3,12 +3,13 @@ Customer Agent - Handles accounts, contacts, and customer data.
 
 Registered as a first-class identity in Okta.
 Uses raw Anthropic SDK for LLM calls.
-Uses demo_store for customer data.
+Calls the protected ProGear Customer MCP for customer data.
 """
 
 from typing import Dict, Any, Optional
 from .base_agent import BaseAgent
-from data.demo_store import demo_store
+from auth.agent_config import AGENT_CUSTOMER, get_agent_config
+from mcp.client import MCPToolError, get_mcp_client
 
 
 class CustomerAgent(BaseAgent):
@@ -58,8 +59,18 @@ Be helpful while respecting customer data privacy."""
         """Process a customer-related task with real data."""
         context = context or {}
 
-        # Get data from demo_store
-        data = self._get_data(task)
+        try:
+            data = await self._get_data(task, context)
+        except MCPToolError as exc:
+            return {
+                "agent": self.agent_type,
+                "agent_name": self.agent_name,
+                "color": self.color,
+                "result": f"Customer MCP operation failed: {exc}",
+                "success": False,
+                "error": str(exc),
+                "scopes": context.get("scopes", self.scopes),
+            }
 
         # Augment the task with data
         augmented_task = f"""{task}
@@ -71,75 +82,40 @@ Provide a helpful response using this data."""
 
         return await super().process(augmented_task, context)
 
-    def _get_data(self, task: str) -> str:
-        """Get customer data from demo_store."""
+    async def _get_data(self, task: str, context: Dict[str, Any]) -> Any:
+        """Select and invoke one Customer MCP tool."""
+        if not context.get("resource_token_validated") or not context.get("mcp_access_token"):
+            raise MCPToolError("The Customer MCP requires a validated access token.")
+        config = get_agent_config(AGENT_CUSTOMER)
+        if config is None:
+            raise MCPToolError("The Customer MCP resource is not configured.")
         task_lower = task.lower()
+        scopes = context.get("scopes", [])
+        if "customer:history" in scopes:
+            tool_name, arguments = "get_customer_summary", {}
+        elif "customer:lookup" in scopes:
+            tier = next(
+                (value for value in ("Platinum", "Gold", "Silver", "Bronze") if value.lower() in task_lower),
+                None,
+            )
+            if tier:
+                tool_name, arguments = "get_customers_by_tier", {"tier": tier}
+            else:
+                query = next(
+                    (value for value in ("state university", "metro", "chicago", "los angeles", "atlanta", "boston", "dallas") if value in task_lower),
+                    task.strip(),
+                )
+                tool_name, arguments = "search_customers", {"query": query}
+        else:
+            import re
 
-        # Search for specific customer
-        if "state" in task_lower or "university" in task_lower:
-            customer = demo_store.get_customer_by_name("State University")
-            if customer:
-                return f"""Customer: {customer['name']}
-- Customer ID: {customer['id']}
-- Tier: {customer['tier']}
-- Contact: {customer['contact']}
-- Email: {customer['email']}
-- Location: {customer['location']}
-- Total Spent: ${customer['total_spent']:,}"""
-
-        if "metro" in task_lower:
-            customer = demo_store.get_customer_by_name("Metro")
-            if customer:
-                return f"""Customer: {customer['name']}
-- Tier: {customer['tier']}
-- Contact: {customer['contact']}
-- Location: {customer['location']}
-- Total Spent: ${customer['total_spent']:,}"""
-
-        if "platinum" in task_lower or "tier" in task_lower:
-            platinum = demo_store.get_customers_by_tier("Platinum")
-            if platinum:
-                lines = [f"Platinum Tier Customers ({len(platinum)}):\n"]
-                total = 0
-                for cust in sorted(platinum, key=lambda x: x['total_spent'], reverse=True):
-                    lines.append(f"- {cust['name']} - ${cust['total_spent']:,} lifetime")
-                    lines.append(f"  Contact: {cust['contact']} | {cust['location']}")
-                    total += cust['total_spent']
-                lines.append(f"\nTotal Platinum Revenue: ${total:,}")
-                lines.append("Platinum benefits: 5% discount, Net 45-60 terms")
-                return "\n".join(lines)
-
-        if "gold" in task_lower:
-            gold = demo_store.get_customers_by_tier("Gold")
-            if gold:
-                lines = [f"Gold Tier Customers ({len(gold)}):\n"]
-                for cust in sorted(gold, key=lambda x: x['total_spent'], reverse=True)[:5]:
-                    lines.append(f"- {cust['name']} - ${cust['total_spent']:,}")
-                return "\n".join(lines)
-
-        # Search by location or name
-        for term in ["chicago", "los angeles", "atlanta", "boston", "dallas"]:
-            if term in task_lower:
-                results = demo_store.search_customers(term)
-                if results:
-                    lines = [f"Customers in {term.title()}:\n"]
-                    for cust in results:
-                        lines.append(f"- {cust['name']} ({cust['tier']}) - ${cust['total_spent']:,}")
-                    return "\n".join(lines)
-
-        # Default: customer overview
-        summary = demo_store.get_customer_summary()
-        by_tier = summary.get('by_tier', {})
-
-        lines = ["Customer Overview:\n"]
-        for tier in ["Platinum", "Gold", "Silver", "Bronze"]:
-            if tier in by_tier:
-                data = by_tier[tier]
-                lines.append(f"- {tier}: {data['count']} accounts (${data['total_spent']:,} combined)")
-
-        top_customer = demo_store.get_customers_by_tier("Platinum")
-        if top_customer:
-            top = max(top_customer, key=lambda x: x['total_spent'])
-            lines.append(f"\nTop Customer: {top['name']} (${top['total_spent']:,})")
-
-        return "\n".join(lines)
+            match = re.search(r"\bCUST-\d{3}\b", task, re.IGNORECASE)
+            if not match:
+                raise MCPToolError("Ask for a customer by ID or use a customer search prompt.")
+            tool_name, arguments = "get_customer", {"customerId": match.group(0).upper()}
+        return await get_mcp_client().call_tool(
+            resource_url=config.mcp_url,
+            access_token=str(context["mcp_access_token"]),
+            tool_name=tool_name,
+            arguments=arguments,
+        )

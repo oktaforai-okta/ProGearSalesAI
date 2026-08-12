@@ -19,6 +19,7 @@ import httpx
 from jose import JWTError, jwt
 
 from .agent_config import get_agent_config
+from mcp.client import MCPDiscoveryError, get_mcp_client
 
 logger = logging.getLogger(__name__)
 
@@ -95,12 +96,21 @@ class ResourceTokenValidator:
     ) -> ValidatedResourceToken:
         config = get_agent_config(agent_type)
         domain = _normalize_domain(os.getenv("OKTA_DOMAIN", ""))
-        if not config or not domain or not config.auth_server_id or not config.agent_id:
+        if not config or not domain or not config.mcp_url or not config.agent_id:
             raise ResourceTokenError(f"{agent_type} resource validation is not configured.")
         if not token or token.startswith("demo-") or token.startswith("service-token-placeholder"):
             raise ResourceTokenError("A real signed resource token is required.")
 
-        issuer = f"{domain}/oauth2/{config.auth_server_id}"
+        try:
+            metadata = await get_mcp_client().discover(
+                config.mcp_url,
+                required_scopes=required_scopes,
+            )
+            issuer = metadata.authorization_server_for(domain)
+        except MCPDiscoveryError as exc:
+            raise ResourceTokenError(
+                f"The {agent_type} MCP authorization metadata could not be trusted: {exc}"
+            ) from exc
         try:
             header = jwt.get_unverified_header(token)
         except JWTError as exc:

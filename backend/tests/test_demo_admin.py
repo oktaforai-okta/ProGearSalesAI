@@ -17,7 +17,7 @@ class DemoAdminResetTests(unittest.TestCase):
     def test_role_always_uses_the_live_okta_value(self):
         self.assertEqual(_reset_level({"login": "sarah.sales@atko.email", "clearance_level": 0}), 0)
         self.assertEqual(_reset_level({"login": "mike.manager@atko.email", "clearance_level": 1}), 1)
-        self.assertEqual(_reset_level({"login": "joe.vp@atko.email", "clearance_level": 2}), 2)
+        self.assertEqual(_reset_level({"login": "presenter.vp@example.com", "clearance_level": 2}), 2)
         self.assertEqual(_reset_level({"login": "demo@example.com", "clearance_level": 1}), 1)
 
     def test_persona_vacation_default_is_domain_independent(self):
@@ -72,13 +72,16 @@ class DemoAdminSessionIsolationTests(unittest.IsolatedAsyncioTestCase):
         session_b = "22222222-2222-4222-8222-222222222222"
 
         await toggle_demo_attribute("00u-mike", session_a, "is_on_vacation", True)
+        await toggle_demo_attribute("00u-mike", session_a, "clearance_level", 2)
 
         status_a = await get_demo_status("00u-mike", session_a)
         status_b = await get_demo_status("00u-mike", session_b)
 
-        self.assertEqual(status_a["clearance_level"], 1)
+        self.assertEqual(status_a["clearance_level"], 2)
         self.assertTrue(status_a["is_a_manager"])
         self.assertTrue(status_a["is_on_vacation"])
+        self.assertEqual(status_a["live_clearance_level"], 1)
+        self.assertTrue(status_a["role_simulation_allowed"])
         self.assertEqual(status_b["clearance_level"], 1)
         self.assertTrue(status_b["is_a_manager"])
         self.assertFalse(status_b["is_on_vacation"])
@@ -104,10 +107,28 @@ class DemoAdminSessionIsolationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_invalid_toggle_values_are_rejected(self):
         session_id = "33333333-3333-4333-8333-333333333333"
-        with self.assertRaisesRegex(ValueError, "not toggleable"):
-            await toggle_demo_attribute("00u-mike", session_id, "clearance_level", 2)
+        for value in (0, 3, True, "2"):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, "clearance_level"):
+                    await toggle_demo_attribute("00u-mike", session_id, "clearance_level", value)
         with self.assertRaisesRegex(ValueError, "is_on_vacation"):
             await toggle_demo_attribute("00u-mike", session_id, "is_on_vacation", "false")
+
+    async def test_sales_session_cannot_simulate_manager_or_vp(self):
+        self.mock_get_profile.return_value = {
+            "login": "sarah.sales@atko.email",
+            "clearance_level": 0,
+            "is_a_manager": False,
+            "is_on_vacation": False,
+        }
+        session_id = "44444444-4444-4444-8444-444444444444"
+
+        with self.assertRaisesRegex(ValueError, "Only a live Manager"):
+            await toggle_demo_attribute("00u-sarah", session_id, "clearance_level", 1)
+
+        status = await get_demo_status("00u-sarah", session_id)
+        self.assertEqual(status["clearance_level"], 0)
+        self.assertFalse(status["role_simulation_allowed"])
 
 
 if __name__ == "__main__":

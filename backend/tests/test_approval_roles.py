@@ -45,7 +45,11 @@ async def _validate_token(token, scope):
         raise ValueError("token mismatch")
 
 
-def _approved_raw(required_level: int, required_role: str):
+def _approved_raw(
+    required_level: int | None,
+    required_role: str,
+    required_group: str | None = None,
+):
     intent = Intent(
         user_email="mike.manager@example.com",
         agent="inventory",
@@ -57,6 +61,7 @@ def _approved_raw(required_level: int, required_role: str):
         agent_id="wlp-agent",
         required_approver_role=required_role,
         required_approver_level=required_level,
+        required_approver_group=required_group,
     )
     return {
         "requestStatus": "RESOLVED",
@@ -74,10 +79,22 @@ def _approved_raw(required_level: int, required_role: str):
 
 
 class ApprovalRoleTests(unittest.IsolatedAsyncioTestCase):
-    def _service(self, raw, store, ledger_path, resolved_level):
+    def _service(
+        self,
+        raw,
+        store,
+        ledger_path,
+        resolved_level,
+        group_member: bool | None = None,
+    ):
         async def resolve_level(approver):
             self.assertEqual(approver["id"], "00u-approver")
             return resolved_level
+
+        async def verify_group(approver, group_name):
+            self.assertEqual(approver["id"], "00u-approver")
+            self.assertEqual(group_name, "AIAgentOwners")
+            return bool(group_member)
 
         return ApprovalService(
             oig=_OIG(raw),
@@ -88,6 +105,7 @@ class ApprovalRoleTests(unittest.IsolatedAsyncioTestCase):
             justification_field_id="justification-field",
             ledger_path=ledger_path,
             resolve_approver_level=resolve_level,
+            verify_approver_group=verify_group if group_member is not None else None,
         )
 
     async def test_manager_cannot_satisfy_vp_request(self):
@@ -111,6 +129,35 @@ class ApprovalRoleTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(status.status, "executed")
             self.assertEqual(store.calls, 1)
 
+    async def test_ai_agent_owner_can_satisfy_owner_group_request(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = _Store()
+            service = self._service(
+                _approved_raw(None, "AI Agent Owner", "AIAgentOwners"),
+                store,
+                Path(tmp) / "ledger.json",
+                resolved_level=-1,
+                group_member=True,
+            )
+            status = await service.execute_if_approved("request-owner")
+            self.assertEqual(status.status, "executed")
+            self.assertEqual(store.calls, 1)
+
+    async def test_non_owner_cannot_satisfy_owner_group_request(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = _Store()
+            service = self._service(
+                _approved_raw(None, "AI Agent Owner", "AIAgentOwners"),
+                store,
+                Path(tmp) / "ledger.json",
+                resolved_level=2,
+                group_member=False,
+            )
+            status = await service.execute_if_approved("request-owner")
+            self.assertEqual(status.status, "denied")
+            self.assertIn("AIAgentOwners", status.denial_reason or "")
+            self.assertEqual(store.calls, 0)
+
     async def test_request_is_not_created_when_execution_token_preflight_fails(self):
         async def reject_token(token, scope):
             raise ValueError("resource token rejected")
@@ -130,13 +177,13 @@ class ApprovalRoleTests(unittest.IsolatedAsyncioTestCase):
                 await service.create_request(
                     user_email="mike.manager@example.com",
                     requester_id="00u-manager",
-                    approver_group_name="ProGear-VPs",
+                    approver_group_name="AIAgentOwners",
                     agent="inventory",
                     scope="inventory:write",
                     parsed_intent={"quantity_delta": 601, "product_name": "basketball"},
                     original_task="Add 601 basketballs to inventory",
-                    required_approver_role="VP",
-                    required_approver_level=2,
+                    required_approver_role="AI Agent Owner",
+                    required_approver_level=None,
                 )
             self.assertEqual(oig.create_calls, 0)
 
@@ -155,13 +202,13 @@ class ApprovalRoleTests(unittest.IsolatedAsyncioTestCase):
             request_id, _ = await service.create_request(
                 user_email="mike.manager@example.com",
                 requester_id="00u-manager",
-                approver_group_name="ProGear-VPs",
+                approver_group_name="AIAgentOwners",
                 agent="inventory",
                 scope="inventory:write",
                 parsed_intent={"quantity_delta": 601, "product_name": "basketball"},
                 original_task="Add 601 basketballs to inventory",
-                required_approver_role="VP",
-                required_approver_level=2,
+                required_approver_role="AI Agent Owner",
+                required_approver_level=None,
             )
             self.assertEqual(request_id, "request-created")
             self.assertEqual(oig.create_kwargs["requester_id"], "00u-manager")
@@ -170,8 +217,11 @@ class ApprovalRoleTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Requested for: mike.manager@example.com", justification)
             self.assertIn("Action: Add 601 basketballs to inventory", justification)
             self.assertIn("Reason: Exceeds the Manager limit of 600 units", justification)
-            self.assertIn("Required approval: VP (Level 2)", justification)
+            self.assertIn("Required approval: AI Agent Owner (AIAgentOwners)", justification)
             self.assertEqual(service.pending_request_ids(), ["request-created"])
+
+            created_intent = service._ledger.get("request-created").intent
+            self.assertEqual(created_intent["required_approver_group"], "AIAgentOwners")
 
             # New requests recover the action from the private ledger; OIG no
             # longer needs to expose machine-readable JSON to the approver.

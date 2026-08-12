@@ -18,6 +18,7 @@ import httpx
 from jose import jwt
 
 from auth.agent_config import AGENT_INVENTORY, get_agent_config
+from mcp.client import authorization_server_id, get_mcp_client
 
 
 def _private_key() -> dict:
@@ -46,10 +47,16 @@ async def mint_service_token(scope: str) -> str:
     domain = _okta_domain()
     client_id = os.getenv("OKTA_APPROVAL_EXECUTOR_CLIENT_ID", "").strip()
     private_key = _private_key()
-    if not config or not domain or not client_id or not private_key or not config.auth_server_id:
+    if not config or not domain or not client_id or not private_key or not config.mcp_url:
         raise RuntimeError("Inventory service-token exchange is not fully configured.")
 
-    token_endpoint = f"{domain}/oauth2/{config.auth_server_id}/v1/token"
+    metadata = await get_mcp_client().discover(
+        config.mcp_url,
+        required_scopes=[scope],
+    )
+    issuer = metadata.authorization_server_for(domain)
+    discovered_auth_server_id = authorization_server_id(issuer, domain)
+    token_endpoint = f"{domain}/oauth2/{discovered_auth_server_id}/v1/token"
     now = int(time.time())
     assertion = jwt.encode(
         {

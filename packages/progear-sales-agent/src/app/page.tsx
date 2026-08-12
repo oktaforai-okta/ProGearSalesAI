@@ -39,7 +39,7 @@ const simpleExampleQuestions: ExampleQuestion[] = [
 const fgaExampleQuestions: ExampleQuestion[] = [
   { text: 'How many basketballs are in stock?', badge: 'Read', action: 'read' },
   { text: 'Add 50 basketballs to inventory', badge: '1–600', action: 'standard' },
-  { text: 'Add 601 basketballs to inventory', badge: '601+ · VP', action: 'large' },
+  { text: 'Add 601 basketballs to inventory', badge: '601+ · Owner', action: 'large' },
 ];
 
 const CHAT_STORAGE_KEY = 'progear-chat-messages';
@@ -190,7 +190,7 @@ export default function Home() {
       request_id: mockId,
       status: 'pending',
       submitted_at: new Date().toISOString(),
-      approver_group: 'InventoryApprovers',
+      approver_group: 'AIAgentOwners',
       intent: {
         product_name: 'basketball',
         quantity_delta: 500,

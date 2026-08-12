@@ -667,7 +667,7 @@ Reason:            User not in required group (needs ProGear-Sales)
 - Clear reasons for each denial
 - Pattern is visible if Mike repeatedly tries to access unauthorized data
 
-**One more thing worth knowing about that "Update basketball count to 9,000" row:** Mike's job role clearing him to make inventory updates at all is only the first check. Before a change of that size happens, FGA compares his signed role with the requested quantity, and a change above 600 is sent to a VP for approval. See "A Closer Look" below for why those extra checks exist.
+**One more thing worth knowing about that "Update basketball count to 9,000" row:** Mike's job role clearing him to make inventory updates at all is only the first check. Before a change of that size happens, FGA compares his role with the requested quantity, and a change above 600 is sent to an AI Agent Owner for approval. See "A Closer Look" below for why those extra checks exist.
 
 ### Scenario 3: The Finance Analyst (Specialized Access)
 
@@ -775,24 +775,24 @@ Think about it this way: Okta holds one role level for the inventory story: **0 
 
 So this demo adds a second, automatic check that combines the live Okta role with the requested quantity:
 - Is the request a read, a standard write of 1–600, or a large write of 601 or more?
-- Is the person's role high enough to execute it directly, should a Manager create a VP request, or must the write stop?
+- Is the person's role high enough to execute it directly, should a Manager create an AI Agent Owner request, or must the write stop?
 
 **Why use both Okta and FGA?** Okta remains the source of truth for identity and role level and issues the narrow Inventory token. The Inventory boundary validates that signed token. FGA is purpose-built to combine the role with the requested quantity for one action, without keeping a second mutable role copy that could drift from Okta.
 
-**In plain terms:** Sarah (Level 0, Manager False) can read, but every write stops before delegated token exchange and she contacts her manager. With FGA enabled, Mike (Level 1, Manager True) can write through 600 units, but 601 needs a VP; with FGA off, his coarse `inventory:write` scope permits any positive quantity. A Level 2 VP (Manager True) can execute any quantity. If any employee is marked On vacation, the agent stops before ID-JAG for every action; the role remains unchanged, but delegated work is suspended.
+**In plain terms:** Sarah (Level 0, Manager False) can read, but every write stops before delegated token exchange and she contacts her manager. With FGA enabled, Mike (Level 1, Manager True) can write through 600 units, but 601 needs an AI Agent Owner; with FGA off, his coarse `inventory:write` scope permits any positive quantity. A Level 2 VP (Manager True) can execute any quantity. The hosted demo previews that outcome through Mike's isolated session. If any employee is marked On vacation, the agent stops before ID-JAG for every action; the role remains unchanged, but delegated work is suspended.
 
 ### Check #3: Should a human still look at this one?
 
 Even after both of the above say yes, one more question remains: is this action, at this size, something a computer should be allowed to finish on its own?
 
-In this demo, Sales writes never become access requests. A Manager write of 601 or more becomes a VP request. Nothing changes in Inventory while that request is pending. The VP sees a short summary of who requested what and why approval is needed—not internal JSON. When OIG reports approval, the backend loads the exact action from its approval ledger, checks that the approver still holds Level 2 in Okta, mints and validates a real service token, and executes once.
+In this demo, Sales writes never become access requests. A Manager write of 601 or more becomes an `AIAgentOwners` request. Nothing changes in Inventory while that request is pending. The owner sees a short summary of who requested what and why approval is needed—not internal JSON. When OIG reports approval, the backend loads the exact action from its approval ledger, checks that the approver is still in `AIAgentOwners`, mints and validates a real service token, and executes once.
 
 **Why require a person to sign off on something that's already fully authorized?** Because "is this allowed" and "is this a good idea right now" are genuinely different questions:
 
 - "May this role execute this quantity?" is the FGA decision: Manager for normal changes, VP for 601+.
-- "Did a qualified person approve it?" is the governance decision. The request and decision are recorded in Okta Identity Governance, and the approver still has to hold the required role when execution occurs.
+- "Did a current AI Agent Owner approve it?" is the governance decision. The request and decision are recorded in Okta Identity Governance, and the approver still has to belong to the required owner group when execution occurs.
 
-Put the checks together and the picture is crisp: Okta establishes identity, checks whether delegation is currently appropriate, and supplies the role claim; FGA decides direct execution, Sales denial, or Manager-to-VP escalation using role and quantity; OIG records the required VP decision. None can be skipped by getting past another.
+Put the checks together and the picture is crisp: Okta establishes identity, checks whether delegation is currently appropriate, and supplies the role claim; FGA decides direct execution, Sales denial, or Manager-to-owner escalation using role and quantity; OIG records the required AI Agent Owner decision. None can be skipped by getting past another.
 
 ---
 
@@ -979,7 +979,7 @@ The ecosystem is growing, and MCP's adoption of this approach is accelerating it
 ### "Can we try this before committing?"
 
 Yes! The ProGear demo lets you:
-- Log in as different users (Sarah, Mike, Joe, Frank)
+- Log in as different users (Sarah, Mike, and Frank); use Mike's isolated FGA control to preview VP
 - Ask questions and see what's allowed or denied
 - Watch the **Token Flow** page show issued tokens and business decisions in real time
 - Use the Okta System Log for the delegated exchanges that were actually attempted
@@ -1021,7 +1021,7 @@ The ProGear demo shows this working in real-time:
 1. **Log in as different users**
    - Sarah Sales: Full access to all four data domains
    - Mike Manager: Inventory only
-   - Joe VP: Inventory, including direct large writes
+   - Mike's VP preview: Inventory, including direct large writes
    - Frank Finance: Pricing only
 
 2. **Ask questions and watch the results**
