@@ -57,6 +57,17 @@ class SimpleAuthorizationTests(unittest.TestCase):
         self.assertFalse(decision.direct_allowed)
         self.assertIn("contact your manager", simple_authorization_message(decision) or "")
 
+    def test_sales_write_without_quantity_explains_read_only_role(self):
+        decision = self.decide(
+            0,
+            "Hey can you increase the inventory?",
+            "inventory:write",
+        )
+        message = simple_authorization_message(decision) or ""
+        self.assertIn("Sales can read inventory but cannot change it", message)
+        self.assertIn("contact your manager", message)
+        self.assertNotIn("positive quantity", message)
+
     def test_manager_standard_write_is_direct(self):
         decision = self.decide(1, "Add 600 basketballs to inventory", "inventory:write")
         self.assertTrue(decision.direct_allowed)
@@ -178,6 +189,31 @@ class SimpleAuthorizationWorkflowTests(unittest.IsolatedAsyncioTestCase):
             "contact your manager",
             state["agent_results"][AGENT_INVENTORY]["authorization_reason"],
         )
+
+    async def test_sales_write_without_quantity_stops_before_exchange_in_both_modes(self):
+        for simulate_fga in (False, True):
+            with self.subTest(simulate_fga=simulate_fga):
+                orchestrator, state = make_workflow_state(
+                    0,
+                    "Hey can you increase the inventory?",
+                    "inventory:write",
+                )
+                state["agent_results"] = {}
+                state["simulate_fga"] = simulate_fga
+
+                state = await orchestrator._pre_exchange_guard_node(state)
+                state = await orchestrator._generate_response_node(state)
+
+                self.assertEqual(state["agents_to_invoke"], [])
+                self.assertEqual(state["token_exchanges"], [])
+                self.assertFalse(state["authorization_decisions"][0]["token_issued"])
+                self.assertIsNone(state.get("pending_approval"))
+                self.assertEqual(
+                    state["final_response"],
+                    "I didn’t change the inventory. Sales can read inventory but cannot "
+                    "change it. Please contact your manager to make the change.",
+                )
+                self.assertNotIn("positive quantity", state["final_response"])
 
     async def test_sales_write_response_explains_clearance_and_manager(self):
         orchestrator, state = make_workflow_state(

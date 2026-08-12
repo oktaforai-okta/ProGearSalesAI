@@ -98,6 +98,38 @@ def decide_inventory_policy(
             hard_denial_reason=None if level >= 0 else "No ProGear role is assigned in Okta.",
         )
 
+    # Role eligibility is the coarse-grained gate and must be evaluated before
+    # request details such as quantity. Sales is read-only for every inventory
+    # write, so asking Sarah to supply a quantity is both misleading and an
+    # unnecessary disclosure of the downstream Manager/VP policy. Likewise, a
+    # user with no ProGear role must be rejected before request validation.
+    if level < 0:
+        return InventoryPolicyDecision(
+            operation="write",
+            relation="can_update_standard",
+            role_level=level,
+            role_name=name,
+            quantity=None,
+            required_level=1,
+            required_role="Manager",
+            hard_denial_reason="No ProGear role is assigned in Okta.",
+        )
+
+    if level == 0:
+        return InventoryPolicyDecision(
+            operation="write",
+            relation="can_update_standard",
+            role_level=level,
+            role_name=name,
+            quantity=None,
+            required_level=1,
+            required_role="Manager",
+            hard_denial_reason=(
+                "Sales can read inventory but cannot change it. "
+                "Please contact your manager to make the change."
+            ),
+        )
+
     parsed = parse_inventory_intent(task)
     quantity = parsed.get("quantity_delta") if parsed else None
     if not isinstance(quantity, int) or quantity <= 0:
@@ -117,21 +149,12 @@ def decide_inventory_policy(
     required_role = ROLE_NAMES[required_level]
     relation = "can_update_large" if is_large else "can_update_standard"
 
-    hard_denial_reason = None
-    if level < 0:
-        hard_denial_reason = "No ProGear role is assigned in Okta."
-    elif level == 0:
-        hard_denial_reason = (
-            "Sales can read inventory but cannot change it. "
-            "Please contact your manager to make the change."
-        )
-
     approval_level = None
     approval_role = None
     # Only a Manager crossing the 600-unit boundary may request approval.
     # Sales never creates an OIG request; a manager performs the ordinary
     # change on Sarah's behalf.
-    if hard_denial_reason is None and level == 1 and required_level == 2:
+    if level == 1 and required_level == 2:
         approval_level = required_level
         approval_role = required_role
 
@@ -145,5 +168,5 @@ def decide_inventory_policy(
         required_role=required_role,
         approval_level=approval_level,
         approval_role=approval_role,
-        hard_denial_reason=hard_denial_reason,
+        hard_denial_reason=None,
     )
