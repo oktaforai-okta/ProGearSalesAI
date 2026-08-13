@@ -1,8 +1,11 @@
 'use client';
 
 import { useState } from 'react';
+import { decodeJwt } from 'jose';
 import {
-  Key, ChevronDown, ChevronUp, ChevronRight, ExternalLink, KeySquare, ShieldOff, TriangleAlert,
+  Key, ChevronDown, ChevronUp, ChevronRight, Copy, Check, ExternalLink,
+  KeySquare, ShieldOff, TriangleAlert, Unlock, Lock, User, Bot,
+  ShieldCheck, Flag, Clock,
 } from 'lucide-react';
 
 interface TokenExchange {
@@ -18,7 +21,7 @@ interface TokenExchange {
   token_claims?: Record<string, any>;
   access_token?: string;  // Raw access token JWT
   id_jag_token?: string;  // Raw ID-JAG token (intermediate)
-  id_jag_claims?: Record<string, any>;  // ID-JAG claims (unused for display, kept for counting)
+  id_jag_claims?: Record<string, any>;  // Decoded ID-JAG claims
 }
 
 interface Props {
@@ -27,28 +30,246 @@ interface Props {
   idTokenRaw?: string;  // Raw ID token JWT
 }
 
-// Shows the raw, signed JWT only - no in-house "decoded" view. The point is
-// credibility: a self-built decoded-claims panel can look like theater to a
-// skeptical viewer, but a real signed token that decodes cleanly on jwt.io
-// (an independent, well-known tool nobody thinks we control) can't be faked.
-//
 // When a step was blocked rather than just not-yet-reached, say so explicitly
 // instead of the generic "No token available" - the absence of a token here
 // is the point being demonstrated (a policy denial), not a gap in the demo.
+
+type ClaimCategory = {
+  label: string;
+  icon: typeof User;
+  text: string;
+  bg: string;
+  border: string;
+};
+
+const CATEGORIES: Record<string, ClaimCategory> = {
+  identity: { label: 'Identity', icon: User, text: 'text-blue-700', bg: 'bg-blue-50', border: 'border-blue-400' },
+  agent: { label: 'Agent', icon: Bot, text: 'text-violet-700', bg: 'bg-violet-50', border: 'border-violet-400' },
+  authorization: { label: 'Authorization', icon: ShieldCheck, text: 'text-emerald-700', bg: 'bg-emerald-50', border: 'border-emerald-400' },
+  governance: { label: 'Governance', icon: Flag, text: 'text-amber-700', bg: 'bg-amber-50', border: 'border-amber-400' },
+  timing: { label: 'Timing', icon: Clock, text: 'text-slate-600', bg: 'bg-slate-50', border: 'border-slate-300' },
+  technical: { label: 'Technical', icon: Lock, text: 'text-gray-500', bg: 'bg-gray-50', border: 'border-gray-300' },
+};
+
+const CLAIM_CATEGORY: Record<string, keyof typeof CATEGORIES> = {
+  sub: 'identity', email: 'identity', name: 'identity', given_name: 'identity',
+  family_name: 'identity', preferred_username: 'identity', login: 'identity',
+  act: 'agent', 'act.sub': 'agent', actor: 'agent',
+  scp: 'authorization', scope: 'authorization', aud: 'authorization', groups: 'authorization',
+  Manager: 'governance', Vacation: 'governance', Clearance: 'governance',
+  is_on_vacation: 'governance', is_a_manager: 'governance', clearance_level: 'governance',
+  iat: 'timing', exp: 'timing', auth_time: 'timing', nbf: 'timing',
+};
+
+const CATEGORY_ORDER: (keyof typeof CATEGORIES)[] = [
+  'identity', 'agent', 'authorization', 'governance', 'timing', 'technical',
+];
+
+function categoryFor(key: string): keyof typeof CATEGORIES {
+  return CLAIM_CATEGORY[key] || 'technical';
+}
+
+function formatClaimValue(value: any): string {
+  if (value === null || value === undefined) return 'null';
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  if (typeof value === 'number') return String(value);
+  if (Array.isArray(value)) return value.join(', ');
+  if (typeof value === 'object') return JSON.stringify(value, null, 2);
+  return String(value);
+}
+
+function decodeToken(rawToken?: string): Record<string, any> | undefined {
+  if (!rawToken) return undefined;
+  try {
+    return decodeJwt(rawToken);
+  } catch {
+    return undefined;
+  }
+}
+
+function CopyButton({ text, label }: { text: string; label: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (error) {
+      console.error(`Failed to copy ${label}:`, error);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      className="flex items-center gap-1 px-2 py-1 text-[10px] bg-gray-100 hover:bg-gray-200 rounded transition text-gray-600"
+      title={`Copy ${label}`}
+    >
+      {copied ? (
+        <>
+          <Check className="w-3 h-3 text-green-600" />
+          <span className="text-green-600">Copied</span>
+        </>
+      ) : (
+        <>
+          <Copy className="w-3 h-3" />
+          Copy
+        </>
+      )}
+    </button>
+  );
+}
+
+function DecodedTokenView({ claims }: { claims?: Record<string, any> }) {
+  const [isOpen, setIsOpen] = useState(true);
+  const grouped: Record<string, [string, any][]> = {};
+
+  if (claims) {
+    for (const entry of Object.entries(claims)) {
+      const category = categoryFor(entry[0]);
+      (grouped[category] ||= []).push(entry);
+    }
+    for (const category of Object.keys(grouped)) {
+      grouped[category].sort(([a], [b]) => a.localeCompare(b));
+    }
+  }
+
+  const populatedCategories = CATEGORY_ORDER.filter((category) => grouped[category]?.length);
+  const claimCount = claims ? Object.keys(claims).length : 0;
+
+  return (
+    <div className="border border-blue-200 rounded-lg overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setIsOpen(!isOpen)}
+        aria-expanded={isOpen}
+        className="w-full flex items-center gap-2 px-3 py-2 bg-blue-50 hover:bg-blue-100 transition text-left"
+      >
+        {isOpen ? <ChevronDown className="w-4 h-4 text-blue-600" /> : <ChevronRight className="w-4 h-4 text-blue-600" />}
+        <Unlock className="w-4 h-4 text-blue-600" />
+        <span className="text-xs font-semibold text-blue-800">Decoded claims</span>
+        <span className="text-[10px] text-blue-600 ml-auto">{claimCount} claims</span>
+      </button>
+
+      {isOpen && (
+        <div className="p-3 space-y-3 bg-white border-t border-blue-100">
+          {claims && (
+            <div className="flex justify-end">
+              <CopyButton text={JSON.stringify(claims, null, 2)} label="decoded claims" />
+            </div>
+          )}
+          {populatedCategories.length > 0 ? (
+            populatedCategories.map((category) => {
+              const meta = CATEGORIES[category];
+              const Icon = meta.icon;
+              return (
+                <div key={category}>
+                  <div className={`flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide mb-1 ${meta.text}`}>
+                    <Icon className="w-3 h-3" />
+                    {meta.label}
+                  </div>
+                  <div className="space-y-1">
+                    {grouped[category].map(([key, value]) => {
+                      const isObject = value !== null && typeof value === 'object';
+                      return (
+                        <div
+                          key={key}
+                          className={`rounded border-l-2 font-mono text-[11px] ${meta.bg} ${meta.border} ${
+                            isObject ? 'px-2 py-1.5' : 'flex gap-2 px-2 py-1.5'
+                          }`}
+                        >
+                          <span className={`flex-shrink-0 font-semibold ${meta.text}`}>{key}:</span>
+                          {isObject ? (
+                            <pre className="mt-1 text-gray-800 whitespace-pre-wrap break-words overflow-x-auto">
+                              {JSON.stringify(value, null, 2)}
+                            </pre>
+                          ) : (
+                            <span className="break-all text-gray-800">{formatClaimValue(value)}</span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })
+          ) : (
+            <div className="text-xs text-gray-400 text-center py-4">Unable to decode this token</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EncodedTokenView({ rawToken }: { rawToken?: string }) {
+  const [isOpen, setIsOpen] = useState(false);
+
+  return (
+    <div className="border border-orange-200 rounded-lg overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setIsOpen(!isOpen)}
+        aria-expanded={isOpen}
+        className="w-full flex items-center gap-2 px-3 py-2 bg-orange-50 hover:bg-orange-100 transition text-left"
+      >
+        {isOpen ? <ChevronDown className="w-4 h-4 text-orange-600" /> : <ChevronRight className="w-4 h-4 text-orange-600" />}
+        <Lock className="w-4 h-4 text-orange-600" />
+        <span className="text-xs font-semibold text-orange-800">Encoded JWT</span>
+        <span className="text-[10px] text-orange-600 ml-auto">signed token</span>
+      </button>
+
+      {isOpen && (
+        <div className="bg-white border-t border-orange-100">
+          <div className="flex items-center justify-end gap-2 px-3 py-2 border-b border-gray-100 bg-gray-50/50">
+            {rawToken && <CopyButton text={rawToken} label="encoded JWT" />}
+            {rawToken && (
+              <a
+                href={`https://jwt.io/#token=${encodeURIComponent(rawToken)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1 px-2 py-1 text-[10px] bg-gray-100 hover:bg-gray-200 rounded transition text-gray-600"
+                title="Open this signed token directly in jwt.io for independent verification"
+              >
+                <ExternalLink className="w-3 h-3" />
+                Verify on jwt.io
+              </a>
+            )}
+          </div>
+          <div className="p-2">
+            {rawToken ? (
+              <div className="font-mono text-[10px] text-gray-700 bg-orange-50 p-2 rounded border border-orange-200 break-all whitespace-pre-wrap">
+                {rawToken}
+              </div>
+            ) : (
+              <div className="text-xs text-gray-400 text-center py-4">Encoded token not available</div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TokenSection({
   title,
+  claims,
   rawToken,
   color,
   defaultOpen = true,
   blockedReason,
 }: {
   title: string;
+  claims?: Record<string, any>;
   rawToken?: string;
   color?: string;
   defaultOpen?: boolean;
   blockedReason?: string;
 }) {
   const [isOpen, setIsOpen] = useState(defaultOpen);
+  const decodedClaims = claims && Object.keys(claims).length > 0 ? claims : decodeToken(rawToken);
 
   if (blockedReason) {
     return (
@@ -65,7 +286,7 @@ function TokenSection({
     );
   }
 
-  if (!rawToken) {
+  if (!rawToken && !decodedClaims) {
     return (
       <div className="border border-gray-200 rounded-lg overflow-hidden">
         <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 text-gray-500 text-sm">
@@ -81,7 +302,9 @@ function TokenSection({
     <div className="border border-gray-200 rounded-lg overflow-hidden">
       {/* Header */}
       <button
+        type="button"
         onClick={() => setIsOpen(!isOpen)}
+        aria-expanded={isOpen}
         className="w-full flex items-center gap-2 px-3 py-2 bg-gray-50 hover:bg-gray-100 transition text-left"
       >
         {isOpen ? (
@@ -101,22 +324,9 @@ function TokenSection({
 
       {isOpen && (
         <div className="bg-white">
-          <div className="flex items-center justify-end px-3 py-2 border-b border-gray-100 bg-gray-50/50">
-            <a
-              href={`https://jwt.io/#token=${encodeURIComponent(rawToken)}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1 px-2 py-1 text-[10px] bg-gray-100 hover:bg-gray-200 rounded transition text-gray-600"
-              title="Open this signed token directly in jwt.io for independent verification"
-            >
-              <ExternalLink className="w-3 h-3" />
-              Verify on jwt.io
-            </a>
-          </div>
-          <div className="p-2">
-            <div className="font-mono text-[10px] text-gray-700 bg-orange-50 p-2 rounded border border-orange-200 break-all whitespace-pre-wrap">
-              {rawToken}
-            </div>
+          <div className="p-3 space-y-2">
+            <DecodedTokenView claims={decodedClaims} />
+            <EncodedTokenView rawToken={rawToken} />
           </div>
         </div>
       )}
@@ -124,7 +334,7 @@ function TokenSection({
   );
 }
 
-export default function RawTokensCard({ exchanges, idTokenRaw }: Props) {
+export default function RawTokensCard({ exchanges, idTokenClaims, idTokenRaw }: Props) {
   // The Token Flow page is a demonstration surface: show the complete proof
   // chain immediately, while preserving the option to collapse it manually.
   const [isExpanded, setIsExpanded] = useState(true);
@@ -136,6 +346,8 @@ export default function RawTokensCard({ exchanges, idTokenRaw }: Props) {
     const isRelevant =
       exchange.access_token ||
       exchange.id_jag_token ||
+      exchange.token_claims ||
+      exchange.id_jag_claims ||
       exchange.access_denied ||
       exchange.status === 'error' ||
       exchange.error;
@@ -146,14 +358,14 @@ export default function RawTokensCard({ exchanges, idTokenRaw }: Props) {
   }, {} as Record<string, TokenExchange>);
 
   const relevantExchanges = Object.values(latestExchanges);
-  const hasAnyTokens = !!idTokenRaw || relevantExchanges.length > 0;
+  const hasAnyTokens = !!idTokenRaw || !!idTokenClaims || relevantExchanges.length > 0;
 
   // Count total tokens (ID Token + ID-JAG tokens + Access tokens)
-  const tokenCount = (idTokenRaw ? 1 : 0) +
+  const tokenCount = (idTokenRaw || idTokenClaims ? 1 : 0) +
     relevantExchanges.reduce((count, e) => {
       let c = 0;
-      if (e.id_jag_token) c++;
-      if (e.access_token) c++;
+      if (e.id_jag_token || e.id_jag_claims) c++;
+      if (e.access_token || e.token_claims) c++;
       return count + c;
     }, 0);
 
@@ -200,6 +412,7 @@ export default function RawTokensCard({ exchanges, idTokenRaw }: Props) {
           {/* ID Token (User's original token) */}
           <TokenSection
             title="Step 1: User Authenticated to Okta for AI Agent Interface (ID Token)"
+            claims={idTokenClaims}
             rawToken={idTokenRaw}
             color="#007dc1"
             defaultOpen={true}
@@ -228,9 +441,10 @@ export default function RawTokensCard({ exchanges, idTokenRaw }: Props) {
                 )}
 
                 {/* ID-JAG Token (intermediate) */}
-                {(exchange.id_jag_token || blocked) && (
+                {(exchange.id_jag_token || exchange.id_jag_claims || blocked) && (
                   <TokenSection
                     title={`Step 2: Cross-App Access Ticket Issued for ${exchange.agent_name} (ID-JAG Token)`}
+                    claims={exchange.id_jag_claims}
                     rawToken={exchange.id_jag_token}
                     color="#6366f1"  // Indigo for ID-JAG
                     blockedReason={blocked}
@@ -238,9 +452,10 @@ export default function RawTokensCard({ exchanges, idTokenRaw }: Props) {
                 )}
 
                 {/* Access Token (final) */}
-                {(exchange.access_token || blocked) && (
+                {(exchange.access_token || exchange.token_claims || blocked) && (
                   <TokenSection
                     title={`Step 3: ${exchange.agent_name} Granted Access to Business Data (Access Token)`}
+                    claims={exchange.token_claims}
                     rawToken={exchange.access_token}
                     color={exchange.color}
                     blockedReason={blocked}
