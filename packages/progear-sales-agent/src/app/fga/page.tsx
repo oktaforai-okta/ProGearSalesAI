@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 import FGAExplanationCard from '@/components/FGAExplanationCard';
 import FGAControlsPanel from '@/components/FGAControlsPanel';
+import FGASettingsGuide from '@/components/FGASettingsGuide';
 
 const FGA_CHECKS_STORAGE_KEY = 'progear-fga-checks';
 
@@ -52,6 +53,8 @@ export default function FGAPage() {
         <FGAExplanationCard checks={fgaChecks} />
 
         <FGAControlsPanel onApplied={loadFromStorage} />
+
+        <FGASettingsGuide />
 
         {fgaChecks.length === 0 && (
           <div className="text-center py-12 text-gray-400">
