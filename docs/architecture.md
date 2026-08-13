@@ -1,231 +1,253 @@
 # ProGear AI Agent Architecture
 
-ProGear is a custom AI sales agent for a fictional basketball-equipment retailer. The hosted application combines four controls:
+This document explains how the ProGear Sales AI demo actually works, end to end, based on the live code in this repo. It's written for someone who has never seen this codebase but is technically comfortable with OAuth, authorization, and multi-agent systems.
 
-1. **Okta AI Agent Governance** gives the agent its own Workload Principal identity.
-2. **Native MCP resources** publish OAuth Protected Resource Metadata and expose standard Streamable HTTP tools.
-3. **FGA** adds the optional role-and-quantity decision for Inventory.
-4. **Okta Identity Governance (OIG)** supplies the one human approval path.
+ProGear ("CourtEdge ProGear") is a fictional basketball-equipment retailer. The demo is an AI sales/shopping assistant secured by three cooperating systems:
 
-For deployment steps, see [implementation-guide.md](./implementation-guide.md).
+1. **Okta AI Agent Governance**: gives the AI its own identity and exchanges the user's login for narrowly-scoped, short-lived access tokens (ID-JAG).
+2. **Auth0 FGA**: a second, finer-grained authorization layer that checks live relationships, clearance, and context (e.g., "is this person on vacation right now?") that Okta's role-based check doesn't know about.
+3. **Okta Identity Governance (OIG)**: routes high-impact actions (large inventory writes) to a human approver instead of letting the agent execute them immediately.
 
-## System at a glance
+For deployment instructions, see [implementation-guide.md](./implementation-guide.md).
 
-```text
-Employee
-   │ signs in
-   ▼
-ProGear custom agent ───────► MCP /.well-known metadata
-   │                             │ resource + Okta AS + scopes
-   │ ID token + agent proof      ▼
-   └──────────────────────────► Okta
-                                 │ ID-JAG, then scoped token
+---
+
+## System overview
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│  Browser: Next.js frontend (Vercel)                                 │
+│  User signs in via Okta (NextAuth.js). Chat UI posts to backend.    │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                 │ Authorization: Bearer <user ID token>
                                  ▼
-                    local token validation
-                                 │
-                   ┌─────────────┴─────────────┐
-                   │ FGA off                   │ FGA on
-                   │ coarse Okta scope         │ role + quantity
-                   └─────────────┬─────────────┘
-                                 │
-                                 ▼
-              Bearer token + native MCP tools/call
-                                 │
-             Inventory · Sales · Customer · Pricing
+┌─────────────────────────────────────────────────────────────────────┐
+│  Backend: FastAPI (Render): backend/api/main.py                     │
+│                                                                       │
+│  Orchestrator (LangGraph, backend/orchestrator/orchestrator.py)     │
+│  router → exchange_tokens → fga_check → approval_gate →             │
+│           process_agents → generate_response                       │
+│                                                                       │
+│   Sales domain  Inventory domain  Customer domain  Pricing domain  │
+│   (internal components; each uses the raw Anthropic SDK)           │
+└───────────┬───────────────────────┬──────────────────────┬──────────┘
+            │                       │                      │
+            ▼                       ▼                      ▼
+   Okta Org AS + 4 Custom      Auth0 FGA                Okta Identity
+   Authorization Servers       (ReBAC + ABAC             Governance (OIG)
+   (ID-JAG token exchange,     check on inventory)        (Access Requests for
+   RSA/JWT-Bearer auth)                                    large writes)
 ```
 
-The browser is a Next.js app on Vercel. FastAPI and LangGraph run on Render. The protected MCP service is a separate Render deployment. The FastAPI backend does not read or mutate the repository's local `demo_store` for live actions.
+The backend never talks to a database: it reads/writes a JSON file (`backend/data/demo_store.py` over `initial_data.json` / `live_data.json`) that simulates ProGear's business data.
 
-## 1. The agent is a first-class identity
+---
 
-Okta registers the **ProGear Sales Agent** as a Workload Principal (`wlp…`). The employee and agent do not collapse into one identity:
+## 1. Identity: the AI agent has its own Okta identity
 
-- the employee remains the delegated subject;
-- the agent authenticates with its own key;
-- resource access names both parties;
-- deactivating the Workload Principal prevents new exchanges;
-- Okta can audit the user, agent, target resource, scope, and outcome.
+The AI is not "the user with extra code around it." It is registered in Okta as a **Workload Principal**, a distinct machine identity whose entity ID starts with `wlp...`. The same `wlp...` identifier is the client ID of the OIDC app Okta permanently binds when **direct User access** is enabled. The Vercel web runtime authenticates its authorization-code and refresh-token requests with a dedicated `private_key_jwt` key (`OKTA_OIDC_PRIVATE_KEY`), while the backend uses its workload key for ID-JAG exchanges. Neither path uses a shared client secret. The production deployment uses one shared `OKTA_AI_AGENT_ID` / `OKTA_AI_AGENT_PRIVATE_KEY` identity across its internal domain configurations; the per-domain environment variables are optional code-level overrides, not four required Okta AI Agent registrations.
 
-Employee sign-in uses a separate OIDC web client linked to the governed agent. The OIDC client and Workload Principal have independent keys. See [agent-client-binding-compatibility.md](./agent-client-binding-compatibility.md).
+Because the agent's identity is separate from the human user's identity, every access decision downstream can be phrased as "is the ProGear Sales Agent, acting on behalf of User Y, allowed to do Z?" This is the shape Okta's AI Agent Governance and the audit trail in the Okta System Log are built around.
 
-## 2. The MCP resource tells the agent how it is protected
+The application has four internal business-domain components and four Custom Authorization Server boundaries, but Okta governs one ProGear Sales Agent identity.
 
-`backend/mcp/client.py` performs [RFC 9728](https://www.rfc-editor.org/rfc/rfc9728) discovery before token exchange.
+Deleting the Workload Principal invalidates the agent identity even if a previously associated OIDC app still exists as a separate application. Current registration APIs support both a fresh `NEW_OIDC_APP` binding and an eligible `EXISTING_APP` binding. The recommended clean recovery uses a fresh app, while preserving the surviving app for comparison until the replacement works end to end. See [Recovering from an Accidentally Deleted AI Agent](./implementation-guide.md#recovering-from-an-accidentally-deleted-ai-agent) in the Implementation Guide for the full procedure.
 
-For example:
+---
 
-```text
-MCP resource:
-https://progear-mcp-servers-m2f3.onrender.com/inventory/mcp
+## 2. Token exchange: two-step ID-JAG
 
-Protected-resource metadata:
-https://progear-mcp-servers-m2f3.onrender.com/
-  .well-known/oauth-protected-resource/inventory/mcp
-```
+The core mechanism is the **Identity Assertion JWT Authorization Grant (ID-JAG)**, implemented in `backend/auth/multi_agent_auth.py`. It is a two-step exchange, and both steps run for each resource domain required by the request:
 
-The metadata must:
+**Step 1: ID token → ID-JAG (at the Org Authorization Server)**
+The user's Okta ID token (from their NextAuth login) is exchanged for an ID-JAG assertion. This assertion names *both* the user and the agent: "Agent X is acting on behalf of User Y." This happens at Okta's Org AS (configured via `OKTA_MAIN_AUTH_SERVER_ID`), using the agent's RSA keypair, not the user's credentials.
 
-- identify the exact MCP resource requested;
-- advertise every requested scope;
-- identify exactly one authorization server in the configured Okta org.
+**Step 2: ID-JAG → scoped access token (at a per-domain Custom Authorization Server)**
+The ID-JAG assertion is then exchanged for an actual access token at the Custom Authorization Server for the specific business domain the request needs (Sales, Inventory, Customer, or Pricing). This is where Okta's access policies actually evaluate: is this user, in this group, allowed to receive these scopes? The resulting access token is scoped, short-lived, and, for the Inventory domain, carries custom claims (`Manager`, `Vacation`, `Clearance`) that feed the FGA layer described below.
 
-The backend fails closed if any check fails. It does not require four copied authorization-server IDs in its environment.
+**No down-scoping.** If any one of the requested scopes isn't grantable to this user under this agent's policy, Okta doesn't silently drop that scope and grant the rest: the *entire* exchange fails with `access_denied`. `multi_agent_auth.py` treats `no_matching_policy`, `access_denied`, and Okta's generic "Policy evaluation failed" 401 as the same outcome and returns a clean `access_denied` result rather than a partial grant or a raw error.
 
-| MCP resource | Resource path | Scopes |
+### The four resource domains and their Custom Authorization Servers
+
+Each internal domain configuration selects its own Custom Authorization Server and scope set, all defined in `backend/auth/agent_config.py`. In the production deployment, these configurations use the same ProGear Sales Agent workload identity:
+
+| Domain | Scopes | Authorization server environment variable |
 |---|---|---|
-| ProGear Inventory MCP | `/inventory/mcp` | `inventory:read`, `inventory:write`, `inventory:alert` |
-| ProGear Sales MCP | `/sales/mcp` | `sales:read`, `sales:quote`, `sales:order` |
-| ProGear Customer MCP | `/customer/mcp` | `customer:read`, `customer:lookup`, `customer:history` |
-| ProGear Pricing MCP | `/pricing/mcp` | `pricing:read`, `pricing:margin`, `pricing:discount` |
+| Sales | `sales:read`, `sales:quote`, `sales:order` | `OKTA_SALES_AUTH_SERVER_ID` |
+| Inventory | `inventory:read`, `inventory:write` | `OKTA_INVENTORY_AUTH_SERVER_ID` |
+| Customer | `customer:read`, `customer:lookup`, `customer:history` | `OKTA_CUSTOMER_AUTH_SERVER_ID` |
+| Pricing | `pricing:read`, `pricing:margin`, `pricing:discount` | `OKTA_PRICING_AUTH_SERVER_ID` |
 
-The MCP Bridge and its write-only authorization server belong to a separate integration. They are not in this hosted native Cross App Access path.
+The code supports optional per-domain agent ID / private key overrides (`OKTA_AI_AGENT_[TYPE]_ID`, `OKTA_AI_AGENT_[TYPE]_PRIVATE_KEY`) for other deployment patterns. When those variables are absent, every domain uses the shared `OKTA_AI_AGENT_ID` and `OKTA_AI_AGENT_PRIVATE_KEY`, which is the one-agent production model used here.
 
-Each domain therefore has two complementary Okta control-plane records: a registered MCP server for standards-based discovery and inventory, and an `IDENTITY_ASSERTION_CUSTOM_AS` agent resource connection for native XAA/ID-JAG. The current MCP-server agent connection type is STS-based; replacing the authorization-server connection with it would change the security flow rather than merely rename the resource.
+If the Okta AI SDK or the agent credentials aren't configured, `multi_agent_auth.py` falls back to a demo mode that fabricates a plausible-looking token result, useful for running the UI without a live Okta org, but worth knowing it exists so you don't mistake demo-mode output for a real exchange.
 
-## 3. Native Cross App Access and ID-JAG
+---
 
-`backend/auth/multi_agent_auth.py` performs the two-step exchange:
+## 3. Orchestration: LangGraph + raw Anthropic SDK
 
-1. **ID token → ID-JAG.** The Okta Org Authorization Server creates a signed delegation grant that preserves the employee subject and identifies the ProGear Workload Principal.
-2. **ID-JAG → scoped access token.** The authorization server discovered from the MCP resource evaluates the employee, agent, and requested scope.
+`backend/orchestrator/orchestrator.py` uses the real `langgraph` package (`from langgraph.graph import StateGraph, END`; `langgraph>=0.2.0` is a genuine dependency in `backend/requirements.txt`, not just a label) to define the request pipeline as an explicit graph:
 
-There is no partial success. If the requested scope is not grantable, the exchange fails rather than silently returning a weaker token.
-
-`backend/auth/resource_token.py` independently verifies the access token before use:
-
-- signature and signing key;
-- issuer discovered from MCP metadata;
-- expected resource audience;
-- expiry;
-- requested scopes;
-- governed agent identity;
-- delegated employee.
-
-The real signed token is then presented directly to the MCP endpoint:
-
-```http
-POST /inventory/mcp
-Authorization: Bearer <scoped access token>
-Content-Type: application/json
-Accept: application/json, text/event-stream
-
-{
-  "jsonrpc": "2.0",
-  "id": "...",
-  "method": "tools/call",
-  "params": {
-    "name": "update_inventory_quantity",
-    "arguments": {
-      "sku": "basketball",
-      "quantity": 50,
-      "operation": "increase"
-    }
-  }
-}
+```
+router → exchange_tokens → fga_check → approval_gate → process_agents → generate_response
 ```
 
-The MCP server validates the Bearer token again and enforces the scope associated with the selected tool.
+- **router**: an LLM call (Claude, via the raw Anthropic SDK) decides which internal domain components are relevant to the user's message and, critically, which *specific scope* is needed. For example, "what's our basketball stock?" needs `inventory:read`, while "add 500 basketballs" needs `inventory:write`. If the LLM call or its JSON parsing fails, a keyword-matching fallback (`AGENT_KEYWORDS` / `SCOPE_DEFINITIONS`) selects the domain and scope instead.
+- **exchange_tokens**: runs the two-step ID-JAG exchange described above for every resource domain the router selected, using the *specific* scopes it determined rather than requesting every available scope.
+- **fga_check**: the Auth0 FGA layer, described in detail below. It runs *after* token exchange because the Inventory Custom Authorization Server's access token carries the `Manager`/`Vacation`/`Clearance` claims that FGA needs, and the Org AS used in Step 1 doesn't support these custom claims.
+- **approval_gate**: the OIG human-in-the-loop check, described below.
+- **process_agents**: invokes the internal domain components that survived both authorization layers.
+- **generate_response**: synthesizes a final answer, explicitly distinguishing "access denied" (policy said no) from "system error" (Okta/infra failure) from "no response" (nothing was needed/available), so the UI and the user never conflate a security decision with a bug.
 
-## 4. Request orchestration
+The internal domain classes (`backend/agents/sales_agent.py`, `inventory_agent.py`, `customer_agent.py`, `pricing_agent.py`) subclass `BaseAgent` (`backend/agents/base_agent.py`). These are orchestration components behind the one governed ProGear Sales Agent, not four separate user-facing or Okta-registered agent identities. Each component calls the **raw Anthropic SDK directly** (`anthropic.Anthropic(...).messages.create(...)`), not LangChain's LLM wrapper. `langchain` is present in `requirements.txt` only because `langgraph` needs it as a transitive dependency.
 
-The LangGraph path is:
+The model name comes from `LLM_MODEL_NAME` (default `claude-sonnet-4-6`); the key from `ANTHROPIC_API_KEY`.
 
-```text
-router
-  → pre_exchange_guard
-  → exchange_tokens
-  → fga_check
-  → approval_gate
-  → process_agents
-  → generate_response
+---
+
+## 4. Auth0 FGA: the second authorization layer
+
+Okta's ID-JAG check answers "is this role allowed to do this *kind* of thing at all" (coarse: group membership → scope). Auth0 FGA, implemented in `backend/auth/fga_client.py`, answers a different question: "does *this specific person* have the right *live* relationship, clearance, and context for *this specific object*, right now?" It's a genuinely separate authorization system, called via the OpenFGA SDK against a hosted FGA store, not a re-implementation of Okta's logic.
+
+### The model
+
+The FGA store defines these types and relations (see the full docstring at the top of `fga_client.py` for the authoritative version):
+
+```
+type user
+
+type clearance_level
+  relations
+    define next_higher: [clearance_level]
+    define granted_to:  [user]
+    define holder:      granted_to or holder from next_higher
+
+type inventory_system
+  relations
+    define manager:        [user]
+    define viewer:         [user]
+    define on_vacation:    [user]
+    define active_manager: manager but not on_vacation
+    define active_viewer:  viewer but not on_vacation
+    define can_manage:     active_manager
+    define can_read:       active_manager or active_viewer
+
+type inventory_item
+  relations
+    define parent:             [inventory_system]
+    define required_clearance: [clearance_level]
+    define has_clearance:      holder from required_clearance
+    define can_view:            can_read from parent
+    define can_update:          has_clearance and can_manage from parent
 ```
 
-- **router** selects the MCP resource and least-privilege scope.
-- **pre_exchange_guard** stops vacation delegation and known Sales writes before ID-JAG.
-- **exchange_tokens** discovers MCP metadata, performs ID-JAG, and validates the resource token.
-- **fga_check** applies the advanced Inventory decision only when enabled.
-- **approval_gate** creates the one Manager-to-`AIAgentOwners` OIG request.
-- **process_agents** calls the actual protected MCP tool.
-- **generate_response** distinguishes policy denial from infrastructure failure.
+Two things worth calling out about this model:
 
-There is no local success fallback. If discovery, Okta, token validation, FGA, or the MCP resource fails, the action fails visibly.
+- **Clearance is hierarchical.** `clearance_level` forms a chain via `next_higher`: holding level *N* also makes you a holder of every level below it (`holder: granted_to or holder from next_higher`). A user with clearance 7 satisfies an item that requires clearance 3.
+- **Read access is broader than write access.** Both managers and plain viewers get `can_view` (via `can_read: active_manager or active_viewer`), but only managers with sufficient clearance get `can_update` (`has_clearance and can_manage from parent`, and `can_manage` is manager-only). Non-managers who request the Inventory agent are automatically given a `viewer` tuple (see "dynamic tuples" below) so they can read but never write.
 
-## 5. Simple mode and FGA mode
+### How scopes map to FGA checks
 
-FGA never grants a scope that Okta denied.
+| Requested scope | FGA check | What it actually requires |
+|---|---|---|
+| `inventory:read` | `can_view` on the relevant `inventory_item` | active manager OR active viewer (i.e., not on vacation) |
+| `inventory:write` | `can_update` on the relevant `inventory_item` | active manager AND sufficient clearance for that item |
 
-### FGA off: coarse-grained Okta policy
+Sales, Customer, and Pricing agents have no FGA model today and always pass through. FGA currently only gates Inventory.
 
-- Sales may read Inventory.
-- Sales cannot obtain `inventory:write` and is told to contact a manager.
-- A Manager or VP with a validated `inventory:write` token may submit any positive quantity.
-- No OIG request is created.
+### Vacation is contextual, not stored
 
-### FGA on: role plus quantity
+`is_on_vacation` is **not** written into the FGA store as a persistent fact. It's read from the `Vacation` claim on the Inventory Custom Authorization Server's access token (or, as a fallback, the ID token) and passed as a **contextual tuple** at check time: `user:X on_vacation inventory_system:warehouse`, added to the request only when true. Because it's evaluated per-request rather than stored, flipping someone's vacation status takes effect on their very next check: no redeploy, no tuple cleanup.
 
-Production uses the authoritative `Clearance` value from the live Okta profile and signed Inventory token. The hosted demo also lets a live Manager compare Manager and VP outcomes in an isolated browser session:
+### Manager, viewer, and clearance tuples are kept in sync dynamically
 
-| Level | Role | Read | Write 1–600 | Write 601+ |
-|---:|---|---|---|---|
-| 0 | Sales | Execute | Block | Block |
-| 1 | Manager | Execute | Execute | Request AI Agent Owner approval |
-| 2 | VP | Execute | Execute | Execute |
+Unlike vacation, manager/viewer/clearance relationships *are* stored as FGA tuples, but the backend keeps them in sync with the live Okta claims on every request rather than requiring a one-time seed:
 
-The version-controlled model is `backend/auth/fga_role_model.json`:
+- `ensure_manager_relationship()` writes or deletes the `manager` tuple to match the `Manager` claim.
+- `ensure_viewer_relationship()` writes or deletes a `viewer` tuple for non-managers who are requesting the Inventory agent, so they get read-only access without ever being a manager.
+- `ensure_clearance_tuple()` enforces a single active clearance tuple per user: it deletes any stale level and writes the current one, so clearance changes on the Okta side (the `Clearance` claim) propagate into FGA on the next request.
 
-```text
-can_read            = Sales or Manager or VP
-can_request_change  = Manager
-can_update_standard = Manager or VP
-can_update_large    = VP
-```
+### The check itself
 
-The backend supplies exactly one contextual role tuple for each check. It does not persist role membership in FGA. Production derives that tuple from live Okta. The hosted Manager/VP comparison is a clearly labeled, session-only overlay and cannot create a scope that Okta did not issue.
+`check_agent_access()` picks `can_view` or `can_update` based on the requested scope, then `check_inventory_access_via_fga()` calls the FGA API with the user, relation, the target `inventory_item` (the demo uses `widget-a`, which requires clearance 3, or `classified-part` if the message mentions "classified," which requires clearance 7), and the contextual vacation tuple if applicable. The orchestrator's `fga_check` node records the full result (allowed/denied, the relation checked, the object, the contextual tuples used, and a human-readable reason) into `state["fga_checks"]`, which the frontend's `/tokens` page and Token Exchange UI render directly.
 
-The `is_on_vacation` control is intentionally earlier than FGA because it answers whether delegation may begin at all. In the hosted demo its value and Mike's role preview are isolated by an opaque browser-tab ID in `sessionStorage`. Sarah cannot elevate.
+**Fail-closed by design.** If the FGA client isn't configured or the API call fails, `check_inventory_access_via_fga()` denies access by default rather than allowing it. Authorization for inventory writes and reads depends on FGA actually answering.
 
-## 6. Human approval
+---
 
-There is one approval path: a Level 1 Manager requests an Inventory increase of 601 or more while FGA is enabled.
+## 5. Governance: human-in-the-loop approval for large writes
 
-1. FGA confirms the Manager may request the change but may not execute it.
-2. The backend proves that its dedicated approval executor can obtain and validate `inventory:write` before creating a request.
-3. OIG records the Manager as requester and assigns the task to `AIAgentOwners`.
-4. A current AI Agent Owner approves or denies it from Access Requests.
-5. The backend verifies the approver's live `AIAgentOwners` membership.
-6. After approval, the dedicated executor mints a fresh token and calls the real Inventory MCP `update_inventory_quantity` tool.
+Not every authorized write executes immediately. `backend/services/factory.py` builds an `ApprovalService` (`backend/services/approval_service.py`) wired to a real **Okta Identity Governance (OIG) Access Request** flow via `backend/services/okta_oig_client.py`. The threshold is configurable (`APPROVAL_QUANTITY_THRESHOLD`, default `500`).
 
-Sales never creates an access request. The requester and approver remain separate: Mike requests as Manager, while a current `AIAgentOwners` member—such as Johnathan in a separate browser profile—approves. No dedicated Joe/VP login is required.
+The orchestrator's **approval_gate** node fires only when all of the following are true:
+1. The request needs `inventory:write`.
+2. FGA didn't already deny the Inventory agent (an unauthorized action never reaches the approval gate, it's just denied).
+3. `backend/services/intent.py` parses a quantity from the message (`parse_inventory_intent`) that is `>= APPROVAL_QUANTITY_THRESHOLD`.
 
-The OIG request ID and exact execution intent are retained in a file-backed ledger. Hosted deployments need a persistent disk for `APPROVALS_LEDGER_PATH`. The MCP tool currently has no idempotency-key argument, so durable end-to-end exactly-once execution requires a future tool contract or durable system-of-record transaction key.
+When triggered, it builds an `Intent` (user, product, quantity, original request text) and calls the OIG API (`POST /governance/api/v1/requests`) to create a real Access Request, with the intent JSON fenced inside the request's justification field (`[INTENT_JSON]{...}[/INTENT_JSON]`) so it can be recovered later without a separate database. The chat response tells the user their request is pending and which approver group (`OKTA_APPROVER_GROUP_NAME`, default `InventoryApprovers`) it went to.
 
-## 7. Data and deployment boundary
+**Resolution happens two ways:**
+- **Foreground fast path**: `GET /api/approvals/{request_id}` (polled by the frontend) calls `ApprovalService.execute_if_approved()`, which checks OIG's current decision and executes the write immediately if approved.
+- **Background poller**: `backend/api/main.py` starts an async loop on FastAPI startup (`_approval_poller_loop`) that polls OIG's open/resolved requests every `APPROVAL_POLL_INTERVAL_SECONDS` (default 120s, with exponential backoff on errors) and executes any newly-approved inventory requests even if nobody has the tab open.
 
-The live MCP service owns the demo data. Its current store is in memory and resets on process restart. That is acceptable for this demo, but production needs durable storage.
+Execution is idempotent: a JSON ledger file (`backend/data/approvals_ledger.json`) tracks which OIG request IDs have already been executed, with a bounded retry count (3 attempts) before a request is marked abandoned, so a flaky write doesn't retry forever and an already-executed request never double-applies.
 
-| Component | Platform |
-|---|---|
-| Next.js frontend | Vercel |
-| FastAPI orchestration backend | Render |
-| ProGear protected MCP resources | Render |
-| Employee and agent identity, token exchange | Okta |
-| Fine-grained Inventory decision | FGA |
-| Human approval | Okta Identity Governance |
+**Honest limitation:** when the write finally executes, it's authorized via `mint_service_token()` (`backend/services/service_token.py`); this is currently a **placeholder string**, not a real Okta `client_credentials` exchange. The comment in that file says so directly: it exists because the original user's session may have long since expired by the time an approver acts, and a real service-identity token exchange is future work, not something wired up today.
 
-The old `packages/progear-sales-mcp-server` directory is a legacy standalone sample and is not the live protected resource.
+---
 
-## 8. What the UI proves
+## 6. The demo data layer
 
-- **`/architecture`** shows MCP discovery, ID-JAG, scoped tokens, native `tools/call`, the agent kill switch, and optional FGA.
-- **`/tokens`** shows the well-known URL, MCP resource, discovered authorization server, signed token chain, resource validation, and final business decision.
-- **`/fga`** shows the opt-in role-and-quantity policy and human-in-the-loop route.
+`backend/data/demo_store.py` is the only place business data lives; there's no database. It loads `backend/data/initial_data.json` (the seed dataset: 90 inventory SKUs across 8 categories, 34 customers) into `backend/data/live_data.json` on first boot if that file doesn't exist, and thereafter reads/writes `live_data.json` directly. `live_data.json` is **gitignored**: it's a runtime snapshot regenerated from the seed file, never something to commit or hand-edit. Resetting the demo means deleting `live_data.json` (or calling the store's reset method) so it re-derives from `initial_data.json`.
 
-A scoped token is necessary, not sufficient. A write executes only after every applicable control passes and the native MCP tool succeeds.
+---
+
+## 7. Known, honest limitation: the MCP server isn't in the live path yet
+
+`packages/progear-sales-mcp-server` is a real, separately deployed Express server that validates JWTs against Okta's JWKS endpoint. It exists and works as a standalone component. **However, the internal domain components in this backend do not call it.** `_invoke_agent()` in the orchestrator instantiates the domain classes directly, and they read/write `demo_store` in-process. There is no network round-trip to the MCP server today. Describing every domain action as "a real MCP tool call" would be inaccurate. It is an in-process function call gated by the same Okta/FGA/OIG checks described above, with a real, working, JWT-validating MCP server that is not yet wired into this request path.
+
+---
+
+## 8. Audit trail
+
+Every ID-JAG exchange, granted or denied, is a token-grant event in **Okta's System Log**, a queryable, tamper-evident stream that exists independently of this app's own logging. `GET /api/okta/logs` in `backend/api/main.py` queries the real Okta System Log API (`/api/v1/logs`, authenticated with `OKTA_API_TOKEN`) for `token.grant`/token-exchange events and reshapes them into a consistent shape: which agent (actor) acted, on behalf of which user (target), against which Custom Authorization Server, and which scopes were requested versus actually granted. This is Okta's own audit record, not a log table this app maintains.
+
+**Honest limitation:** the endpoint above is real and callable, but the frontend page that rendered it (`OktaSystemLog`, on the now-removed `/how-it-works` page) is gone. There's currently no UI surfacing this data, only the API.
+
+---
+
+## 9. Cutting off access
+
+Two independent mechanisms can stop the agent from acting, and both take effect almost immediately because every credential in this system is short-lived and re-derived per request: there's no long-lived session to revoke.
+
+- **Deactivate the Workload Principal.** An admin can deactivate the AI agent's identity in Okta directly. The next ID-JAG exchange attempt for that agent fails outright.
+- **Flip a context flag FGA reads.** Because vacation status is a contextual tuple evaluated at check time (not a stored fact), setting `is_on_vacation` denies the very next inventory check for that user: no redeploy, no cache to bust. This repo ships a scoped demo endpoint for this exact purpose: `POST /api/admin/demo-toggle` (and `/api/admin/demo-reset`) let the *signed-in* user flip their own `is_on_vacation` / `is_a_manager` / `clearance_level` Okta profile attributes via the Okta Users API, specifically so the FGA "manager on vacation" and "insufficient clearance" scenarios can be demonstrated live without an Admin Console detour. It only ever mutates the caller's own profile: the user ID always comes from their validated token, never from the request body (`backend/auth/demo_admin.py`).
+
+---
+
+## 10. Deployment topology
+
+Both halves deploy from this single repo and auto-deploy on every push to `main`:
+
+| Component | Platform | Detail |
+|---|---|---|
+| Frontend | Vercel | `packages/progear-sales-agent` (Next.js). Live at `https://progear-sales-aiagent.vercel.app`. |
+| Backend | Render | Service name "ProGearSalesAI", `rootDir: backend`. Live at `https://progearsalesai-p2wm.onrender.com`. |
+
+---
+
+## 11. See it live, interactively
+
+One page in the running frontend exists specifically to make this architecture visible and explorable, beyond this document:
+
+- **`/architecture`**: interactive D3.js diagrams (`D3ArchitectureDiagram` component): a hub-and-spoke relationship graph you can hover/click to trace connections (the resource tier is four separate boxes for Inventory, Customer, Pricing, and Sales rather than one bundled node, so each domain's own access rules are traceable), and a UML-style sequence-diagram walkthrough of 4 real scenarios (happy path, access denied, blocked on vacation, needs human approval). Steps stay lit as playback advances, so the whole path taken so far is always visible, not just the current step.
+
+There's also a **`/tokens`** page showing the raw token exchanges, FGA checks, and pending approvals as they happen in real time for the current session, useful for watching the mechanisms above fire on an actual request instead of just reading about them.
+
+---
 
 ## Further reading
 
-- [Okta: Secure MCP servers](https://developer.okta.com/docs/api/secures-ai/mcp-servers)
-- [Okta: AI Agent token exchange](https://developer.okta.com/docs/guides/ai-agent-token-exchange/authserver/main/)
-- [RFC 9728: OAuth 2.0 Protected Resource Metadata](https://www.rfc-editor.org/rfc/rfc9728)
-- [IETF ID-JAG](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-identity-assertion-authz-grant)
-- [Cross App Access](https://xaa.dev/)
+- [Implementation Guide](./implementation-guide.md): step-by-step deployment instructions
+- [Okta AI Agent Documentation](https://developer.okta.com/docs/guides/ai-agent-governance/): official Okta docs
+- [IETF ID-JAG Specification](https://datatracker.ietf.org/doc/draft-ietf-oauth-identity-assertion-authz-grant/): Identity Assertion JWT Authorization Grant draft

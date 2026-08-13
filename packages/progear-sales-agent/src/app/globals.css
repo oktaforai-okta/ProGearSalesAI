@@ -2,17 +2,10 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Light is the deliberate first-visit theme; the provider adds .dark when
-   Dark or a dark System preference is selected. */
+/* CourtEdge ProGear - Basketball Theme */
 body {
-  background: linear-gradient(to bottom, #f8fafc, #ffffff);
-  color: #172033;
-  min-height: 100vh;
-}
-
-html.dark body {
   background: linear-gradient(to bottom, #0d0d14, #1a1a2e);
-  color: #e2e8f0;
+  min-height: 100vh;
 }
 
 /* Smooth animations */

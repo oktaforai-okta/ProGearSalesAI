@@ -32,8 +32,8 @@ from auth.fga_client import close_fga_client
 from auth.demo_admin import toggle_demo_attribute, reset_demo_attributes, get_demo_status, ALLOWED_ATTRIBUTES
 from orchestrator.orchestrator import Orchestrator
 from dataclasses import asdict
+from data.demo_store import demo_store
 from services.factory import build_approval_service
-from services.okta_role_resolver import OktaRoleResolver
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -65,7 +65,7 @@ def _get_approval_service():
     """Return the process-wide ApprovalService, constructing on first call."""
     global _approval_service_singleton
     if _approval_service_singleton is None:
-        _approval_service_singleton = build_approval_service()
+        _approval_service_singleton = build_approval_service(demo_store)
     return _approval_service_singleton
 
 
@@ -102,22 +102,22 @@ async def _approval_poller_loop():
     if not req_type_id:
         logger.warning("OKTA_OIG_INVENTORY_REQUEST_TYPE_ID not set; approval poller disabled")
         return
-    bootstrapped = False
     while True:
         try:
             svc = _get_approval_service()
-            # Recover this service's open requests once after startup. New
-            # requests register themselves in the persistent ledger. From then
-            # on, poll only those IDs; repeatedly listing every historical OPEN
-            # and RESOLVED tenant request caused avoidable OIG rate limiting.
-            if not bootstrapped:
-                raw_open = await svc._oig.list_requests(request_status="OPEN")
-                for raw in raw_open:
-                    if raw.get("requestTypeId") == req_type_id and raw.get("id"):
-                        svc.track_request(raw["id"])
-                bootstrapped = True
-
-            for rid in svc.pending_request_ids():
+            # Okta filters server-side only by requeststatus. A freshly-approved
+            # request can appear as either OPEN (approvals done but workflow
+            # still transitioning) or RESOLVED (terminal). Poll both to avoid
+            # missing either. Filter by requestTypeId + decision client-side.
+            raw_open = await svc._oig.list_requests(request_status="OPEN")
+            raw_resolved = await svc._oig.list_requests(request_status="RESOLVED")
+            raw_list = raw_open + raw_resolved
+            for raw in raw_list:
+                if raw.get("requestTypeId") != req_type_id:
+                    continue
+                rid = raw.get("id")
+                if not rid:
+                    continue
                 try:
                     await svc.execute_if_approved(rid)
                 except Exception as exc:
@@ -132,15 +132,6 @@ async def _approval_poller_loop():
 @app.on_event("startup")
 async def _start_approval_poller():
     global _approval_poll_task
-    if os.getenv("OKTA_OIG_INVENTORY_REQUEST_TYPE_ID"):
-        try:
-            await _get_approval_service().preflight_execution()
-            logger.info("Approval execution-token preflight passed")
-        except Exception as exc:
-            # The app remains available for reads and direct writes, but every
-            # approval request also repeats this preflight and therefore fails
-            # before creating an OIG request until configuration is repaired.
-            logger.error("Approval execution-token preflight failed: %s", exc)
     _approval_poll_task = _approval_asyncio.create_task(_approval_poller_loop())
     logger.info("Approval poller started")
 
@@ -176,12 +167,6 @@ class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
     history: Optional[List[ChatMessage]] = []
-    # False is the coarse Okta-scope experience. True adds hosted FGA quantity
-    # checks and OIG approval routing; it never grants a scope Okta denied.
-    simulate_fga: bool = False
-    # Opaque id generated in browser sessionStorage. It selects an isolated,
-    # server-side FGA demo context and is ignored when simulation is off.
-    demo_session_id: Optional[str] = None
 
 
 class AgentInfo(BaseModel):
@@ -208,11 +193,6 @@ class TokenExchange(BaseModel):
     access_token: Optional[str] = None  # Raw access token JWT
     id_jag_token: Optional[str] = None  # Raw ID-JAG token (intermediate)
     id_jag_claims: Optional[Dict[str, Any]] = None  # Decoded ID-JAG claims
-    resource_token_validated: bool = False
-    resource_token_kid: Optional[str] = None
-    resource_validation_error: Optional[str] = None
-    business_decision: Optional[str] = None
-    business_reason: Optional[str] = None
 
 
 class AgentFlowStep(BaseModel):
@@ -230,11 +210,9 @@ class ChatResponse(BaseModel):
     session_id: str
     agent_flow: List[AgentFlowStep]
     token_exchanges: List[TokenExchange]
-    fga_checks: List[Dict[str, Any]]
-    authorization_decisions: List[Dict[str, Any]]
     user_info: Optional[Dict[str, Any]] = None
-    # Populated when a Manager's 601+ inventory write awaits an AI Agent Owner.
-    # Null for direct execution and hard denials.
+    # Populated by the OIG approval gate when a high-quantity inventory write
+    # is awaiting manager approval. Null for normal responses.
     pending_approval: Optional[Dict[str, Any]] = None
 
 
@@ -291,94 +269,53 @@ async def chat(
     if authorization and authorization.startswith("Bearer "):
         user_token = authorization[7:]
 
-    # Validate the employee token separately from authorization-context
-    # resolution so an Okta profile API failure is never mislabeled as either
-    # an authentication failure or an unassigned role.
-    if not user_token:
-        raise HTTPException(status_code=401, detail="Missing Okta bearer token")
-    try:
-        user_claims = await okta_auth.validate_token(user_token)
-    except Exception as exc:
-        logger.warning("Token validation failed: %s", exc)
-        raise HTTPException(
-            status_code=401,
-            detail="Your sign-in token could not be verified. Please sign out and sign back in.",
-        ) from exc
-
-    # The ID token authenticates the employee. Authorization uses the
-    # employee's live Okta profile, identified by subject rather than by a
-    # persona name, so any user assigned level 0, 1, or 2 follows the same
-    # policy dynamically on their next request.
-    role_identifier = user_claims.get("sub") or user_claims.get("email")
-    try:
-        resolved_user = await OktaRoleResolver(
-            base_url=os.environ["OKTA_DOMAIN"],
-            api_token=os.environ["OKTA_API_TOKEN"],
-        ).resolve_identity(role_identifier or "")
-        clearance_level = resolved_user.clearance_level
-    except (KeyError, httpx.HTTPError, ValueError) as exc:
-        logger.error(
-            "Live Okta authorization-context lookup failed (%s): %r",
-            type(exc).__name__,
-            exc,
-        )
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "I couldn't verify your current Okta role and delegation context, so no "
-                "agent action was attempted. Please try again."
-            ),
-        ) from exc
-
-    user_info = {
-        "sub": user_claims.get("sub"),
-        "email": user_claims.get("email"),
-        "name": user_claims.get("name"),
-        "groups": user_claims.get("groups", []),
-        "clearance_level": clearance_level,
-        "is_a_manager": resolved_user.is_a_manager,
-        "is_on_vacation": resolved_user.is_on_vacation,
-        "okta_user_id": resolved_user.user_id,
-        "authorization_context_source": "live_okta_profile",
-    }
-
-    # Shared Sarah/Mike accounts are used by multiple demo engineers. FGA
-    # controls may simulate vacation and let a live Manager compare Manager/VP
-    # policy outcomes inside this browser session. The overlay does not mutate
-    # Okta and cannot grant a scope that Okta refused to issue.
-    if request.simulate_fga:
-        if not request.demo_session_id:
-            raise HTTPException(status_code=400, detail="FGA simulation session is missing. Refresh the page and try again.")
+    # Validate user
+    if user_token:
         try:
-            demo_context = await get_demo_status(
-                resolved_user.user_id or role_identifier or "",
-                request.demo_session_id,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except RuntimeError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-        except httpx.HTTPError as exc:
-            logger.error("FGA demo context lookup failed: %s", exc)
-            raise HTTPException(status_code=502, detail="FGA demo context could not be loaded") from exc
+            user_claims = await okta_auth.validate_token(user_token)
 
-        user_info.update({
-            "clearance_level": demo_context["clearance_level"],
-            "is_a_manager": demo_context["is_a_manager"],
-            "is_on_vacation": demo_context["is_on_vacation"],
-            "authorization_context_source": "isolated_fga_demo_context",
-        })
+            # Extract claims from Okta ID token
+            # Note: Custom claims (Manager, Vacation, Clearance) come from Custom Auth Server, not ID token
+            # ID token is used for initial authentication only
+            is_manager = user_claims.get("Manager", user_claims.get("is_a_manager", False))
+            is_on_vacation = user_claims.get("Vacation", user_claims.get("is_on_vacation", False))
+            clearance_level = 0
+            clearance_claim = user_claims.get("Clearance", user_claims.get("clearance_level"))
+            if clearance_claim is not None:
+                try:
+                    clearance_level = int(clearance_claim)
+                except (ValueError, TypeError):
+                    logger.warning(f"Invalid Clearance claim in ID token: {clearance_claim}")
 
-    # Log sanitized ID token metadata only - never the raw JWT or the full
-    # decoded claim body (deployed on Render; logs are not a place for token
-    # material).
-    logger.info("=== ID Token (User) ===")
-    logger.info("User: %s", user_info.get("email"))
-    logger.info("Subject (sub): %s", user_claims.get("sub"))
-    logger.info("Groups: %s", user_claims.get("groups", []))
-    logger.info("Resolved live clearance_level: %s", clearance_level)
-    logger.info("Resolved manager/vacation context: manager=%s vacation=%s", resolved_user.is_a_manager, resolved_user.is_on_vacation)
-    logger.info("Claim keys present: %s", list(user_claims.keys()))
+            user_info = {
+                "sub": user_claims.get("sub"),
+                "email": user_claims.get("email"),
+                "name": user_claims.get("name"),
+                "groups": user_claims.get("groups", []),
+                "is_manager": is_manager,  # Fallback from ID token
+                "is_on_vacation": is_on_vacation,  # Fallback from ID token
+                "clearance_level": clearance_level,  # Fallback from ID token
+            }
+
+            # Log sanitized ID token metadata only - never the raw JWT or the
+            # full decoded claim body (deployed on Render; logs are not a
+            # place for token material).
+            logger.info(f"=== ID Token (User) ===")
+            logger.info(f"User: {user_info.get('email')}")
+            logger.info(f"Subject (sub): {user_claims.get('sub')}")
+            logger.info(f"Groups: {user_claims.get('groups', [])}")
+            logger.info(f"Manager claim (raw): {user_claims.get('Manager')} | is_a_manager: {user_claims.get('is_a_manager')}")
+            logger.info(f"Resolved is_manager: {is_manager}")
+            logger.info(f"Vacation claim (raw): {user_claims.get('Vacation')} | is_on_vacation: {user_claims.get('is_on_vacation')}")
+            logger.info(f"Resolved is_on_vacation: {is_on_vacation}")
+            logger.info(f"Clearance claim (raw): {user_claims.get('Clearance')} | clearance_level: {user_claims.get('clearance_level')}")
+            logger.info(f"Resolved clearance_level: {clearance_level}")
+            logger.info(f"Claim keys present: {list(user_claims.keys())}")
+        except Exception as e:
+            logger.warning(f"Token validation failed: {e}")
+            user_info = {"email": "anonymous", "groups": [], "is_manager": False, "is_on_vacation": False, "clearance_level": 0}
+    else:
+        user_info = {"email": "anonymous", "groups": [], "is_manager": False, "is_on_vacation": False, "clearance_level": 0}
 
     # Create orchestrator and process request
     try:
@@ -387,18 +324,13 @@ async def chat(
             user_info=user_info,
             approval_service=_get_approval_service(),
         )
-        result = await orchestrator.process(
-            request.message,
-            simulate_fga=request.simulate_fga,
-        )
+        result = await orchestrator.process(request.message)
 
         return ChatResponse(
             content=result["content"],
             session_id=request.session_id or "session-1",
             agent_flow=[AgentFlowStep(**step) for step in result["agent_flow"]],
             token_exchanges=[TokenExchange(**ex) for ex in result["token_exchanges"]],
-            fga_checks=result.get("fga_checks", []),
-            authorization_decisions=result.get("authorization_decisions", []),
             user_info=user_info,
             pending_approval=result.get("pending_approval"),
         )
@@ -414,8 +346,6 @@ async def chat(
                 AgentFlowStep(step="error", action=str(e), status="error")
             ],
             token_exchanges=[],
-            fga_checks=[],
-            authorization_decisions=[],
             user_info=user_info
         )
 
@@ -483,18 +413,17 @@ async def agent_config():
     Resource-domain metadata for UI display.
 
     Okta governs a single AI Agent workload identity for this demo, the
-    ProGear Sales Agent. The four entries below are native protected MCP
-    resources. Each publishes RFC 9728 metadata naming its Okta authorization
-    server and supported scopes. They are not four separate registered Okta AI
-    Agent identities.
+    ProGear Sales Agent. The four entries below are internal resource
+    domains - each with its own Custom Authorization Server and scope
+    boundary - that the one governed agent performs token exchanges
+    against. They are not four separate registered Okta AI Agent
+    identities, so this response intentionally avoids labeling each domain
+    as its own "Agent".
     """
-    configs = get_all_agent_configs()
     domains = [
         {
             "type": "sales",
             "domain": "Sales",
-            "resource_name": configs["sales"].name,
-            "mcp_url": configs["sales"].mcp_url,
             "description": "Orders, quotes, and sales pipeline",
             "color": "#3b82f6",
             "icon": "ShoppingCart",
@@ -502,8 +431,6 @@ async def agent_config():
         {
             "type": "inventory",
             "domain": "Inventory",
-            "resource_name": configs["inventory"].name,
-            "mcp_url": configs["inventory"].mcp_url,
             "description": "Stock levels, products, and warehouse",
             "color": "#10b981",
             "icon": "Package",
@@ -511,8 +438,6 @@ async def agent_config():
         {
             "type": "customer",
             "domain": "Customer",
-            "resource_name": configs["customer"].name,
-            "mcp_url": configs["customer"].mcp_url,
             "description": "Accounts, contacts, and purchase history",
             "color": "#8b5cf6",
             "icon": "Users",
@@ -520,8 +445,6 @@ async def agent_config():
         {
             "type": "pricing",
             "domain": "Pricing",
-            "resource_name": configs["pricing"].name,
-            "mcp_url": configs["pricing"].mcp_url,
             "description": "Pricing, margins, and discounts",
             "color": "#f59e0b",
             "icon": "DollarSign",
@@ -529,8 +452,9 @@ async def agent_config():
     ]
     identity_note = (
         "One Okta AI Agent identity (the ProGear Sales Agent) performs "
-        "native Cross App Access across four protected MCP resources. Each MCP "
-        "resource advertises its own Okta authorization server and scopes."
+        "token exchanges across these four resource domains. Each domain "
+        "has its own Custom Authorization Server and scope boundary, not "
+        "its own Okta agent identity."
     )
 
     return {
@@ -672,7 +596,7 @@ async def okta_system_logs(
         }
 
 
-# --- Demo FGA Controls (isolated by authenticated browser session) ---
+# --- Demo FGA Controls (real Okta profile mutation, scoped to caller) ---
 
 class DemoToggleRequest(BaseModel):
     """Body for POST /api/admin/demo-toggle."""
@@ -681,9 +605,10 @@ class DemoToggleRequest(BaseModel):
 
 
 async def _resolve_caller_user_id(authorization: Optional[str]) -> str:
-    """Validate the caller's bearer token and return its immutable Okta subject.
+    """Validate the caller's bearer token and return their Okta login/email.
 
-    Never trust a user id from the request body for demo-admin endpoints.
+    Never trust a user id from the request body for demo-admin endpoints -
+    the caller can only ever mutate their own Okta profile.
     """
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing bearer token")
@@ -694,26 +619,23 @@ async def _resolve_caller_user_id(authorization: Optional[str]) -> str:
     except Exception as e:
         raise HTTPException(status_code=401, detail=f"Invalid token: {e}")
 
-    user_id = user_claims.get("sub") or user_claims.get("email")
+    user_id = user_claims.get("email") or user_claims.get("sub")
     if not user_id:
         raise HTTPException(status_code=401, detail="Token missing subject/email")
     return user_id
 
 
 @app.get("/api/admin/demo-status")
-async def demo_status(
-    authorization: Optional[str] = Header(None, alias="Authorization"),
-    demo_session_id: Optional[str] = Header(None, alias="X-Demo-Session-ID"),
-):
+async def demo_status(authorization: Optional[str] = Header(None, alias="Authorization")):
     """
-    Return the signed-in user's browser-session FGA simulation context.
+    Demo-only, read-only: the signed-in user's current is_on_vacation /
+    is_a_manager / clearance_level values, so the UI can show which state is
+    actually active instead of a static button style.
     """
     user_id = await _resolve_caller_user_id(authorization)
 
     try:
-        return await get_demo_status(user_id, demo_session_id or "")
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        return await get_demo_status(user_id)
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
@@ -724,13 +646,13 @@ async def demo_status(
 @app.post("/api/admin/demo-toggle")
 async def demo_toggle(
     request: DemoToggleRequest,
-    authorization: Optional[str] = Header(None, alias="Authorization"),
-    demo_session_id: Optional[str] = Header(None, alias="X-Demo-Session-ID"),
+    authorization: Optional[str] = Header(None, alias="Authorization")
 ):
     """
-    Change only this signed-in browser session's allowed FGA demo context.
-    Sales cannot simulate a higher role; a live Manager may compare Manager
-    and VP outcomes without changing the shared Okta profile.
+    Demo-only: toggle the SIGNED-IN user's own is_on_vacation / is_a_manager /
+    clearance_level Okta attribute for real, so the FGA scenarios (manager on
+    vacation, insufficient clearance) can be shown live without an Okta Admin
+    Console detour mid-demo. See auth/demo_admin.py for the scoping rules.
     """
     user_id = await _resolve_caller_user_id(authorization)
 
@@ -738,38 +660,26 @@ async def demo_toggle(
         raise HTTPException(status_code=400, detail=f"Attribute must be one of {sorted(ALLOWED_ATTRIBUTES)}")
 
     try:
-        return await toggle_demo_attribute(
-            user_id,
-            demo_session_id or "",
-            request.attribute,
-            request.value,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        return await toggle_demo_attribute(user_id, request.attribute, request.value)
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         logger.error(f"demo_toggle failed: {e}")
-        raise HTTPException(status_code=502, detail=f"Demo context update failed: {e}")
+        raise HTTPException(status_code=502, detail=f"Okta update failed: {e}")
 
 
 @app.post("/api/admin/demo-reset")
-async def demo_reset(
-    authorization: Optional[str] = Header(None, alias="Authorization"),
-    demo_session_id: Optional[str] = Header(None, alias="X-Demo-Session-ID"),
-):
-    """Restore this browser session's starting simulation values."""
+async def demo_reset(authorization: Optional[str] = Header(None, alias="Authorization")):
+    """Restore the signed-in user's demo attributes to their pre-toggle values."""
     user_id = await _resolve_caller_user_id(authorization)
 
     try:
-        return await reset_demo_attributes(user_id, demo_session_id or "")
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        return await reset_demo_attributes(user_id)
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         logger.error(f"demo_reset failed: {e}")
-        raise HTTPException(status_code=502, detail=f"Demo context reset failed: {e}")
+        raise HTTPException(status_code=502, detail=f"Okta update failed: {e}")
 
 
 # --- Approval Resolver Endpoint ---
@@ -780,8 +690,7 @@ async def get_approval(request_id: str):
 
     Foreground fast-path: if the request is APPROVED and not yet executed,
     the call synchronously executes the inventory write. Otherwise returns
-    current status without side effects. Short-lived per-request caching
-    collapses duplicate polling from multiple browser tabs.
+    current status without side effects.
     """
     try:
         svc = _get_approval_service()

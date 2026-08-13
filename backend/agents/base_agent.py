@@ -40,9 +40,8 @@ class BaseAgent:
         self.user_token = user_token
         self.color = color
 
-        # Use the async SDK because agents run inside FastAPI/LangGraph's event
-        # loop. A synchronous model call here stalls unrelated demo requests.
-        self.client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+        # Initialize Anthropic client (raw SDK)
+        self.client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
         self.model = LLM_MODEL_NAME
 
     def get_system_prompt(self) -> str:
@@ -63,7 +62,7 @@ class BaseAgent:
         context = context or {}
 
         try:
-            response = await self.client.messages.create(
+            response = self.client.messages.create(
                 model=self.model,
                 max_tokens=1024,
                 system=self.get_system_prompt(),

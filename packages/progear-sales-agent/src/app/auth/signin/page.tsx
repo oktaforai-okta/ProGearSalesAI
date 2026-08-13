@@ -3,7 +3,6 @@
 import { signIn } from 'next-auth/react';
 import { useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
-import { ThemeSelector } from '@/components/ThemeProvider';
 
 function SignInContent() {
   const searchParams = useSearchParams();
@@ -15,10 +14,7 @@ function SignInContent() {
   };
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-gradient-to-br from-slate-100 via-orange-50 to-amber-100 px-4 py-20 dark:from-primary dark:via-primary-light dark:to-court-brown sm:py-12">
-      <div className="absolute right-4 top-4 z-20">
-        <ThemeSelector iconOnly />
-      </div>
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary via-primary-light to-court-brown relative overflow-hidden">
       {/* Basketball Court Pattern Background */}
       <div className="absolute inset-0 opacity-5">
         <svg className="w-full h-full" viewBox="0 0 400 400" preserveAspectRatio="xMidYMid slice">
@@ -46,28 +42,28 @@ function SignInContent() {
       <div className="absolute top-20 left-20 w-64 h-64 bg-accent rounded-full blur-3xl opacity-20 animate-pulse"></div>
       <div className="absolute bottom-20 right-20 w-96 h-96 bg-court-orange rounded-full blur-3xl opacity-15 animate-pulse" style={{ animationDelay: '1s' }}></div>
 
-      <div className="relative z-10 w-full max-w-sm rounded-2xl border-2 border-accent/30 bg-gradient-to-br from-white/95 to-white/90 p-6 shadow-2xl backdrop-blur-sm dark:from-slate-900/95 dark:to-slate-950/90 sm:p-8">
+      <div className="relative z-10 bg-gradient-to-br from-white/95 to-white/90 p-10 rounded-2xl shadow-2xl max-w-md w-full border-2 border-accent/30 backdrop-blur-sm">
         {/* Basketball Logo */}
-        <div className="mb-6 text-center">
-          <div className="relative mb-3 inline-flex items-center justify-center">
+        <div className="text-center mb-8">
+          <div className="inline-flex items-center justify-center mb-4 relative">
             <div className="absolute inset-0 bg-accent/20 rounded-full blur-xl animate-pulse"></div>
-            <span className="relative z-10 text-6xl">🏀</span>
+            <span className="text-7xl relative z-10">🏀</span>
           </div>
-          <h1 className="mb-2 bg-gradient-to-r from-primary via-court-orange to-accent bg-clip-text text-3xl font-bold text-transparent">
+          <h1 className="text-4xl font-bold bg-gradient-to-r from-primary via-court-orange to-accent bg-clip-text text-transparent mb-2">
             CourtEdge ProGear
           </h1>
-          <p className="font-display text-base text-gray-600 dark:text-slate-300">
+          <p className="text-gray-600 font-display text-lg">
             Basketball Equipment Sales Intelligence
           </p>
         </div>
 
         {/* Security Badge - Basketball styled */}
-        <div className="mb-5 rounded-xl border border-okta-blue/30 bg-gradient-to-r from-okta-blue/10 via-primary/5 to-accent/10 p-3">
+        <div className="mb-6 p-4 bg-gradient-to-r from-okta-blue/10 via-primary/5 to-accent/10 border border-okta-blue/30 rounded-xl">
           <div className="flex items-center justify-center space-x-3">
             <svg className="w-6 h-6 text-okta-blue" fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
             </svg>
-            <span className="font-bold text-gray-700 dark:text-slate-100">Enterprise Secured</span>
+            <span className="text-gray-700 font-bold">Enterprise Secured</span>
             <div className="w-2 h-2 bg-success-green rounded-full animate-pulse"></div>
           </div>
         </div>
@@ -91,10 +87,67 @@ function SignInContent() {
         {/* Sign In Button - Basketball Orange Theme */}
         <button
           onClick={handleSignIn}
-          className="flex w-full items-center justify-center rounded-xl border-b-4 border-court-brown/50 bg-gradient-to-r from-accent to-court-orange px-6 py-3 font-bold text-white shadow-lg transition-all duration-300 ease-in-out hover:scale-[1.02] hover:from-court-orange hover:to-accent hover:shadow-xl"
+          className="w-full bg-gradient-to-r from-accent to-court-orange hover:from-court-orange hover:to-accent text-white font-bold py-4 px-6 rounded-xl transition-all duration-300 ease-in-out transform hover:scale-[1.02] hover:shadow-xl shadow-lg flex items-center justify-center space-x-3 border-b-4 border-court-brown/50"
         >
-          <span>Sign in with Okta</span>
+          <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="2"/>
+            <path d="M12 2v20M2 12h20" stroke="currentColor" strokeWidth="1.5"/>
+          </svg>
+          <span className="text-lg">Sign in with Okta</span>
         </button>
+
+        {/* Features - Basketball court styled */}
+        <div className="mt-8 p-5 bg-gradient-to-br from-primary/5 to-court-brown/10 border-2 border-accent/20 rounded-xl">
+          <h3 className="font-bold text-sm text-primary mb-4 flex items-center">
+            <svg className="w-5 h-5 mr-2 text-accent" viewBox="0 0 24 24" fill="currentColor">
+              <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="2"/>
+              <path d="M12 2c-3 4-3 16 0 20M12 2c3 4 3 16 0 20" stroke="currentColor" strokeWidth="1.5" fill="none"/>
+              <path d="M2 12h20" stroke="currentColor" strokeWidth="1.5"/>
+            </svg>
+            Security Features
+          </h3>
+          <ul className="text-xs text-gray-700 space-y-3">
+            <li className="flex items-start">
+              <div className="w-5 h-5 bg-accent/20 rounded-full flex items-center justify-center mr-3 mt-0.5 flex-shrink-0">
+                <svg className="w-3 h-3 text-accent" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                </svg>
+              </div>
+              <span><strong className="text-primary">Secure Token Exchange:</strong> Identity delegation for AI assistant</span>
+            </li>
+            <li className="flex items-start">
+              <div className="w-5 h-5 bg-court-orange/20 rounded-full flex items-center justify-center mr-3 mt-0.5 flex-shrink-0">
+                <svg className="w-3 h-3 text-court-orange" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                </svg>
+              </div>
+              <span><strong className="text-primary">Secure Data Access:</strong> Protected inventory & sales data</span>
+            </li>
+            <li className="flex items-start">
+              <div className="w-5 h-5 bg-okta-blue/20 rounded-full flex items-center justify-center mr-3 mt-0.5 flex-shrink-0">
+                <svg className="w-3 h-3 text-okta-blue" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                </svg>
+              </div>
+              <span><strong className="text-primary">Verified Authentication:</strong> SSO with enterprise identity</span>
+            </li>
+            <li className="flex items-start">
+              <div className="w-5 h-5 bg-tech-purple/20 rounded-full flex items-center justify-center mr-3 mt-0.5 flex-shrink-0">
+                <svg className="w-3 h-3 text-tech-purple" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                </svg>
+              </div>
+              <span><strong className="text-primary">Activity Logging:</strong> Token exchange audit trail</span>
+            </li>
+          </ul>
+        </div>
+
+        {/* Footer */}
+        <div className="mt-6 pt-6 border-t-2 border-accent/20">
+          <div className="flex items-center justify-center text-xs text-gray-500">
+            <span>CourtEdge ProGear - Enterprise Sales Platform</span>
+          </div>
+        </div>
       </div>
     </div>
   );

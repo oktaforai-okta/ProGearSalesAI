@@ -1,93 +1,71 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
-import { BadgeCheck, Briefcase, Loader2, PauseCircle, Plane, PlayCircle, RotateCcw, ShieldAlert } from 'lucide-react';
+import { ShieldAlert, Palmtree, Key as KeyIcon, RotateCcw, Loader2 } from 'lucide-react';
 import { API_BASE_URL } from '@/lib/config';
-import { getOrCreateFGADemoSessionId, useFGASimulation } from '@/hooks/useFGASimulation';
 
 interface Props {
   onApplied?: () => void;
 }
 
 interface DemoStatus {
-  clearance_level: number;
-  live_clearance_level: number;
-  role_simulation_allowed: boolean;
-  is_a_manager: boolean;
   is_on_vacation: boolean;
+  is_a_manager: boolean;
+  clearance_level: number;
 }
 
-const ROLES = [
-  { level: 0, name: 'Sales', summary: 'Read inventory. Ask a manager to make changes.' },
-  { level: 1, name: 'Manager', summary: 'Make inventory changes up to 600 units.' },
-  { level: 2, name: 'VP', summary: 'Make inventory changes of any size.' },
-] as const;
-
-const roleForLevel = (level: number) => ROLES.find((role) => role.level === level);
-
+// Mutates the signed-in user's REAL Okta profile via the backend's
+// /api/admin/demo-toggle (scoped server-side to the caller's own sub - see
+// backend/auth/demo_admin.py). Deliberately not a client-side simulation:
+// the point is to remove the "log into Okta Admin Console mid-demo" friction
+// while keeping the FGA check genuinely live.
 export default function FGAControlsPanel({ onApplied }: Props) {
   const { data: session } = useSession();
-  const { isEnabled, setIsEnabled } = useFGASimulation();
   const [status, setStatus] = useState<DemoStatus | null>(null);
+  const [clearance, setClearance] = useState(5);
   const [busy, setBusy] = useState<string | null>(null);
   const [lastResult, setLastResult] = useState<string | null>(null);
+
   const idToken = session?.idToken;
 
-  const demoHeaders = useCallback((includeJson = false) => ({
-    ...(includeJson ? { 'Content-Type': 'application/json' } : {}),
-    Authorization: `Bearer ${idToken}`,
-    'X-Demo-Session-ID': getOrCreateFGADemoSessionId(),
-  }), [idToken]);
-
-  const loadStatus = useCallback(async () => {
-    if (!idToken || !isEnabled) return;
+  async function loadStatus() {
+    if (!idToken) return;
     try {
-      const response = await fetch(`${API_BASE_URL}/api/admin/demo-status`, {
-        headers: demoHeaders(),
+      const res = await fetch(`${API_BASE_URL}/api/admin/demo-status`, {
+        headers: { Authorization: `Bearer ${idToken}` },
       });
-      if (!response.ok) return;
-      const data: DemoStatus = await response.json();
+      if (!res.ok) return;
+      const data: DemoStatus = await res.json();
       setStatus(data);
+      setClearance(data.clearance_level ?? 5);
     } catch {
-      // The controls remain usable after the next successful status refresh.
+      // Non-fatal - buttons just fall back to showing nothing selected.
     }
-  }, [demoHeaders, idToken, isEnabled]);
+  }
 
   useEffect(() => {
-    if (isEnabled) {
-      void loadStatus();
-    } else {
-      setStatus(null);
-      setLastResult(null);
-    }
-  }, [isEnabled, loadStatus]);
+    loadStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [idToken]);
 
-  async function callToggle(attribute: 'clearance_level' | 'is_on_vacation', value: number | boolean) {
+  async function callToggle(attribute: string, value: unknown) {
     if (!idToken) return;
     setBusy(attribute);
     setLastResult(null);
     try {
-      const response = await fetch(`${API_BASE_URL}/api/admin/demo-toggle`, {
+      const res = await fetch(`${API_BASE_URL}/api/admin/demo-toggle`, {
         method: 'POST',
-        headers: demoHeaders(true),
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
         body: JSON.stringify({ attribute, value }),
       });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.detail || 'Update failed');
-      const values: DemoStatus | undefined = data.values;
-      if (values) {
-        setStatus(values);
-      } else {
-        setStatus((previous) => previous ? { ...previous, [attribute]: data.value } : previous);
-      }
-      const result = attribute === 'clearance_level'
-        ? `FGA demo role is now ${roleForLevel(Number(data.value))?.name}. The next FGA prompt in this browser session uses this role.`
-        : `On vacation is now ${data.value ? 'True' : 'False'}. The next FGA prompt in this browser session uses this value.`;
-      setLastResult(result);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Toggle failed');
+      setStatus((prev) => (prev ? { ...prev, [attribute]: data.value } : prev));
+      setLastResult(`Updated your Okta profile: ${attribute} = ${JSON.stringify(data.value)}. ${data.note || ''}`);
       onApplied?.();
-    } catch (error) {
-      setLastResult(`Error: ${error instanceof Error ? error.message : 'Update failed'}`);
+    } catch (err) {
+      setLastResult(`Error: ${err instanceof Error ? err.message : 'Toggle failed'}`);
     } finally {
       setBusy(null);
     }
@@ -98,212 +76,148 @@ export default function FGAControlsPanel({ onApplied }: Props) {
     setBusy('reset');
     setLastResult(null);
     try {
-      const response = await fetch(`${API_BASE_URL}/api/admin/demo-reset`, {
+      const res = await fetch(`${API_BASE_URL}/api/admin/demo-reset`, {
         method: 'POST',
-        headers: demoHeaders(),
+        headers: { Authorization: `Bearer ${idToken}` },
       });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.detail || 'Reset failed');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Reset failed');
+      setLastResult(
+        data.reset?.length
+          ? `Reset ${data.reset.join(', ')} to their original values.`
+          : 'Nothing to reset - no attributes have been toggled yet.'
+      );
       await loadStatus();
-      setLastResult('Restored this browser session’s starting role and vacation state.');
       onApplied?.();
-    } catch (error) {
-      setLastResult(`Error: ${error instanceof Error ? error.message : 'Reset failed'}`);
+    } catch (err) {
+      setLastResult(`Error: ${err instanceof Error ? err.message : 'Reset failed'}`);
     } finally {
       setBusy(null);
     }
   }
 
+  // Active state gets a solid, filled style; inactive gets a plain outline -
+  // so it's obvious at a glance which value is actually live right now,
+  // not just which button happens to be styled "colored".
+  function toggleButtonClass(isActive: boolean, color: 'orange' | 'green') {
+    if (isActive) {
+      return color === 'orange'
+        ? 'px-3 py-1.5 text-xs rounded-lg border-2 border-orange-500 bg-orange-500 text-white font-semibold shadow-sm disabled:opacity-50 flex items-center gap-1'
+        : 'px-3 py-1.5 text-xs rounded-lg border-2 border-green-600 bg-green-600 text-white font-semibold shadow-sm disabled:opacity-50 flex items-center gap-1';
+    }
+    return 'px-3 py-1.5 text-xs rounded-lg border border-gray-300 bg-white hover:bg-gray-50 text-gray-500 disabled:opacity-50 flex items-center gap-1';
+  }
+
   return (
-    <section className="overflow-hidden rounded-xl border-2 border-purple-200 bg-white shadow-sm dark:border-purple-900 dark:bg-slate-900">
+    <div className="bg-white rounded-xl border-2 border-purple-200 shadow-sm overflow-hidden">
       <div className="bg-gradient-to-r from-purple-600 to-indigo-600 px-4 py-3">
-        <h2 className="flex items-center gap-2 font-semibold text-white">
-          <ShieldAlert className="h-5 w-5" />
+        <h3 className="text-white font-semibold flex items-center gap-2">
+          <ShieldAlert className="w-5 h-5" />
           FGA Demo Controls
-        </h2>
-        <p className="mt-1 text-xs text-white/80">
-          Isolated to this browser session{session?.user?.email ? ` — ${session.user.email}` : ''}
+        </h3>
+        <p className="text-white/80 text-xs mt-1">
+          Changes your real Okta profile{session?.user?.email ? ` - ${session.user.email}` : ''}
         </p>
       </div>
 
-      <div className="space-y-5 p-4">
-        <div className="rounded-xl border border-purple-200 bg-purple-50/70 p-4 dark:border-purple-800 dark:bg-purple-950/30">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <div className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
-                {isEnabled ? <PauseCircle className="h-5 w-5 text-purple-600 dark:text-purple-300" /> : <PlayCircle className="h-5 w-5 text-purple-600 dark:text-purple-300" />}
-                Simulate FGA
-                <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
-                  isEnabled
-                    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
-                    : 'bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
-                }`}>
-                  {isEnabled ? 'On' : 'Off by default'}
-                </span>
-              </div>
-              <p className="mt-1 max-w-xl text-xs leading-relaxed text-slate-600 dark:text-slate-300">
-                Turn this on for the role, quantity threshold, and human approval demo. It also reveals the guided FGA prompts on the chat page.
-                <span className="mt-1 block font-medium text-purple-700 dark:text-purple-300">
-                  Other engineers using the same account are not affected. Closing this tab ends this demo session.
-                </span>
-                <span className="mt-1 block text-slate-500 dark:text-slate-400">
-                  Sarah remains read-only. Mike can compare Manager and VP outcomes without affecting another engineer’s session.
-                </span>
-              </p>
-            </div>
+      <div className="p-4 space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-sm text-gray-700">
+            <Palmtree className="w-4 h-4 text-orange-500" />
+            On vacation
+          </div>
+          <div className="flex gap-2">
             <button
-              type="button"
-              aria-pressed={isEnabled}
-              onClick={() => setIsEnabled(!isEnabled)}
-              className={`shrink-0 rounded-lg px-4 py-2 text-sm font-semibold transition ${
-                isEnabled
-                  ? 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700'
-                  : 'bg-purple-600 text-white shadow-sm hover:bg-purple-700'
-              }`}
+              onClick={() => callToggle('is_on_vacation', true)}
+              disabled={busy !== null}
+              className={toggleButtonClass(status?.is_on_vacation === true, 'orange')}
             >
-              {isEnabled ? 'Stop simulation' : 'Simulate FGA'}
+              {busy === 'is_on_vacation' && <Loader2 className="w-3 h-3 animate-spin" />}
+              Set true
+            </button>
+            <button
+              onClick={() => callToggle('is_on_vacation', false)}
+              disabled={busy !== null}
+              className={toggleButtonClass(status?.is_on_vacation === false, 'orange')}
+            >
+              Set false
             </button>
           </div>
         </div>
 
-        {isEnabled ? (
-          <>
-        <div className="rounded-lg border border-blue-200 bg-blue-50/70 p-3 dark:border-blue-900 dark:bg-blue-950/25">
-          <div className="flex items-center gap-2 text-sm font-medium text-gray-800 dark:text-slate-100">
-            <BadgeCheck className="h-4 w-4 text-blue-600" />
-            FGA demo role
-            {status ? (
-              <span className="ml-auto rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-blue-700 dark:bg-blue-950 dark:text-blue-300">
-                Current: {status.clearance_level} — {roleForLevel(status.clearance_level)?.name}
-              </span>
-            ) : null}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-sm text-gray-700">
+            <ShieldAlert className="w-4 h-4 text-green-600" />
+            Manager
           </div>
-          <p className="mt-2 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
-            {status ? roleForLevel(status.clearance_level)?.summary : 'Loading the signed-in employee’s role.'}
-          </p>
-          {status?.role_simulation_allowed ? (
-            <>
-              <p className="mt-2 text-[11px] leading-relaxed text-blue-800 dark:text-blue-200">
-                Mike’s live Okta role is Manager. This isolated control previews Manager or VP FGA outcomes without changing his shared Okta profile.
-              </p>
-              <div className="mt-3 grid grid-cols-2 gap-2">
-                {[1, 2].map((level) => (
-                  <button
-                    key={level}
-                    type="button"
-                    aria-pressed={status.clearance_level === level}
-                    onClick={() => callToggle('clearance_level', level)}
-                    disabled={busy !== null || status.clearance_level === level}
-                    className={`rounded-lg border px-3 py-2 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                      status.clearance_level === level
-                        ? 'border-blue-300 bg-blue-100 text-blue-700 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-300'
-                        : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800'
-                    }`}
-                  >
-                    {busy === 'clearance_level' && status.clearance_level !== level
-                      ? <Loader2 className="mx-auto h-4 w-4 animate-spin" />
-                      : roleForLevel(level)?.name}
-                  </button>
-                ))}
-              </div>
-            </>
-          ) : (
-            <p className="mt-2 text-[11px] text-blue-800 dark:text-blue-200">
-              Sales stays Sales. This control never elevates a Sales session.
-            </p>
-          )}
+          <div className="flex gap-2">
+            <button
+              onClick={() => callToggle('is_a_manager', true)}
+              disabled={busy !== null}
+              className={toggleButtonClass(status?.is_a_manager === true, 'green')}
+            >
+              {busy === 'is_a_manager' && <Loader2 className="w-3 h-3 animate-spin" />}
+              Set true
+            </button>
+            <button
+              onClick={() => callToggle('is_a_manager', false)}
+              disabled={busy !== null}
+              className={toggleButtonClass(status?.is_a_manager === false, 'green')}
+            >
+              Set false
+            </button>
+          </div>
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70">
-            <div className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
-              <Briefcase className="h-4 w-4 text-emerald-600 dark:text-emerald-300" />
-              Manager
-              <span className={`ml-auto rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
-                status?.is_a_manager
-                  ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
-                  : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'
-              }`}>
-                {status?.is_a_manager ? 'True' : 'False'}
-              </span>
-            </div>
-            <p className="mt-2 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
-              Derived from the role selected above: Sales is False; Manager and VP are True.
-            </p>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-sm text-gray-700">
+            <KeyIcon className="w-4 h-4 text-blue-600" />
+            Clearance level
+            {status && (
+              <span className="text-[10px] text-gray-400">(current: {status.clearance_level})</span>
+            )}
           </div>
-
-          <div className="rounded-lg border border-amber-200 bg-amber-50/70 p-3 dark:border-amber-900 dark:bg-amber-950/25">
-            <div className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
-              <Plane className="h-4 w-4 text-amber-600 dark:text-amber-300" />
-              On vacation
-              <span className={`ml-auto rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
-                status?.is_on_vacation
-                  ? 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300'
-                  : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
-              }`}>
-                {status?.is_on_vacation ? 'True' : 'False'}
-              </span>
-            </div>
-            <p className="mt-2 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
-              True suspends agent delegation before ID-JAG for every resource. False is the default and allows normal policy checks to continue.
-            </p>
-            <p className="mt-2 text-[11px] font-medium leading-relaxed text-amber-800 dark:text-amber-200">
-              Demo overlay only. In production, the live Okta attribute remains admin- or lifecycle-managed—not an employee self-service setting.
-            </p>
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              {[true, false].map((value) => (
-                <button
-                  key={String(value)}
-                  type="button"
-                  aria-pressed={status?.is_on_vacation === value}
-                  onClick={() => callToggle('is_on_vacation', value)}
-                  disabled={busy !== null || status?.is_on_vacation === value}
-                  className={`rounded-lg border px-3 py-2 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                    status?.is_on_vacation === value
-                      ? value
-                        ? 'border-red-300 bg-red-100 text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300'
-                        : 'border-emerald-300 bg-emerald-100 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                      : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800'
-                  }`}
-                >
-                  {busy === 'is_on_vacation' && status?.is_on_vacation !== value
-                    ? <Loader2 className="mx-auto h-4 w-4 animate-spin" />
-                    : value ? 'True' : 'False'}
-                </button>
+          <div className="flex items-center gap-2">
+            <select
+              value={clearance}
+              onChange={(e) => setClearance(Number(e.target.value))}
+              className="text-xs border border-gray-300 rounded-lg px-2 py-1.5"
+            >
+              {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
+                <option key={n} value={n}>{n}</option>
               ))}
-            </div>
+            </select>
+            <button
+              onClick={() => callToggle('clearance_level', clearance)}
+              disabled={busy !== null}
+              className="px-3 py-1.5 text-xs rounded-lg border border-blue-300 bg-blue-50 hover:bg-blue-100 text-blue-700 disabled:opacity-50"
+            >
+              Apply
+            </button>
           </div>
         </div>
 
         <button
-          type="button"
           onClick={callReset}
           disabled={busy !== null}
-          className="flex w-full items-center justify-center gap-2 rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+          className="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm rounded-lg border border-gray-300 bg-gray-50 hover:bg-gray-100 text-gray-700 disabled:opacity-50"
         >
-          {busy === 'reset' ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
-          Reset this demo session
+          <RotateCcw className="w-4 h-4" />
+          Reset my demo attributes
         </button>
 
-        {lastResult ? (
+        {lastResult && (
           <div
-            role="status"
-            className={`rounded-lg border p-2 text-xs ${
+            className={`text-xs p-2 rounded-lg border ${
               lastResult.startsWith('Error')
-                ? 'border-red-200 bg-red-50 text-red-700'
-                : 'border-green-200 bg-green-50 text-green-700'
+                ? 'bg-red-50 text-red-700 border-red-200'
+                : 'bg-green-50 text-green-700 border-green-200'
             }`}
           >
             {lastResult}
           </div>
-        ) : null}
-          </>
-        ) : (
-          <p className="rounded-lg border border-dashed border-slate-300 px-4 py-3 text-center text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
-            FGA details are hidden until you choose <strong>Simulate FGA</strong>.
-          </p>
         )}
       </div>
-    </section>
+    </div>
   );
 }

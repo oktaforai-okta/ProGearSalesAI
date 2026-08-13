@@ -34,7 +34,7 @@ The original AI Agent was deleted accidentally. A surviving OIDC application is 
 Do not delete or replace independent systems when changing the binding implementation. The following survive a client-to-agent binding migration:
 
 - The four Custom Authorization Servers, scopes, access-policy rules, and audiences.
-- FGA stores, models, and tuples.
+- Auth0 FGA stores, models, and tuples.
 - Okta Identity Governance workflows.
 - Demo users and groups.
 - Vercel and Render projects.

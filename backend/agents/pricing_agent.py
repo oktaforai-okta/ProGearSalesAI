@@ -3,13 +3,12 @@ Pricing Agent - Handles pricing, discounts, and margins.
 
 Registered as a first-class identity in Okta.
 Uses raw Anthropic SDK for LLM calls.
-Calls the protected ProGear Pricing MCP for pricing data.
+Uses demo_store for pricing data.
 """
 
 from typing import Dict, Any, Optional
 from .base_agent import BaseAgent
-from auth.agent_config import AGENT_PRICING, get_agent_config
-from mcp.client import MCPToolError, get_mcp_client
+from data.demo_store import demo_store
 
 
 class PricingAgent(BaseAgent):
@@ -59,18 +58,8 @@ Always show pricing calculations clearly."""
         """Process a pricing-related task with real data."""
         context = context or {}
 
-        try:
-            data = await self._get_data(task, context)
-        except MCPToolError as exc:
-            return {
-                "agent": self.agent_type,
-                "agent_name": self.agent_name,
-                "color": self.color,
-                "result": f"Pricing MCP operation failed: {exc}",
-                "success": False,
-                "error": str(exc),
-                "scopes": context.get("scopes", self.scopes),
-            }
+        # Get data from demo_store
+        data = self._get_data(task)
 
         # Augment the task with data
         augmented_task = f"""{task}
@@ -82,29 +71,70 @@ Provide a helpful response using this data."""
 
         return await super().process(augmented_task, context)
 
-    async def _get_data(self, task: str, context: Dict[str, Any]) -> Any:
-        """Select and invoke one Pricing MCP tool."""
-        if not context.get("resource_token_validated") or not context.get("mcp_access_token"):
-            raise MCPToolError("The Pricing MCP requires a validated access token.")
-        config = get_agent_config(AGENT_PRICING)
-        if config is None:
-            raise MCPToolError("The Pricing MCP resource is not configured.")
+    def _get_data(self, task: str) -> str:
+        """Get pricing data from demo_store."""
         task_lower = task.lower()
-        scopes = context.get("scopes", [])
-        if "pricing:discount" in scopes:
-            tool_name, arguments = "get_discount_structure", {}
-        elif "pricing:margin" in scopes or "margin" in task_lower:
-            category = "Hoops & Backboards" if "hoop" in task_lower else "Basketballs"
-            tool_name, arguments = "get_category_pricing", {"category": category}
-        else:
-            import re
 
-            sku_match = re.search(r"\b[A-Z]{2,5}-[A-Z0-9-]+\b", task.upper())
-            sku = sku_match.group(0) if sku_match else "BB-PRO-001"
-            tool_name, arguments = "get_price", {"sku": sku}
-        return await get_mcp_client().call_tool(
-            resource_url=config.mcp_url,
-            access_token=str(context["mcp_access_token"]),
-            tool_name=tool_name,
-            arguments=arguments,
-        )
+        if "basketball" in task_lower or "margin" in task_lower:
+            # Get basketball pricing
+            basketball_pricing = demo_store.get_pricing_by_category("Basketballs")
+            if basketball_pricing:
+                lines = ["Basketball Pricing:\n"]
+                total_margin = 0
+                for item in basketball_pricing[:6]:
+                    lines.append(f"- {item['name']}: ${item['price']:.2f} (cost ${item['cost']:.2f}, margin {item['margin']}%)")
+                    total_margin += item['margin']
+
+                avg_margin = total_margin / len(basketball_pricing[:6])
+                lines.append(f"\nAverage basketball margin: {avg_margin:.1f}%")
+                return "\n".join(lines)
+
+        if "bulk" in task_lower or "discount" in task_lower:
+            discounts = demo_store.get_discount_structure()
+            volume = discounts.get('volume_discounts', {})
+            tier = discounts.get('tier_discounts', {})
+
+            return f"""Bulk Discounts:
+- {', '.join(f'{qty}+ units: {disc}%' for qty, disc in sorted(volume.items(), key=lambda x: int(x[0])))}
+
+Customer Tier Bonuses:
+- {', '.join(f'{t}: {d}%' for t, d in tier.items())}
+
+Example: 1,500 units @ Platinum = {volume.get('500', 20) + tier.get('Platinum', 5)}% total discount"""
+
+        if "hoop" in task_lower:
+            hoop_pricing = demo_store.get_pricing_by_category("Hoops & Backboards")
+            if hoop_pricing:
+                lines = ["Hoops & Backboards Pricing:\n"]
+                for item in hoop_pricing:
+                    lines.append(f"- {item['name']}: ${item['price']:.2f} (margin {item['margin']}%)")
+                return "\n".join(lines)
+
+        # Default: pricing overview
+        all_pricing = demo_store.get_all_pricing()
+        all_inventory = demo_store.get_all_inventory()
+
+        # Calculate average margin by category
+        category_margins = {}
+        for sku, pricing in all_pricing.items():
+            if sku in all_inventory:
+                category = all_inventory[sku].get('category', 'Other')
+                if category not in category_margins:
+                    category_margins[category] = []
+                category_margins[category].append(pricing['margin'])
+
+        lines = ["Pricing Overview:\n"]
+        all_margins = []
+        for category, margins in category_margins.items():
+            avg = sum(margins) / len(margins)
+            all_margins.extend(margins)
+            lines.append(f"- {category}: avg margin {avg:.1f}%")
+
+        overall_avg = sum(all_margins) / len(all_margins) if all_margins else 0
+        lines.append(f"\nOverall Average Margin: {overall_avg:.1f}%")
+
+        discounts = demo_store.get_discount_structure()
+        lines.append(f"\nVolume discounts: 5-20% based on quantity")
+        lines.append(f"Tier discounts: 0-5% based on customer status")
+
+        return "\n".join(lines)

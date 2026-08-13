@@ -2,8 +2,7 @@
 
 import { useState } from 'react';
 import {
-  CheckCircle2, Clock3, Key, ChevronDown, ChevronUp, ChevronRight, ExternalLink,
-  KeySquare, ShieldCheck, ShieldOff, TriangleAlert, XCircle,
+  Key, ChevronDown, ChevronUp, ChevronRight, ExternalLink, KeySquare, ShieldOff, TriangleAlert,
 } from 'lucide-react';
 
 interface TokenExchange {
@@ -20,39 +19,12 @@ interface TokenExchange {
   access_token?: string;  // Raw access token JWT
   id_jag_token?: string;  // Raw ID-JAG token (intermediate)
   id_jag_claims?: Record<string, any>;  // ID-JAG claims (unused for display, kept for counting)
-  resource_token_validated?: boolean;
-  resource_token_kid?: string;
-  resource_validation_error?: string;
-  mcp_resource?: string;
-  protected_resource_metadata?: string;
-  authorization_server_issuer?: string;
-}
-
-interface AuthorizationDecision {
-  agent: string;
-  mode: 'okta' | 'simple' | 'fga';
-  engine: string;
-  operation: 'read' | 'write';
-  quantity?: number | null;
-  role_level?: number;
-  role_name?: string;
-  required_role?: string;
-  decision: 'allow' | 'deny' | 'approval_required';
-  outcome: 'authorized' | 'executed' | 'blocked' | 'awaiting_approval';
-  reason: string;
-  relation?: string;
-  request_id?: string;
-  approval_role?: string | null;
-  token_issued?: boolean;
-  token_validated?: boolean;
 }
 
 interface Props {
   exchanges: TokenExchange[];
-  decisions: AuthorizationDecision[];
   idTokenClaims?: Record<string, any>;
   idTokenRaw?: string;  // Raw ID token JWT
-  stopReason?: string | null;
 }
 
 // Shows the raw, signed JWT only - no in-house "decoded" view. The point is
@@ -69,16 +41,12 @@ function TokenSection({
   color,
   defaultOpen = false,
   blockedReason,
-  claims,
-  stageNote,
 }: {
   title: string;
   rawToken?: string;
   color?: string;
   defaultOpen?: boolean;
   blockedReason?: string;
-  claims?: Record<string, any>;
-  stageNote?: string;
 }) {
   const [isOpen, setIsOpen] = useState(defaultOpen);
 
@@ -128,21 +96,8 @@ function TokenSection({
           />
         )}
         <span className="text-sm font-medium text-gray-700">{title}</span>
-        <span className="text-xs text-emerald-600 ml-auto">issued</span>
+        <span className="text-xs text-gray-400 ml-auto">token available</span>
       </button>
-
-      <div className="border-t border-gray-100 bg-white px-3 py-2">
-        {stageNote ? <p className="mb-2 text-[11px] text-gray-600">{stageNote}</p> : null}
-        {claims ? (
-          <div className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-[10px] text-gray-500">
-            {claims.jti ? <span>jti …{String(claims.jti).slice(-12)}</span> : null}
-            {claims.aud ? <span>aud {Array.isArray(claims.aud) ? claims.aud.join(', ') : String(claims.aud)}</span> : null}
-            {claims.scp || claims.scope ? (
-              <span>scope {Array.isArray(claims.scp) ? claims.scp.join(' ') : String(claims.scope ?? claims.scp)}</span>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
 
       {isOpen && (
         <div className="bg-white">
@@ -169,100 +124,7 @@ function TokenSection({
   );
 }
 
-function DecisionSection({ decision }: { decision: AuthorizationDecision }) {
-  const presentation = decision.outcome === 'executed'
-    ? {
-        Icon: CheckCircle2,
-        label: 'Executed',
-        classes: 'border-emerald-200 bg-emerald-50 text-emerald-800',
-      }
-    : decision.outcome === 'awaiting_approval'
-      ? {
-          Icon: Clock3,
-          label: `Waiting for ${decision.approval_role ?? 'VP'}`,
-          classes: 'border-amber-200 bg-amber-50 text-amber-800',
-        }
-      : decision.outcome === 'blocked'
-        ? {
-            Icon: XCircle,
-            label: decision.engine === 'Okta delegation policy'
-              ? 'Blocked — no delegated access'
-              : 'Blocked — no inventory change',
-            classes: 'border-red-200 bg-red-50 text-red-800',
-          }
-        : {
-            Icon: ShieldCheck,
-            label: 'Authorized',
-            classes: 'border-blue-200 bg-blue-50 text-blue-800',
-          };
-  const { Icon } = presentation;
-  const modeLabel = decision.mode === 'fga'
-    ? 'FGA'
-    : decision.mode === 'okta'
-      ? (decision.engine === 'Okta delegation policy' ? 'Okta delegation' : 'Okta clearance')
-      : 'Simple role policy';
-
-  return (
-    <div className={`rounded-lg border p-3 ${presentation.classes}`}>
-      <div className="flex flex-wrap items-center gap-2">
-        <Icon className="h-4 w-4" />
-        <span className="text-sm font-semibold">Step 4: {presentation.label}</span>
-        <span className="ml-auto rounded-full bg-white/70 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide">
-          {modeLabel}
-        </span>
-      </div>
-      <p className="mt-1 text-xs leading-relaxed">{decision.reason}</p>
-      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[10px] opacity-80">
-        <span>{decision.role_level} — {decision.role_name}</span>
-        <span>{decision.operation}{decision.quantity ? ` · ${decision.quantity.toLocaleString()} units` : ''}</span>
-        {decision.relation ? <span className="font-mono">{decision.relation}</span> : null}
-        {decision.request_id ? <span className="font-mono">request {decision.request_id}</span> : null}
-      </div>
-    </div>
-  );
-}
-
-function StoppedExchangeSection({
-  decision,
-  stopReason,
-}: {
-  decision?: AuthorizationDecision;
-  stopReason?: string | null;
-}) {
-  const reason = decision?.reason ?? stopReason;
-  if (!reason) return null;
-  const stopLabel = stopReason?.startsWith('Authentication stopped')
-    ? 'Authentication stopped'
-    : 'Request stopped';
-
-  return (
-    <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-red-800">
-      <div className="flex items-center gap-2">
-        <ShieldOff className="h-4 w-4 shrink-0" />
-        <span className="text-sm font-semibold">Exchange stopped after Step 1</span>
-        <span className="ml-auto rounded-full bg-white/70 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide">
-          {decision?.engine === 'Okta delegation policy' ? 'Delegation stopped' : decision ? 'Clearance denied' : stopLabel}
-        </span>
-      </div>
-      <p className="mt-1 text-xs leading-relaxed">{reason}</p>
-      <p className="mt-2 text-[11px] font-medium">
-        No ID-JAG or scoped resource token was requested.
-      </p>
-      {decision ? (
-        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[10px] opacity-80">
-          <span>{decision.role_level} — {decision.role_name}</span>
-          <span>
-            {decision.operation}
-            {decision.quantity ? ` · ${decision.quantity.toLocaleString()} units` : ''}
-          </span>
-          {decision.required_role ? <span>requires {decision.required_role}</span> : null}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-export default function RawTokensCard({ exchanges, decisions, idTokenRaw, stopReason }: Props) {
+export default function RawTokensCard({ exchanges, idTokenRaw }: Props) {
   const [isExpanded, setIsExpanded] = useState(false);
 
   // Keep the latest record per domain. Successful tokens, policy denials, and
@@ -282,20 +144,7 @@ export default function RawTokensCard({ exchanges, decisions, idTokenRaw, stopRe
   }, {} as Record<string, TokenExchange>);
 
   const relevantExchanges = Object.values(latestExchanges);
-  const latestDecisions = decisions.reduce((acc, decision) => {
-    acc[decision.agent] = decision;
-    return acc;
-  }, {} as Record<string, AuthorizationDecision>);
-  const allStoppedDecisions = Object.values(latestDecisions).filter(
-    (decision) => decision.outcome === 'blocked' && !latestExchanges[decision.agent]
-  );
-  const vacationStop = allStoppedDecisions.find(
-    (decision) => decision.engine === 'Okta delegation policy'
-  );
-  const stoppedDecisions = vacationStop ? [vacationStop] : allStoppedDecisions;
   const hasAnyTokens = !!idTokenRaw || relevantExchanges.length > 0;
-  const hasDelegatedExchange = relevantExchanges.length > 0;
-  const hasAnyEvidence = hasAnyTokens || stoppedDecisions.length > 0 || !!stopReason;
 
   // Count total tokens (ID Token + ID-JAG tokens + Access tokens)
   const tokenCount = (idTokenRaw ? 1 : 0) +
@@ -320,7 +169,7 @@ export default function RawTokensCard({ exchanges, decisions, idTokenRaw, stopRe
         <div className="flex items-center gap-2">
           {!isExpanded && hasAnyTokens && (
             <span className="text-xs text-gray-400">
-              {tokenCount} signed artifact(s)
+              {tokenCount} token(s)
             </span>
           )}
           {isExpanded ? (
@@ -337,15 +186,12 @@ export default function RawTokensCard({ exchanges, decisions, idTokenRaw, stopRe
           {/* Token Flow legend -- lives at the top now (right-aligned) so
               it's the first thing read, rather than a footer someone has
               to scroll past every step to find. */}
-          {hasDelegatedExchange && (
+          {hasAnyTokens && (
             <div className="pb-3 border-b border-gray-100">
               <div className="text-[10px] text-gray-500 flex items-center justify-start gap-1.5">
                 <KeySquare className="w-3 h-3" />
-                <span className="font-semibold">Proof chain:</span> ID Token → ID-JAG → Scoped Resource Token → Business Decision
+                <span className="font-semibold">Token Flow:</span> ID Token → ID-JAG Token → Access Token
               </div>
-              <p className="mt-1 text-[11px] text-gray-600">
-                A scoped token lets the request reach the resource. It does not mean the requested write was authorized or executed.
-              </p>
             </div>
           )}
 
@@ -354,19 +200,11 @@ export default function RawTokensCard({ exchanges, decisions, idTokenRaw, stopRe
             title="Step 1: User Authenticated to Okta for AI Agent Interface (ID Token)"
             rawToken={idTokenRaw}
             color="#007dc1"
-            defaultOpen={false}
-            stageNote="The employee signed in. This proves identity; it is not a resource authorization decision."
+            defaultOpen={true}
           />
 
-          {stoppedDecisions.map((decision) => (
-            <StoppedExchangeSection key={decision.agent} decision={decision} />
-          ))}
-          {stopReason && stoppedDecisions.length === 0 ? (
-            <StoppedExchangeSection stopReason={stopReason} />
-          ) : null}
-
           {/* Agent Token Exchanges - ID-JAG and Access Token for each */}
-          {relevantExchanges.map((exchange) => {
+          {relevantExchanges.map((exchange, idx) => {
             const blocked = exchange.access_denied
               ? exchange.error || `Access denied for ${exchange.agent_name}`
               : undefined;
@@ -374,17 +212,7 @@ export default function RawTokensCard({ exchanges, decisions, idTokenRaw, stopRe
               ? exchange.error || `Token exchange failed for ${exchange.agent_name}`
               : undefined;
             return (
-              <div key={exchange.agent} className="space-y-2">
-                {exchange.mcp_resource && exchange.protected_resource_metadata ? (
-                  <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
-                    <div className="font-semibold">MCP protected-resource discovery</div>
-                    <div className="mt-1 break-all font-mono text-[10px]">{exchange.protected_resource_metadata}</div>
-                    <div className="mt-1 break-all text-[10px]">Resource: {exchange.mcp_resource}</div>
-                    {exchange.authorization_server_issuer ? (
-                      <div className="mt-1 break-all text-[10px]">Authorization server: {exchange.authorization_server_issuer}</div>
-                    ) : null}
-                  </div>
-                ) : null}
+              <div key={idx} className="space-y-2">
                 {systemError && (
                   <div className="border border-amber-200 rounded-lg overflow-hidden">
                     <div className="flex items-center gap-2 px-3 py-2 bg-amber-50 text-amber-800 text-sm">
@@ -402,58 +230,28 @@ export default function RawTokensCard({ exchanges, decisions, idTokenRaw, stopRe
                   <TokenSection
                     title={`Step 2: Cross-App Access Ticket Issued for ${exchange.agent_name} (ID-JAG Token)`}
                     rawToken={exchange.id_jag_token}
-                    claims={exchange.id_jag_claims}
                     color="#6366f1"  // Indigo for ID-JAG
                     defaultOpen={false}
                     blockedReason={blocked}
-                    stageNote="Okta delegated this employee + agent request to the resource authorization server."
                   />
                 )}
 
                 {/* Access Token (final) */}
                 {(exchange.access_token || blocked) && (
                   <TokenSection
-                    title={`Step 3: Scoped token issued for ${exchange.agent_name}`}
+                    title={`Step 3: ${exchange.agent_name} Granted Access to Business Data (Access Token)`}
                     rawToken={exchange.access_token}
-                    claims={exchange.token_claims}
                     color={exchange.color}
                     defaultOpen={false}
                     blockedReason={blocked}
-                    stageNote="The resource validates this coarse scope. When FGA is enabled, role and quantity add the action-level decision."
                   />
                 )}
-
-                {exchange.access_token ? (
-                  <div className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-xs ${
-                    exchange.resource_token_validated
-                      ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-                      : 'border-red-200 bg-red-50 text-red-800'
-                  }`}>
-                    {exchange.resource_token_validated
-                      ? <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
-                      : <ShieldOff className="mt-0.5 h-4 w-4 shrink-0" />}
-                    <div>
-                      <span className="font-semibold">
-                        {exchange.resource_token_validated ? 'The resource validated the token' : 'The resource rejected the token'}
-                      </span>
-                      <p className="mt-0.5">
-                        {exchange.resource_token_validated
-                          ? 'Signature, issuer, audience, expiry, agent identity, delegated user, and scope passed.'
-                          : exchange.resource_validation_error ?? 'Resource-token validation did not pass.'}
-                      </p>
-                    </div>
-                  </div>
-                ) : null}
-
-                {latestDecisions[exchange.agent] ? (
-                  <DecisionSection decision={latestDecisions[exchange.agent]} />
-                ) : null}
               </div>
             );
           })}
 
           {/* No tokens message */}
-          {!hasAnyEvidence && (
+          {!hasAnyTokens && (
             <div className="text-center py-4 text-gray-400">
               <Key className="w-6 h-6 mx-auto mb-2 opacity-50" />
               <p className="text-sm">No token data available</p>

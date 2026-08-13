@@ -15,7 +15,7 @@ PyJWT>=2.8.0
 cryptography>=41.0.0
 okta-ai-sdk-proto==1.0.1
 
-# Fine-Grained Authorization (FGA)
+# Auth0 / FGA
 openfga-sdk==0.9.7
 
 # HTTP & Networking

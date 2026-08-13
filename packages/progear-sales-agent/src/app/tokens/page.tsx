@@ -6,13 +6,10 @@ import { useSession } from 'next-auth/react';
 import { ArrowLeft } from 'lucide-react';
 import RawTokensCard from '@/components/RawTokensCard';
 import ApprovalStatusCard, { type ApprovalStatus } from '@/components/ApprovalStatusCard';
-import { ThemeSelector } from '@/components/ThemeProvider';
 
 const AGENT_FLOW_STORAGE_KEY = 'progear-agent-flow';
 const TOKEN_EXCHANGE_STORAGE_KEY = 'progear-token-exchanges';
-const AUTHORIZATION_DECISIONS_STORAGE_KEY = 'progear-authorization-decisions';
 const PENDING_APPROVAL_STORAGE_KEY = 'progear-pending-approval';
-const TOKEN_FLOW_STOP_STORAGE_KEY = 'progear-token-flow-stop';
 
 // Reads the exact same sessionStorage the chat page (/) already writes on
 // every response - no backend or API changes needed to power this page.
@@ -20,22 +17,16 @@ export default function TokensPage() {
   const { data: session } = useSession();
   const [agentFlow, setAgentFlow] = useState<any[]>([]);
   const [tokenExchanges, setTokenExchanges] = useState<any[]>([]);
-  const [authorizationDecisions, setAuthorizationDecisions] = useState<any[]>([]);
   const [pendingApproval, setPendingApproval] = useState<ApprovalStatus | null>(null);
-  const [tokenFlowStop, setTokenFlowStop] = useState<string | null>(null);
 
   const loadFromStorage = () => {
     try {
       const flow = sessionStorage.getItem(AGENT_FLOW_STORAGE_KEY);
       const exchanges = sessionStorage.getItem(TOKEN_EXCHANGE_STORAGE_KEY);
       const approval = sessionStorage.getItem(PENDING_APPROVAL_STORAGE_KEY);
-      const decisions = sessionStorage.getItem(AUTHORIZATION_DECISIONS_STORAGE_KEY);
-      const stopReason = sessionStorage.getItem(TOKEN_FLOW_STOP_STORAGE_KEY);
       if (flow) setAgentFlow(JSON.parse(flow));
       if (exchanges) setTokenExchanges(JSON.parse(exchanges));
       if (approval) setPendingApproval(JSON.parse(approval));
-      if (decisions) setAuthorizationDecisions(JSON.parse(decisions));
-      setTokenFlowStop(stopReason);
     } catch (e) {
       console.error('Error loading token data:', e);
     }
@@ -51,7 +42,7 @@ export default function TokensPage() {
   }, []);
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-gray-50 to-white dark:from-neutral-bg dark:to-primary">
+    <main className="min-h-screen bg-gradient-to-b from-gray-50 to-white">
       <header className="bg-gradient-to-r from-primary via-court-brown to-primary-light border-b-4 border-accent shadow-lg">
         <div className="px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
@@ -67,23 +58,20 @@ export default function TokensPage() {
               <p className="text-gray-300 text-xs">Agent flow and the raw token exchange chain</p>
             </div>
           </div>
-          <ThemeSelector />
         </div>
       </header>
 
       <div className="max-w-4xl mx-auto p-6 space-y-4">
         <RawTokensCard
           exchanges={tokenExchanges}
-          decisions={authorizationDecisions}
           idTokenRaw={session?.idToken}
-          stopReason={tokenFlowStop}
         />
 
         {pendingApproval && (
           <ApprovalStatusCard key={pendingApproval.request_id} initial={pendingApproval} />
         )}
 
-        {agentFlow.length === 0 && tokenExchanges.length === 0 && authorizationDecisions.length === 0 && !tokenFlowStop && (
+        {agentFlow.length === 0 && tokenExchanges.length === 0 && (
           <div className="text-center py-12 text-gray-400">
             <p className="text-sm">
               No activity yet. Send a message on the{' '}

@@ -1,7 +1,4 @@
-"""ProGear authentication and authorization helpers.
+# ProGear Sales AI - Auth Package
+from .okta_auth import OktaAuth
 
-Keep package import side-effect free so pure policy modules can be tested
-without loading the optional JWT/FGA SDKs.
-"""
-
-__all__: list[str] = []
+__all__ = ["OktaAuth"]

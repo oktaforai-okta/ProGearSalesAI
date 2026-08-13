@@ -3,10 +3,8 @@
 Verified endpoint behavior (probed 2026-05-11):
 
 - POST   /governance/api/v1/requests
-    Body: {requestTypeId, subject, requesterUserIds: [id],
-           requesterFieldValues: [{id, value}]}
-    `requesterUserIds` preserves the signed-in employee as the requester even
-    though the service authenticates to OIG with an administrative API token.
+    Body: {requestTypeId, subject, requesterFieldValues: [{id, value}]}
+    `requesterId` is inferred from the API token's owner and is NOT sent.
     Returns: {id, subject, requestStatus, approvals: [...], ...}
 
 - GET    /governance/api/v1/requests/{id}
@@ -37,7 +35,7 @@ class OIGAuthError(RuntimeError):
 
 
 class OIGUnavailable(RuntimeError):
-    """Raised when Okta is temporarily unavailable or rate limited."""
+    """Raised when Okta returns 5xx or times out."""
 
 
 class OktaOIGClient:
@@ -71,10 +69,6 @@ class OktaOIGClient:
 
         if resp.status_code == 401:
             raise OIGAuthError(f"OIG auth failed on {method} {url}")
-        if resp.status_code == 429:
-            retry_after = resp.headers.get("Retry-After")
-            suffix = f"; retry after {retry_after}s" if retry_after else ""
-            raise OIGUnavailable(f"OIG rate limited {method} {url}{suffix}")
         if resp.status_code >= 500:
             raise OIGUnavailable(f"OIG {resp.status_code} on {method} {url}")
         if resp.status_code >= 400:
@@ -88,7 +82,6 @@ class OktaOIGClient:
         *,
         request_type_id: str,
         subject: str,
-        requester_id: str,
         justification_field_id: str,
         justification_value: str,
     ) -> dict[str, Any]:
@@ -96,14 +89,11 @@ class OktaOIGClient:
 
         The justification lives inside requesterFieldValues, keyed by the
         Request Type's custom field ID (see OKTA_OIG_JUSTIFICATION_FIELD_ID).
-        The signed-in employee's Okta user ID is sent explicitly. The API
-        token owner remains the request creator, which preserves both actors
-        in OIG's audit record.
+        The requester identity is inferred from the API token owner.
         """
         payload = {
             "requestTypeId": request_type_id,
             "subject": subject,
-            "requesterUserIds": [requester_id],
             "requesterFieldValues": [
                 {"id": justification_field_id, "value": justification_value},
             ],

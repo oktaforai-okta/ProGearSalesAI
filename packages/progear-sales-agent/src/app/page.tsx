@@ -8,9 +8,7 @@ import { Key, GitBranch, ShieldCheck } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { type ApprovalStatus } from '@/components/ApprovalStatusCard';
-import { ThemeSelector } from '@/components/ThemeProvider';
 import { API_BASE_URL, OKTA_DOMAIN } from '@/lib/config';
-import { getOrCreateFGADemoSessionId, useFGASimulation } from '@/hooks/useFGASimulation';
 
 interface Message {
   id: string;
@@ -20,34 +18,27 @@ interface Message {
   agentFlow?: any[];
   tokenExchanges?: any[];
   fgaChecks?: any[];
-  authorizationDecisions?: any[];
 }
 
-type ExampleQuestion = {
-  text: string;
-  badge: string;
-  action: 'read' | 'standard' | 'large';
-};
-
-// The everyday demo stays focused on the two core personas. The advanced FGA
-// demo adds the quantity boundary without duplicating the Manager tier.
-const simpleExampleQuestions: ExampleQuestion[] = [
-  { text: 'How many basketballs are in stock?', badge: 'Read', action: 'read' },
-  { text: 'Can you add 50 basketballs to the inventory?', badge: 'Write', action: 'standard' },
-];
-
-const fgaExampleQuestions: ExampleQuestion[] = [
-  { text: 'How many basketballs are in stock?', badge: 'Read', action: 'read' },
-  { text: 'Add 50 basketballs to inventory', badge: '1–600', action: 'standard' },
-  { text: 'Add 601 basketballs to inventory', badge: '601+ · Owner', action: 'large' },
+// Kept deliberately simple: 2 reads (left column) + 2 writes (right
+// column), both about inventory. Earlier versions mixed in
+// customer/pricing/margin questions, but those don't exercise the
+// read-vs-write security story this demo is actually about, so they were
+// dropped per explicit feedback. The two write prompts are picked to
+// straddle the OIG approval threshold (500 units) on purpose: 50 auto-
+// executes, 600 pauses for human approval -- same mechanism, visibly
+// different outcome.
+const exampleQuestions: { text: string; action: 'read' | 'write' }[] = [
+  { text: "What basketball hoops do we have in stock?", action: 'read' },
+  { text: "Add 50 basketballs to inventory", action: 'write' },
+  { text: "How many basketballs are in stock?", action: 'read' },
+  { text: "Add 600 basketballs to inventory", action: 'write' },
 ];
 
 const CHAT_STORAGE_KEY = 'progear-chat-messages';
 const AGENT_FLOW_STORAGE_KEY = 'progear-agent-flow';
 const TOKEN_EXCHANGE_STORAGE_KEY = 'progear-token-exchanges';
 const FGA_CHECKS_STORAGE_KEY = 'progear-fga-checks';
-const AUTHORIZATION_DECISIONS_STORAGE_KEY = 'progear-authorization-decisions';
-const TOKEN_FLOW_STOP_STORAGE_KEY = 'progear-token-flow-stop';
 const PENDING_APPROVAL_STORAGE_KEY = 'progear-pending-approval';
 const APPROVAL_ANNOUNCED_STORAGE_KEY = 'progear-approval-announced';
 
@@ -101,14 +92,12 @@ const markdownComponents = {
 export default function Home() {
   const { data: session, status } = useSession();
   const router = useRouter();
-  const { isEnabled: isFGASimulationEnabled } = useFGASimulation();
   const [message, setMessage] = useState('');
   const [chatMessages, setChatMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [currentAgentFlow, setCurrentAgentFlow] = useState<any[]>([]);
   const [currentTokenExchanges, setCurrentTokenExchanges] = useState<any[]>([]);
   const [currentFGAChecks, setCurrentFGAChecks] = useState<any[]>([]);
-  const [currentAuthorizationDecisions, setCurrentAuthorizationDecisions] = useState<any[]>([]);
   const [pendingApproval, setPendingApproval] = useState<ApprovalStatus | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -121,7 +110,6 @@ export default function Home() {
       const savedAgentFlow = sessionStorage.getItem(AGENT_FLOW_STORAGE_KEY);
       const savedTokenExchanges = sessionStorage.getItem(TOKEN_EXCHANGE_STORAGE_KEY);
       const savedFGAChecks = sessionStorage.getItem(FGA_CHECKS_STORAGE_KEY);
-      const savedAuthorizationDecisions = sessionStorage.getItem(AUTHORIZATION_DECISIONS_STORAGE_KEY);
 
       if (savedMessages) {
         setChatMessages(JSON.parse(savedMessages));
@@ -134,9 +122,6 @@ export default function Home() {
       }
       if (savedFGAChecks) {
         setCurrentFGAChecks(JSON.parse(savedFGAChecks));
-      }
-      if (savedAuthorizationDecisions) {
-        setCurrentAuthorizationDecisions(JSON.parse(savedAuthorizationDecisions));
       }
       const savedPendingApproval = sessionStorage.getItem(PENDING_APPROVAL_STORAGE_KEY);
       if (savedPendingApproval) {
@@ -169,15 +154,12 @@ export default function Home() {
     if (currentFGAChecks.length > 0) {
       sessionStorage.setItem(FGA_CHECKS_STORAGE_KEY, JSON.stringify(currentFGAChecks));
     }
-    if (currentAuthorizationDecisions.length > 0) {
-      sessionStorage.setItem(AUTHORIZATION_DECISIONS_STORAGE_KEY, JSON.stringify(currentAuthorizationDecisions));
-    }
     if (pendingApproval) {
       sessionStorage.setItem(PENDING_APPROVAL_STORAGE_KEY, JSON.stringify(pendingApproval));
     } else {
       sessionStorage.removeItem(PENDING_APPROVAL_STORAGE_KEY);
     }
-  }, [currentAgentFlow, currentTokenExchanges, currentFGAChecks, currentAuthorizationDecisions, pendingApproval]);
+  }, [currentAgentFlow, currentTokenExchanges, currentFGAChecks, pendingApproval]);
 
   // Debug hook: ?mockApprovalId= populates the ApprovalStatusCard for manual UI testing
   useEffect(() => {
@@ -190,7 +172,7 @@ export default function Home() {
       request_id: mockId,
       status: 'pending',
       submitted_at: new Date().toISOString(),
-      approver_group: 'AIAgentOwners',
+      approver_group: 'InventoryApprovers',
       intent: {
         product_name: 'basketball',
         quantity_delta: 500,
@@ -217,7 +199,6 @@ export default function Home() {
     setCurrentAgentFlow([]);
     setCurrentTokenExchanges([]);
     setCurrentFGAChecks([]);
-    setCurrentAuthorizationDecisions([]);
     setPendingApproval(null);
     setMessage('');
     // Clear session storage
@@ -225,8 +206,6 @@ export default function Home() {
     sessionStorage.removeItem(AGENT_FLOW_STORAGE_KEY);
     sessionStorage.removeItem(TOKEN_EXCHANGE_STORAGE_KEY);
     sessionStorage.removeItem(FGA_CHECKS_STORAGE_KEY);
-    sessionStorage.removeItem(AUTHORIZATION_DECISIONS_STORAGE_KEY);
-    sessionStorage.removeItem(TOKEN_FLOW_STOP_STORAGE_KEY);
     sessionStorage.removeItem(PENDING_APPROVAL_STORAGE_KEY);
     sessionStorage.removeItem(APPROVAL_ANNOUNCED_STORAGE_KEY);
   };
@@ -302,7 +281,7 @@ export default function Home() {
     };
 
     tick();
-    const handle = setInterval(tick, 10000);
+    const handle = setInterval(tick, 5000);
     return () => {
       cancelled = true;
       clearInterval(handle);
@@ -322,8 +301,6 @@ export default function Home() {
     sessionStorage.removeItem(AGENT_FLOW_STORAGE_KEY);
     sessionStorage.removeItem(TOKEN_EXCHANGE_STORAGE_KEY);
     sessionStorage.removeItem(FGA_CHECKS_STORAGE_KEY);
-    sessionStorage.removeItem(AUTHORIZATION_DECISIONS_STORAGE_KEY);
-    sessionStorage.removeItem(TOKEN_FLOW_STOP_STORAGE_KEY);
     sessionStorage.removeItem(PENDING_APPROVAL_STORAGE_KEY);
 
     // End Okta session using OIDC logout endpoint
@@ -358,16 +335,6 @@ export default function Home() {
     setCurrentAgentFlow([{ step: 'router', action: 'Processing request...', status: 'processing' }]);
     setCurrentTokenExchanges([]);
     setCurrentFGAChecks([]);
-    setCurrentAuthorizationDecisions([]);
-    setPendingApproval(null);
-    sessionStorage.removeItem(AGENT_FLOW_STORAGE_KEY);
-    sessionStorage.removeItem(TOKEN_EXCHANGE_STORAGE_KEY);
-    sessionStorage.removeItem(FGA_CHECKS_STORAGE_KEY);
-    sessionStorage.removeItem(AUTHORIZATION_DECISIONS_STORAGE_KEY);
-    sessionStorage.removeItem(PENDING_APPROVAL_STORAGE_KEY);
-    sessionStorage.removeItem(TOKEN_FLOW_STOP_STORAGE_KEY);
-
-    let responseStatus: number | null = null;
 
     try {
       const idToken = session?.idToken;
@@ -383,13 +350,8 @@ export default function Home() {
       const response = await fetch(`${API_BASE_URL}/api/chat`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({
-          message: userMessage,
-          simulate_fga: isFGASimulationEnabled,
-          demo_session_id: isFGASimulationEnabled ? getOrCreateFGADemoSessionId() : undefined,
-        }),
+        body: JSON.stringify({ message: userMessage }),
       });
-      responseStatus = response.status;
 
       const contentType = response.headers.get('content-type') || '';
       const data = contentType.includes('application/json')
@@ -401,7 +363,6 @@ export default function Home() {
       setCurrentAgentFlow(data.agent_flow || []);
       setCurrentTokenExchanges(data.token_exchanges || []);
       setCurrentFGAChecks(data.fga_checks || []);
-      setCurrentAuthorizationDecisions(data.authorization_decisions || []);
       if (data.pending_approval) {
         setPendingApproval(data.pending_approval);
       }
@@ -415,8 +376,6 @@ export default function Home() {
         );
       }
 
-      sessionStorage.removeItem(TOKEN_FLOW_STOP_STORAGE_KEY);
-
       const assistantMessage: Message = {
         id: `msg-${Date.now()}`,
         role: 'assistant',
@@ -425,28 +384,20 @@ export default function Home() {
         agentFlow: data.agent_flow,
         tokenExchanges: data.token_exchanges,
         fgaChecks: data.fga_checks,
-        authorizationDecisions: data.authorization_decisions,
       };
       setChatMessages((prev) => [...prev, assistantMessage]);
 
     } catch (error) {
       console.error('Chat error:', error);
       const errorMessage = error instanceof Error ? error.message : '';
-      const stopPrefix = responseStatus === 401
-        ? 'Authentication stopped before token exchange.'
-        : responseStatus === 503
-          ? 'Authorization context could not be verified before token exchange.'
-          : 'Request stopped before token exchange.';
-      const tokenFlowStop = errorMessage
-        ? `${stopPrefix} ${errorMessage}`
-        : `${stopPrefix} Please try again.`;
-      sessionStorage.setItem(TOKEN_FLOW_STOP_STORAGE_KEY, tokenFlowStop);
       setChatMessages((prev) => [
         ...prev,
         {
           id: `msg-${Date.now()}`,
           role: 'assistant',
-          content: errorMessage || 'The request could not reach the ProGear service. Please try again.',
+          content: errorMessage
+            ? `The request could not reach the ProGear service. ${errorMessage}`
+            : 'The request could not reach the ProGear service. Please try again.',
           timestamp: Date.now(),
         },
       ]);
@@ -469,7 +420,7 @@ export default function Home() {
   }
 
   return (
-    <main className="flex h-screen flex-col bg-gradient-to-b from-slate-100 to-white dark:from-neutral-bg dark:to-primary">
+    <main className="h-screen bg-gradient-to-b from-neutral-bg to-primary flex flex-col">
       {/* Header */}
       <header className="bg-gradient-to-r from-primary via-court-brown to-primary-light border-b-4 border-accent shadow-lg relative overflow-hidden">
         {/* Court pattern */}
@@ -532,21 +483,15 @@ export default function Home() {
             >
               <ShieldCheck className="w-4 h-4" />
               <span className="hidden sm:inline">FGA</span>
-              {isFGASimulationEnabled ? (
-                <span className="rounded-full bg-emerald-400/20 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-emerald-200">
-                  On
-                </span>
-              ) : null}
             </Link>
           </div>
 
           <div className="flex items-center space-x-3">
-            <ThemeSelector iconOnly />
             <div className="flex items-center gap-3">
               <span className="text-gray-200 text-sm">{session?.user?.email}</span>
               <button
                 onClick={handleSignOut}
-                className="flex items-center space-x-2 whitespace-nowrap rounded-lg border border-white/20 bg-white/10 px-5 py-2.5 text-white transition hover:border-accent/50 hover:bg-accent/30"
+                className="px-5 py-2.5 bg-white/10 hover:bg-accent/30 text-white rounded-lg transition border border-white/20 hover:border-accent/50 flex items-center space-x-2"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
@@ -560,7 +505,7 @@ export default function Home() {
 
       {/* Chat - full width; token/FGA/approval detail lives on /tokens now */}
       <div className="flex-1 flex overflow-hidden">
-        <div className="flex w-full flex-col bg-gradient-to-b from-slate-50 to-white dark:from-neutral-bg dark:to-primary-light">
+        <div className="w-full flex flex-col bg-gradient-to-b from-neutral-bg to-white">
           {/* Messages Area */}
           <div className="flex-1 overflow-y-auto p-6 space-y-4 max-w-3xl mx-auto w-full">
             {chatMessages.length === 0 && (
@@ -569,32 +514,29 @@ export default function Home() {
                   <div className="absolute inset-0 bg-accent/20 rounded-full blur-2xl animate-pulse"></div>
                   <span className="text-6xl relative z-10">🏀</span>
                 </div>
-                <h2 className="mb-2 text-2xl font-bold text-slate-900 dark:text-white">Welcome, {session?.user?.name || 'Team Member'}!</h2>
-                <p className="mb-6 text-slate-600 dark:text-gray-300">
+                <h2 className="text-2xl font-bold text-white mb-2">Welcome, {session?.user?.name || 'Team Member'}!</h2>
+                <p className="text-gray-300 mb-6">
                   Your AI-powered basketball equipment sales assistant is ready. Ask about orders, inventory, pricing, or customers.
                 </p>
 
-                <div className="mx-auto flex max-w-lg flex-col gap-2.5 text-left">
-                  {(isFGASimulationEnabled ? fgaExampleQuestions : simpleExampleQuestions).map((question) => {
-                    const isRead = question.action === 'read';
+                {/* Example Questions -- left column = read, right column = write */}
+                <div className="grid grid-cols-2 gap-3 text-left">
+                  {exampleQuestions.map((question, idx) => {
+                    const isWrite = question.action === 'write';
                     return (
                       <button
-                        key={question.badge}
+                        key={idx}
                         onClick={() => handleSendMessage(question.text)}
-                        className="group flex min-h-14 items-center gap-3 rounded-xl border-2 border-accent/20 bg-white/95 px-3.5 py-2.5 text-left backdrop-blur-sm transition-all hover:border-accent hover:shadow-lg dark:bg-slate-900/95"
+                        className="group p-4 bg-white/95 backdrop-blur-sm border-2 border-accent/20 hover:border-accent hover:shadow-xl rounded-xl transition-all text-left flex items-start space-x-3"
                       >
                         <span
-                          className={`min-w-20 flex-shrink-0 rounded-md px-2 py-1 text-center text-[10px] font-bold uppercase tracking-wide ${
-                            isRead
-                              ? 'bg-emerald-100 text-emerald-700'
-                              : question.action === 'large'
-                                ? 'bg-purple-100 text-purple-700'
-                                : 'bg-court-orange/15 text-court-orange'
+                          className={`flex-shrink-0 px-2 py-1 rounded-md text-[10px] font-bold tracking-wide uppercase ${
+                            isWrite ? 'bg-court-orange/15 text-court-orange' : 'bg-emerald-100 text-emerald-700'
                           }`}
                         >
-                          {question.badge}
+                          {isWrite ? 'Write' : 'Read'}
                         </span>
-                        <span className="text-sm font-medium leading-snug text-gray-700 group-hover:text-primary dark:text-slate-200 dark:group-hover:text-white">
+                        <span className="text-sm text-gray-700 group-hover:text-primary font-medium leading-relaxed">
                           {question.text}
                         </span>
                       </button>
