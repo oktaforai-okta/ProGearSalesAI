@@ -23,6 +23,7 @@ moved to a backend-side JSON file (see approval_service.py).
 from __future__ import annotations
 
 import logging
+import math
 from typing import Any
 
 import httpx
@@ -36,6 +37,14 @@ class OIGAuthError(RuntimeError):
 
 class OIGUnavailable(RuntimeError):
     """Raised when Okta returns 5xx or times out."""
+
+
+class OIGRateLimited(RuntimeError):
+    """Raised when Okta throttles Governance API traffic."""
+
+    def __init__(self, message: str, retry_after: int = 60):
+        super().__init__(message)
+        self.retry_after = max(1, retry_after)
 
 
 class OktaOIGClient:
@@ -69,6 +78,15 @@ class OktaOIGClient:
 
         if resp.status_code == 401:
             raise OIGAuthError(f"OIG auth failed on {method} {url}")
+        if resp.status_code == 429:
+            try:
+                retry_after = math.ceil(float(resp.headers.get("Retry-After", "60")))
+            except ValueError:
+                retry_after = 60
+            raise OIGRateLimited(
+                f"OIG rate limit exceeded on {method} {url}",
+                retry_after=retry_after,
+            )
         if resp.status_code >= 500:
             raise OIGUnavailable(f"OIG {resp.status_code} on {method} {url}")
         if resp.status_code >= 400:

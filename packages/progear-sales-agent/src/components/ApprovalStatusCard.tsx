@@ -90,26 +90,48 @@ export default function ApprovalStatusCard({ initial, onStatusChange }: Props) {
     const id = status.request_id;
     let cancelled = false;
 
+    const baseDelay = 15_000;
+    const maxDelay = 120_000;
+    let delay = baseDelay;
+    let handle: ReturnType<typeof setTimeout> | undefined;
+
+    const schedule = () => {
+      if (!cancelled) handle = setTimeout(tick, delay);
+    };
+
     const tick = async () => {
       try {
         const res = await fetch(`${API_BASE_URL}/api/approvals/${id}`);
-        if (!res.ok) return;
+        if (res.status === 429) {
+          const retryAfter = Number(res.headers.get('Retry-After') || 0) * 1000;
+          delay = Math.min(maxDelay, Math.max(retryAfter, delay * 2));
+          return;
+        }
+        if (!res.ok) {
+          delay = Math.min(maxDelay, delay * 2);
+          return;
+        }
         const data: ApprovalStatus = await res.json();
         if (cancelled) return;
+        delay = baseDelay;
         if (data.status !== status.status) {
           onStatusChange?.(data);
         }
         setStatus(data);
+        if (data.status === 'executed' || data.status === 'denied') {
+          cancelled = true;
+        }
       } catch {
-        /* swallow — next tick will retry */
+        delay = Math.min(maxDelay, delay * 2);
+      } finally {
+        schedule();
       }
     };
 
-    tick();
-    const handle = setInterval(tick, 5000);
+    schedule();
     return () => {
       cancelled = true;
-      clearInterval(handle);
+      if (handle) clearTimeout(handle);
     };
   }, [status.request_id, status.status]);
 

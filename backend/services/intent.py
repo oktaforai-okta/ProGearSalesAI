@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import asdict, dataclass
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 INTENT_FENCE_START = "[INTENT_JSON]"
@@ -55,16 +57,81 @@ def find_comment(comments: list[dict[str, Any]], prefix: str) -> dict[str, Any] 
     return None
 
 
-_QTY_RE = re.compile(r"(\d+)")
+_NUMBER = r"(?P<quantity>\d[\d,]*)"
+
+# Prefer an explicitly requested delta over unrelated numbers that may be
+# copied from a prior inventory response. For example, in
+# "Youth Adjustable Hoop – 823 units - increase this by 50", 823 is the
+# current stock level and 50 is the requested change.
+_QTY_PATTERNS = (
+    re.compile(
+        rf"\b(?:increase|raise|boost|restock|decrease|reduce)\b[^\n]{{0,100}}?\bby\s+{_NUMBER}\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        rf"\b(?:add|increase|raise|boost|restock|remove|decrease|reduce)\s+{_NUMBER}\b",
+        re.IGNORECASE,
+    ),
+)
+_QTY_RE = re.compile(r"(?P<quantity>\d[\d,]*)")
+_DISPLAYED_PRODUCT_RE = re.compile(
+    r"^\s*(?P<product>.+?)\s+[–—-]\s*\d[\d,]*\s+units?\b",
+    re.IGNORECASE,
+)
 # Order matters: longer/more-specific matches come first so "basketball" wins
 # over any bare "ball" substring. Bare "ball" is intentionally absent — this is
 # a basketball-equipment demo, so "balls"/"ball" should canonicalize to the
 # default "basketball" below, keeping the inventory-agent and approval-gate
 # paths resolving the same SKU.
 _PRODUCT_KEYWORDS = (
-    "basketball", "treadmill", "helmet", "glove", "shoe", "jersey",
+    "basketball", "treadmill", "helmet", "glove", "shoe", "jersey", "hoop",
     "racket", "bat",
 )
+
+
+@lru_cache(maxsize=1)
+def _catalog_product_names() -> tuple[str, ...]:
+    """Return known demo product names, longest first, without live-data state."""
+    catalog_path = Path(__file__).resolve().parent.parent / "data" / "initial_data.json"
+    try:
+        payload = json.loads(catalog_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return ()
+    names = {
+        str(item.get("name") or "").strip()
+        for item in (payload.get("inventory") or {}).values()
+        if item.get("name")
+    }
+    return tuple(sorted(names, key=len, reverse=True))
+
+
+def _parse_quantity(task: str) -> int | None:
+    for pattern in _QTY_PATTERNS:
+        match = pattern.search(task)
+        if match:
+            return int(match.group("quantity").replace(",", ""))
+    match = _QTY_RE.search(task)
+    if not match:
+        return None
+    return int(match.group("quantity").replace(",", ""))
+
+
+def _parse_product(task: str) -> str:
+    task_lower = task.lower()
+
+    # A copied inventory row often contains the exact catalog name. Resolve it
+    # before generic words such as "basketball" or "hoop".
+    for name in _catalog_product_names():
+        if name.lower() in task_lower:
+            return name
+
+    displayed = _DISPLAYED_PRODUCT_RE.search(task)
+    if displayed:
+        product = displayed.group("product").strip(" -–—:\t")
+        if product:
+            return product
+
+    return next((p for p in _PRODUCT_KEYWORDS if p in task_lower), "basketball")
 
 
 def parse_inventory_intent(task: str) -> dict | None:
@@ -76,13 +143,11 @@ def parse_inventory_intent(task: str) -> dict | None:
     """
     if not task:
         return None
-    m = _QTY_RE.search(task)
-    if not m:
-        return None
     try:
-        quantity = int(m.group(1))
+        quantity = _parse_quantity(task)
     except ValueError:
         return None
-    task_lower = task.lower()
-    product = next((p for p in _PRODUCT_KEYWORDS if p in task_lower), "basketball")
+    if quantity is None or quantity <= 0:
+        return None
+    product = _parse_product(task)
     return {"quantity_delta": quantity, "product_name": product}

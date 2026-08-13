@@ -269,22 +269,46 @@ export default function Home() {
     if (pendingApproval.status === 'executed' || pendingApproval.status === 'denied') return;
 
     let cancelled = false;
+    const baseDelay = 15_000;
+    const maxDelay = 120_000;
+    let delay = baseDelay;
+    let handle: ReturnType<typeof setTimeout> | undefined;
+
+    const schedule = () => {
+      if (!cancelled) handle = setTimeout(tick, delay);
+    };
+
     const tick = async () => {
       try {
         const res = await fetch(`${API_BASE_URL}/api/approvals/${pendingApproval.request_id}`);
-        if (!res.ok || cancelled) return;
+        if (res.status === 429) {
+          const retryAfter = Number(res.headers.get('Retry-After') || 0) * 1000;
+          delay = Math.min(maxDelay, Math.max(retryAfter, delay * 2));
+          return;
+        }
+        if (!res.ok || cancelled) {
+          delay = Math.min(maxDelay, delay * 2);
+          return;
+        }
         const data: ApprovalStatus = await res.json();
-        if (!cancelled) handleApprovalStatusChange(data);
+        delay = baseDelay;
+        if (!cancelled) {
+          handleApprovalStatusChange(data);
+          if (data.status === 'executed' || data.status === 'denied') {
+            cancelled = true;
+          }
+        }
       } catch {
-        /* next tick retries */
+        delay = Math.min(maxDelay, delay * 2);
+      } finally {
+        schedule();
       }
     };
 
-    tick();
-    const handle = setInterval(tick, 5000);
+    schedule();
     return () => {
       cancelled = true;
-      clearInterval(handle);
+      if (handle) clearTimeout(handle);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingApproval?.request_id, pendingApproval?.status]);

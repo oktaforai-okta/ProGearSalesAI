@@ -182,13 +182,13 @@ Not every authorized write executes immediately. `backend/services/factory.py` b
 The orchestrator's **approval_gate** node fires only when all of the following are true:
 1. The request needs `inventory:write`.
 2. FGA didn't already deny the Inventory agent (an unauthorized action never reaches the approval gate, it's just denied).
-3. `backend/services/intent.py` parses a quantity from the message (`parse_inventory_intent`) that is `>= APPROVAL_QUANTITY_THRESHOLD`.
+3. `backend/services/intent.py` parses the requested change from the message (`parse_inventory_intent`) and gates it when the change is `>= APPROVAL_QUANTITY_THRESHOLD`. Explicit phrases such as "increase by 50" take precedence over copied stock counts, and exact catalog names in the prompt are preserved.
 
-When triggered, it builds an `Intent` (user, product, quantity, original request text) and calls the OIG API (`POST /governance/api/v1/requests`) to create a real Access Request, with the intent JSON fenced inside the request's justification field (`[INTENT_JSON]{...}[/INTENT_JSON]`) so it can be recovered later without a separate database. The chat response tells the user their request is pending and which approver group (`OKTA_APPROVER_GROUP_NAME`, default `InventoryApprovers`) it went to.
+When triggered, it builds an `Intent` (user, product, quantity, original request text), checks for an equivalent open request, and calls the OIG API (`POST /governance/api/v1/requests`) only when a new Access Request is needed. The intent JSON is fenced inside the request's justification field (`[INTENT_JSON]{...}[/INTENT_JSON]`) so it can be recovered later without a separate database. The chat response tells the user their request is pending and which approver group (`OKTA_APPROVER_GROUP_NAME`, default `InventoryApprovers`) it went to.
 
 **Resolution happens two ways:**
-- **Foreground fast path**: `GET /api/approvals/{request_id}` (polled by the frontend) calls `ApprovalService.execute_if_approved()`, which checks OIG's current decision and executes the write immediately if approved.
-- **Background poller**: `backend/api/main.py` starts an async loop on FastAPI startup (`_approval_poller_loop`) that polls OIG's open/resolved requests every `APPROVAL_POLL_INTERVAL_SECONDS` (default 120s, with exponential backoff on errors) and executes any newly-approved inventory requests even if nobody has the tab open.
+- **Foreground fast path**: `GET /api/approvals/{request_id}` (polled by the frontend) calls `ApprovalService.execute_if_approved()`, which checks OIG's current decision and executes the write immediately if approved. Pending status is cached briefly to coalesce duplicate browser tabs; clients poll every 15 seconds, exponentially back off on errors, and honor Okta's `Retry-After` response when rate limited.
+- **Background poller**: `backend/api/main.py` starts an async loop on FastAPI startup (`_approval_poller_loop`) that polls only this deployment's pending request IDs from the persistent ledger every `APPROVAL_POLL_INTERVAL_SECONDS` (default 120s, with exponential and `Retry-After` backoff) and executes newly-approved inventory requests even if nobody has the tab open. It does not scan historical OIG requests.
 
 Execution is idempotent: a JSON ledger file (`backend/data/approvals_ledger.json`) tracks which OIG request IDs have already been executed, with a bounded retry count (3 attempts) before a request is marked abandoned, so a flaky write doesn't retry forever and an already-executed request never double-applies.
 

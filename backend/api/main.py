@@ -11,6 +11,7 @@ Features:
 
 import os
 import logging
+import time
 from pathlib import Path
 
 # Load environment variables BEFORE importing modules that read env at import time
@@ -34,6 +35,7 @@ from orchestrator.orchestrator import Orchestrator
 from dataclasses import asdict
 from data.demo_store import demo_store
 from services.factory import build_approval_service
+from services.okta_oig_client import OIGRateLimited
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -53,12 +55,15 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Retry-After"],
 )
 
 
 # --- Approval Service (lazy; constructed on first use) ---
 
 _approval_service_singleton = None
+_approval_status_cache: Dict[str, tuple[float, Dict[str, Any]]] = {}
+_approval_status_locks: Dict[str, "_approval_asyncio.Lock"] = {}
 
 
 def _get_approval_service():
@@ -105,24 +110,24 @@ async def _approval_poller_loop():
     while True:
         try:
             svc = _get_approval_service()
-            # Okta filters server-side only by requeststatus. A freshly-approved
-            # request can appear as either OPEN (approvals done but workflow
-            # still transitioning) or RESOLVED (terminal). Poll both to avoid
-            # missing either. Filter by requestTypeId + decision client-side.
-            raw_open = await svc._oig.list_requests(request_status="OPEN")
-            raw_resolved = await svc._oig.list_requests(request_status="RESOLVED")
-            raw_list = raw_open + raw_resolved
-            for raw in raw_list:
-                if raw.get("requestTypeId") != req_type_id:
-                    continue
-                rid = raw.get("id")
-                if not rid:
-                    continue
+            # Poll only request IDs created by this deployment and recorded in
+            # its persistent ledger. OIG's list endpoint omits approval details
+            # and intent fields, so scanning it would require an extra GET for
+            # every historical request on every pass.
+            for rid in svc.pending_request_ids():
                 try:
                     await svc.execute_if_approved(rid)
+                except OIGRateLimited:
+                    raise
                 except Exception as exc:
                     logger.warning(f"Approval poller: execute failed for {rid}: {exc}")
             interval = base_interval
+        except OIGRateLimited as exc:
+            interval = min(max_interval, max(interval * 2, exc.retry_after))
+            logger.warning(
+                "Approval poller: Okta rate limited; backing off to %ss",
+                interval,
+            )
         except Exception as exc:
             interval = min(interval * 2, max_interval)
             logger.warning(f"Approval poller: loop error, backing off to {interval}s: {exc}")
@@ -692,10 +697,35 @@ async def get_approval(request_id: str):
     the call synchronously executes the inventory write. Otherwise returns
     current status without side effects.
     """
+    cache_seconds = int(os.getenv("APPROVAL_STATUS_CACHE_SECONDS", "15"))
+    now = time.monotonic()
+    cached = _approval_status_cache.get(request_id)
+    if cached and now - cached[0] < cache_seconds:
+        return cached[1]
+
+    lock = _approval_status_locks.setdefault(request_id, _approval_asyncio.Lock())
     try:
-        svc = _get_approval_service()
-        status = await svc.execute_if_approved(request_id)
-        return _approval_status_to_json(status)
+        async with lock:
+            now = time.monotonic()
+            cached = _approval_status_cache.get(request_id)
+            if cached and now - cached[0] < cache_seconds:
+                return cached[1]
+            svc = _get_approval_service()
+            status = await svc.execute_if_approved(request_id)
+            payload = _approval_status_to_json(status)
+            _approval_status_cache[request_id] = (now, payload)
+            return payload
+    except OIGRateLimited as exc:
+        logger.warning(
+            "Approval status rate limited for %s; retry after %ss",
+            request_id,
+            exc.retry_after,
+        )
+        raise HTTPException(
+            status_code=429,
+            detail="Approval status is temporarily rate limited",
+            headers={"Retry-After": str(exc.retry_after)},
+        )
     except Exception as exc:
         logger.error(f"Approval resolve failed for {request_id}: {exc}")
         # Return a JSON error rather than leak a stack trace to the client.

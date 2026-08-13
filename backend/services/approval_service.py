@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import hashlib
 import json
 import logging
 import os
@@ -64,7 +65,9 @@ class _LedgerEntry:
     new_quantity: int | None = None
     failed_attempts: int = 0
     abandoned: bool = False
+    closed: bool = False
     last_error: str | None = None
+    intent_fingerprint: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -75,7 +78,9 @@ class _LedgerEntry:
             "new_quantity": self.new_quantity,
             "failed_attempts": self.failed_attempts,
             "abandoned": self.abandoned,
+            "closed": self.closed,
             "last_error": self.last_error,
+            "intent_fingerprint": self.intent_fingerprint,
         }
 
     @classmethod
@@ -88,7 +93,9 @@ class _LedgerEntry:
             new_quantity=data.get("new_quantity"),
             failed_attempts=int(data.get("failed_attempts") or 0),
             abandoned=bool(data.get("abandoned")),
+            closed=bool(data.get("closed")),
             last_error=data.get("last_error"),
+            intent_fingerprint=data.get("intent_fingerprint"),
         )
 
 
@@ -146,6 +153,26 @@ class _Ledger:
         self._data[request_id] = entry
         self._save()
 
+    def pending_request_ids(self) -> list[str]:
+        return [
+            request_id
+            for request_id, entry in self._data.items()
+            if entry.intent_fingerprint
+            and not entry.executed
+            and not entry.abandoned
+            and not entry.closed
+        ]
+
+    def request_ids_for_fingerprint(self, fingerprint: str) -> list[str]:
+        return [
+            request_id
+            for request_id, entry in self._data.items()
+            if entry.intent_fingerprint == fingerprint
+            and not entry.executed
+            and not entry.abandoned
+            and not entry.closed
+        ]
+
 
 class ApprovalService:
     def __init__(
@@ -168,6 +195,7 @@ class ApprovalService:
         self._threshold = quantity_threshold
         self._now = clock
         self._locks: dict[str, asyncio.Lock] = {}
+        self._creation_locks: dict[str, asyncio.Lock] = {}
         self._ledger = _Ledger(ledger_path)
 
     # ---------- gating ----------
@@ -194,7 +222,12 @@ class ApprovalService:
         original_task: str,
         fga_check_id: str | None = None,
     ) -> tuple[str, Intent]:
-        """Create an OIG Access Request and return (request_id, intent)."""
+        """Create or reuse an equivalent open OIG request.
+
+        Equivalent requests are serialized by an in-process lock, then checked
+        against Okta before creation. Repeated clicks or duplicate browser tabs
+        therefore return the same pending request instead of creating another.
+        """
         _ = requester_id  # explicit: Okta infers requester from API token
         qty = int(parsed_intent["quantity_delta"])
         product = str(parsed_intent["product_name"])
@@ -208,11 +241,61 @@ class ApprovalService:
             submitted_at=self._now().isoformat().replace("+00:00", "Z"),
             fga_check_id=fga_check_id,
         )
+        fingerprint = self._intent_fingerprint(intent)
+        lock = self._creation_locks.setdefault(fingerprint, asyncio.Lock())
+
+        async with lock:
+            existing = await self._find_equivalent_open_request(intent)
+            if existing is not None:
+                request_id, existing_intent = existing
+                logger.info("Reusing equivalent open OIG request %s", request_id)
+                return request_id, existing_intent
+
+            return await self._create_request(intent, approver_group_name)
+
+    @staticmethod
+    def _intent_fingerprint(intent: Intent) -> str:
+        canonical = "|".join(
+            (
+                intent.user_email.strip().lower(),
+                intent.agent.strip().lower(),
+                intent.scope.strip().lower(),
+                intent.product_name.strip().lower(),
+                str(intent.quantity_delta),
+            )
+        )
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    async def _find_equivalent_open_request(
+        self, intent: Intent
+    ) -> tuple[str, Intent] | None:
+        expected = self._intent_fingerprint(intent)
+        for request_id in self._ledger.request_ids_for_fingerprint(expected):
+            raw = await self._oig.get_request(request_id)
+            existing_intent = self._extract_intent(raw)
+            if existing_intent is None:
+                continue
+            if self._intent_fingerprint(existing_intent) != expected:
+                continue
+            status = self._status_from_raw(request_id, raw)
+            if status.status in ("pending", "approved"):
+                return request_id, existing_intent
+            ledger_entry = self._ledger.get(request_id)
+            ledger_entry.closed = True
+            self._ledger.put(request_id, ledger_entry)
+        return None
+
+    async def _create_request(
+        self, intent: Intent, approver_group_name: str
+    ) -> tuple[str, Intent]:
+        qty = intent.quantity_delta
+        product = intent.product_name
+        scope = intent.scope
         subject = f"Inventory write: +{qty} {product}"
         human = (
-            f"AI agent requests inventory write on behalf of {user_email}.\n"
+            f"AI agent requests inventory write on behalf of {intent.user_email}.\n"
             f"Action: Add {qty} units of {product} (scope: {scope}).\n"
-            f"Original task: \"{original_task}\".\n"
+            f"Original task: \"{intent.original_task}\".\n"
             f"Assigned approver group: {approver_group_name}."
         )
         justification = encode_justification(human, intent)
@@ -231,7 +314,14 @@ class ApprovalService:
         request_id = created.get("id") or created.get("requestId")
         if not request_id:
             raise RuntimeError(f"OIG response missing request id: {created!r}")
+        ledger_entry = self._ledger.get(request_id)
+        ledger_entry.intent_fingerprint = self._intent_fingerprint(intent)
+        self._ledger.put(request_id, ledger_entry)
         return request_id, intent
+
+    def pending_request_ids(self) -> list[str]:
+        """Return only requests created by this service that still need polling."""
+        return self._ledger.pending_request_ids()
 
     # ---------- status ----------
 
@@ -390,6 +480,10 @@ class ApprovalService:
 
             # Nothing to do unless approvers have said yes.
             if status.status != "approved":
+                if status.status == "denied":
+                    ledger_entry = self._ledger.get(request_id)
+                    ledger_entry.closed = True
+                    self._ledger.put(request_id, ledger_entry)
                 return status
 
             ledger_entry = self._ledger.get(request_id)
