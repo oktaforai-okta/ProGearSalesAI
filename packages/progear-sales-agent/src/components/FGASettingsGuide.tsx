@@ -60,7 +60,8 @@ export default function FGASettingsGuide() {
               </tr>
               <tr>
                 <th scope="row" className="px-3 py-2 font-medium text-gray-800">
-                  Inventory increase: 1–499 units
+                  <span className="block">Inventory increase:</span>
+                  <span className="block whitespace-nowrap">1–499 units</span>
                 </th>
                 <td className="px-3 py-2">
                   An authorized active manager can update inventory immediately
@@ -68,7 +69,8 @@ export default function FGASettingsGuide() {
               </tr>
               <tr>
                 <th scope="row" className="px-3 py-2 font-medium text-gray-800">
-                  Inventory increase: 500+ units
+                  <span className="block">Inventory increase:</span>
+                  <span className="block whitespace-nowrap">500+ units</span>
                 </th>
                 <td className="px-3 py-2">
                   Creates an access request that must be approved by the AIAgentOwners group
