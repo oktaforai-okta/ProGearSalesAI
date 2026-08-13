@@ -39,7 +39,7 @@ function TokenSection({
   title,
   rawToken,
   color,
-  defaultOpen = false,
+  defaultOpen = true,
   blockedReason,
 }: {
   title: string;
@@ -125,7 +125,9 @@ function TokenSection({
 }
 
 export default function RawTokensCard({ exchanges, idTokenRaw }: Props) {
-  const [isExpanded, setIsExpanded] = useState(false);
+  // The Token Flow page is a demonstration surface: show the complete proof
+  // chain immediately, while preserving the option to collapse it manually.
+  const [isExpanded, setIsExpanded] = useState(true);
 
   // Keep the latest record per domain. Successful tokens, policy denials, and
   // system errors are all relevant evidence. A domain that was never invoked
@@ -231,7 +233,6 @@ export default function RawTokensCard({ exchanges, idTokenRaw }: Props) {
                     title={`Step 2: Cross-App Access Ticket Issued for ${exchange.agent_name} (ID-JAG Token)`}
                     rawToken={exchange.id_jag_token}
                     color="#6366f1"  // Indigo for ID-JAG
-                    defaultOpen={false}
                     blockedReason={blocked}
                   />
                 )}
@@ -242,7 +243,6 @@ export default function RawTokensCard({ exchanges, idTokenRaw }: Props) {
                     title={`Step 3: ${exchange.agent_name} Granted Access to Business Data (Access Token)`}
                     rawToken={exchange.access_token}
                     color={exchange.color}
-                    defaultOpen={false}
                     blockedReason={blocked}
                   />
                 )}
