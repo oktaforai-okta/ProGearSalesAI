@@ -58,6 +58,22 @@ export default function FGASettingsGuide() {
                   All inventory access is blocked due to the user&apos;s vacation status
                 </td>
               </tr>
+              <tr>
+                <th scope="row" className="px-3 py-2 font-medium text-gray-800">
+                  Inventory increase: 1–499 units
+                </th>
+                <td className="px-3 py-2">
+                  An authorized active manager can update inventory immediately
+                </td>
+              </tr>
+              <tr>
+                <th scope="row" className="px-3 py-2 font-medium text-gray-800">
+                  Inventory increase: 500+ units
+                </th>
+                <td className="px-3 py-2">
+                  Creates an access request that must be approved by the AIAgentOwners group
+                </td>
+              </tr>
             </tbody>
           </table>
           <p className="border-t border-gray-200 bg-gray-50 px-3 py-2 text-[11px] leading-relaxed text-gray-600">
