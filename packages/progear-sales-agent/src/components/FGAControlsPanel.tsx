@@ -113,7 +113,7 @@ export default function FGAControlsPanel({ onApplied }: Props) {
       <div className="bg-gradient-to-r from-purple-600 to-indigo-600 px-4 py-3">
         <h3 className="text-white font-semibold flex items-center gap-2">
           <ShieldAlert className="w-5 h-5" />
-          FGA Demo Controls
+          Fine-Grained Demo Controls
         </h3>
         <p className="text-white/80 text-xs mt-1">
           Changes your real Okta profile{session?.user?.email ? ` - ${session.user.email}` : ''}

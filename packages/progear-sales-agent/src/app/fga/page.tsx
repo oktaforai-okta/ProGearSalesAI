@@ -18,7 +18,7 @@ export default function FGAPage() {
       const checks = sessionStorage.getItem(FGA_CHECKS_STORAGE_KEY);
       if (checks) setFgaChecks(JSON.parse(checks));
     } catch (e) {
-      console.error('Error loading FGA data:', e);
+      console.error('Error loading fine-grained control data:', e);
     }
   };
 
@@ -42,8 +42,7 @@ export default function FGAPage() {
               <span className="text-sm">Back to Chat</span>
             </Link>
             <div>
-              <h1 className="text-white text-xl font-bold">Fine-Grained Authorization</h1>
-              <p className="text-gray-300 text-xs">Okta + Auth0 FGA, better together</p>
+              <h1 className="text-white text-xl font-bold">Fine-Grained Controls</h1>
             </div>
           </div>
         </div>
@@ -57,7 +56,7 @@ export default function FGAPage() {
         {fgaChecks.length === 0 && (
           <div className="text-center py-12 text-gray-400">
             <p className="text-sm">
-              No FGA checks yet. Send a message on the{' '}
+              No fine-grained checks yet. Send a message on the{' '}
               <Link href="/" className="text-okta-blue underline">
                 chat page
               </Link>{' '}

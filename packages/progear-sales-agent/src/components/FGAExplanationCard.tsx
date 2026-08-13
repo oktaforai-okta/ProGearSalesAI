@@ -59,11 +59,8 @@ export default function FGAExplanationCard({ checks, isLoading }: Props) {
         <div>
           <h3 className="text-white font-semibold flex items-center gap-2">
             <Shield className="w-5 h-5" />
-            Fine-Grained Authorization (FGA)
+            Fine-Grained Controls
           </h3>
-          <p className="text-white/80 text-xs mt-1">
-            Okta + Auth0 FGA Better Together
-          </p>
         </div>
         <div className="flex items-center gap-2">
           {!isExpanded && hasChecks && (
@@ -86,8 +83,8 @@ export default function FGAExplanationCard({ checks, isLoading }: Props) {
           <div className="flex items-start gap-2">
             <Info className="w-4 h-4 text-purple-600 mt-0.5 flex-shrink-0" />
             <div className="text-xs text-purple-800">
-              <strong>Why FGA?</strong> Okta handles identity and group-based access.
-              FGA adds <em>fine-grained</em> relationship-based checks with contextual conditions
+              <strong>Why fine-grained controls?</strong> Okta handles identity and group-based access.
+              These controls add relationship-based checks with contextual conditions
               like vacation status and clearance hierarchies.
             </div>
           </div>
@@ -162,7 +159,7 @@ export default function FGAExplanationCard({ checks, isLoading }: Props) {
         <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
           <div className="text-xs font-semibold text-gray-600 mb-2 flex items-center gap-1">
             <Database className="w-3.5 h-3.5" />
-            FGA Authorization Model (ProGear)
+            Authorization Model (ProGear)
           </div>
           <div className="font-mono text-[11px] leading-relaxed text-gray-700 bg-white rounded p-3 border overflow-x-auto">
             <div className="text-purple-700 font-semibold">type inventory_item</div>
@@ -207,7 +204,7 @@ export default function FGAExplanationCard({ checks, isLoading }: Props) {
           <div className="bg-indigo-50 rounded-lg p-3 border border-indigo-200">
             <div className="text-xs font-semibold text-indigo-700 mb-2 flex items-center gap-1">
               <Link2 className="w-3.5 h-3.5" />
-              FGA Tuples
+              Authorization Relationships
             </div>
             <div className="space-y-1.5 text-xs">
               {/* Stored Tuples */}
@@ -278,8 +275,8 @@ export default function FGAExplanationCard({ checks, isLoading }: Props) {
               <Shield className="w-4 h-4 text-gray-400" />
             </div>
             <div className="text-sm">
-              No FGA checks performed
-              <div className="text-[10px] text-gray-400">FGA applies to inventory operations only</div>
+              No fine-grained checks performed
+              <div className="text-[10px] text-gray-400">Fine-grained controls apply to inventory operations only</div>
             </div>
           </div>
         )}
@@ -330,7 +327,7 @@ export default function FGAExplanationCard({ checks, isLoading }: Props) {
                     <div className="flex items-center gap-2 text-xs px-2 py-1.5 rounded bg-red-50 border border-red-200">
                       <User className="w-3.5 h-3.5 text-red-500" />
                       <span className="text-red-700">
-                        <strong>Not a manager</strong> - no manager relationship in FGA
+                        <strong>Not a manager</strong> - no manager relationship in the authorization model
                       </span>
                       <XCircle className="w-3.5 h-3.5 text-red-500 ml-auto" />
                     </div>
@@ -405,7 +402,7 @@ export default function FGAExplanationCard({ checks, isLoading }: Props) {
         {isLoading && relevantChecks.length === 0 && (
           <div className="text-center py-4 text-gray-400">
             <Shield className="w-6 h-6 mx-auto mb-2 animate-pulse" />
-            <p className="text-xs">Checking FGA permissions...</p>
+            <p className="text-xs">Checking fine-grained permissions...</p>
           </div>
         )}
 
@@ -419,7 +416,7 @@ export default function FGAExplanationCard({ checks, isLoading }: Props) {
             <span>+</span>
             <div className="flex items-center gap-1">
               <div className="w-2 h-2 rounded-full bg-purple-600"></div>
-              <span>FGA: Fine-Grained + Contextual</span>
+              <span>Fine-Grained Controls: Relationship + Context</span>
             </div>
             <span>=</span>
             <span className="font-semibold text-gray-700">Complete Governance</span>

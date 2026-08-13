@@ -463,7 +463,7 @@ export default function Home() {
             <Link
               href="/tokens"
               className="px-4 py-2.5 bg-white/10 hover:bg-accent/30 text-white rounded-lg transition border border-white/20 hover:border-accent/50 flex items-center gap-2 text-sm"
-              title="Token exchanges, FGA checks, and demo controls"
+              title="Token exchanges, authorization checks, and demo controls"
             >
               <Key className="w-4 h-4" />
               <span className="hidden sm:inline">Token Flow</span>
@@ -479,10 +479,10 @@ export default function Home() {
             <Link
               href="/fga"
               className="px-4 py-2.5 bg-white/10 hover:bg-accent/30 text-white rounded-lg transition border border-white/20 hover:border-accent/50 flex items-center gap-2 text-sm"
-              title="Fine-Grained Authorization checks and demo controls"
+              title="Fine-Grained Controls and demo settings"
             >
               <ShieldCheck className="w-4 h-4" />
-              <span className="hidden sm:inline">FGA</span>
+              <span className="hidden sm:inline">Fine-Grained Controls</span>
             </Link>
           </div>
 

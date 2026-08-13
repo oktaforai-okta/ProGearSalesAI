@@ -371,7 +371,7 @@ Return ONLY the JSON object, no other text."""
 
         state["agent_flow"].append({
             "step": "fga_check",
-            "action": "Checking fine-grained permissions (Auth0 FGA API)",
+            "action": "Checking fine-grained permissions",
             "status": "processing"
         })
 
@@ -512,7 +512,7 @@ Return ONLY the JSON object, no other text."""
                         tx["success"] = False
                         tx["access_denied"] = True
                         tx["status"] = "denied"
-                        tx["error"] = f"FGA: {result.reason}"
+                        tx["error"] = f"Fine-grained controls: {result.reason}"
                         tx["fga_denied"] = True  # Flag for UI to show FGA-specific styling
                         tx["access_token"] = None
                         tx["id_jag_token"] = None
@@ -533,7 +533,7 @@ Return ONLY the JSON object, no other text."""
                         "status": "denied",
                         "scopes": [],
                         "requested_scopes": scopes,
-                        "error": f"FGA: {result.reason}",
+                        "error": f"Fine-grained controls: {result.reason}",
                         "demo_mode": False,
                         "fga_denied": True,
                     })
@@ -551,7 +551,7 @@ Return ONLY the JSON object, no other text."""
 
         state["agent_flow"].append({
             "step": "fga_check",
-            "action": f"FGA ({fga_status}): {len(allowed_agents)} allowed, {denied_count} denied",
+            "action": f"Fine-grained controls ({fga_status}): {len(allowed_agents)} allowed, {denied_count} denied",
             "status": "completed",
             "details": {
                 "vacation_status": is_on_vacation,
@@ -593,7 +593,7 @@ Return ONLY the JSON object, no other text."""
         if AGENT_INVENTORY not in allowed_agents:
             state["agent_flow"].append({
                 "step": "approval_gate",
-                "action": "FGA denied inventory agent; skipping approval request",
+                "action": "Fine-grained controls denied the inventory request; skipping approval",
                 "status": "skipped",
             })
             return state

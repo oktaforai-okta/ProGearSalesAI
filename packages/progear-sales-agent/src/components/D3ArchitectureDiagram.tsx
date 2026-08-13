@@ -193,7 +193,7 @@ const NODES: DiagramNode[] = [
         "Context: a live flag (for example 'on vacation') can block access this second, with no code change.",
       ],
       callouts: ['Blocks instantly on context change', 'No redeploy needed to revoke'],
-      architect: "Auth0 FGA (Zanzibar-style relationship graph). Vacation is a contextual tuple, not stored — takes effect next check.",
+      architect: "Relationship-based controls use a Zanzibar-style graph. Vacation is a contextual tuple, not stored — it takes effect on the next check.",
     },
   },
   {

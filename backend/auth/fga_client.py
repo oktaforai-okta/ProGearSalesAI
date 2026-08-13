@@ -797,7 +797,7 @@ async def check_inventory_access_via_fga(
             object=fga_object,
             user=fga_user,
             context=context,
-            reason="FGA not configured - access denied by default",
+            reason="Fine-grained controls are not configured - access denied by default",
             contextual_tuples=[],
         )
 
@@ -850,7 +850,7 @@ async def check_inventory_access_via_fga(
             object=fga_object,
             user=fga_user,
             context={**context, "error": str(e)},
-            reason=f"FGA check failed: {e}",
+            reason=f"Fine-grained controls check failed: {e}",
             contextual_tuples=[],
         )
 
@@ -892,7 +892,7 @@ async def check_agent_access(
             object=f"{agent_type}_system",
             user=f"user:{user_email}",
             context={"is_on_vacation": is_on_vacation},
-            reason=f"No FGA model for {agent_type} - Okta RBAC only",
+            reason=f"No fine-grained model for {agent_type} - Okta role-based access only",
             contextual_tuples=[],
         )
 
