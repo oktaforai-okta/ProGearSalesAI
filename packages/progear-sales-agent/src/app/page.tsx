@@ -9,6 +9,8 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { type ApprovalStatus } from '@/components/ApprovalStatusCard';
 import { API_BASE_URL, OKTA_DOMAIN } from '@/lib/config';
+import { A2AExecutionCard, type A2ATraceEvent } from '@/components/A2AExecutionCard';
+import { AgentRegistryPanel } from '@/components/AgentRegistryPanel';
 
 interface Message {
   id: string;
@@ -18,6 +20,7 @@ interface Message {
   agentFlow?: any[];
   tokenExchanges?: any[];
   fgaChecks?: any[];
+  a2aTrace?: A2ATraceEvent[];
 }
 
 // Kept deliberately simple: 2 reads (left column) + 2 writes (right
@@ -29,10 +32,10 @@ interface Message {
 // executes, 600 pauses for human approval -- same mechanism, visibly
 // different outcome.
 const exampleQuestions: { text: string; action: 'read' | 'write' }[] = [
-  { text: "What basketball hoops do we have in stock?", action: 'read' },
-  { text: "Add 50 basketballs to inventory", action: 'write' },
-  { text: "How many basketballs are in stock?", action: 'read' },
-  { text: "Add 600 basketballs to inventory", action: 'write' },
+  { text: "How many Elite Basketballs are in stock?", action: 'read' },
+  { text: "We received 50 Elite basketballs. Add them to inventory, refresh Metro Youth League's price, and notify their buyer.", action: 'write' },
+  { text: "Show Metro Youth League's customer profile and notification preference.", action: 'read' },
+  { text: "We received 50 Elite basketballs for Metro. Update stock and notify the buyer.", action: 'write' },
 ];
 
 const CHAT_STORAGE_KEY = 'progear-chat-messages';
@@ -370,6 +373,12 @@ export default function Home() {
       if (idToken) {
         headers['Authorization'] = `Bearer ${idToken}`;
       }
+      if (session?.accessToken) {
+        // Custom-AS access token used only as the A2A exchange subject. The
+        // backend never returns or logs it, and each downstream receives a new
+        // target-specific token from Okta.
+        headers['X-ProGear-Delegation-Token'] = session.accessToken;
+      }
 
       const response = await fetch(`${API_BASE_URL}/api/chat`, {
         method: 'POST',
@@ -408,6 +417,7 @@ export default function Home() {
         agentFlow: data.agent_flow,
         tokenExchanges: data.token_exchanges,
         fgaChecks: data.fga_checks,
+        a2aTrace: data.a2a_trace,
       };
       setChatMessages((prev) => [...prev, assistantMessage]);
 
@@ -534,13 +544,14 @@ export default function Home() {
           <div className="flex-1 overflow-y-auto p-6 space-y-4 max-w-3xl mx-auto w-full">
             {chatMessages.length === 0 && (
               <div className="text-center py-8 max-w-2xl mx-auto">
+                <AgentRegistryPanel />
                 <div className="inline-block mb-4 relative">
                   <div className="absolute inset-0 bg-accent/20 rounded-full blur-2xl animate-pulse"></div>
                   <span className="text-6xl relative z-10">🏀</span>
                 </div>
                 <h2 className="text-2xl font-bold text-white mb-2">Welcome, {session?.user?.name || 'Team Member'}!</h2>
                 <p className="text-gray-300 mb-6">
-                  Your AI-powered basketball equipment sales assistant is ready. Ask about orders, inventory, pricing, or customers.
+                  Coordinate governed inventory and customer work across AWS and Google, with Okta preserving who acted for whom.
                 </p>
 
                 {/* Example Questions -- left column = read, right column = write */}
@@ -607,6 +618,7 @@ export default function Home() {
                         {getRouterSummary(msg.agentFlow)}
                       </div>
                     )}
+                    {msg.role === 'assistant' && <A2AExecutionCard events={msg.a2aTrace} />}
                     <div className={`text-xs mt-2 ${msg.role === 'user' ? 'text-white/70' : 'text-gray-400'}`}>
                       {new Date(msg.timestamp).toLocaleTimeString()}
                     </div>
@@ -628,7 +640,7 @@ export default function Home() {
                         <div className="w-2.5 h-2.5 bg-court-orange rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
                         <div className="w-2.5 h-2.5 bg-court-brown rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
                       </div>
-                      <span className="text-sm text-gray-500">Processing with AI agents...</span>
+                      <span className="text-sm text-gray-500">Coordinating governed AWS and Google agents...</span>
                     </div>
                   </div>
                 </div>
@@ -646,7 +658,7 @@ export default function Home() {
                   type="text"
                   value={message}
                   onChange={(e) => setMessage(e.target.value)}
-                  placeholder="Ask about orders, inventory, pricing, or customers..."
+                  placeholder="Ask ProGear to coordinate inventory and customer work..."
                   className="w-full px-5 py-3 border-2 border-neutral-border rounded-xl focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 transition text-gray-700 placeholder-gray-400"
                   disabled={isLoading}
                 />

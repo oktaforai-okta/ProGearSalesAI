@@ -37,6 +37,17 @@ An AI sales agent needs to read and write real business data (inventory, pricing
 - **WHEN** does a human need to approve before an action executes?
 - **CAN** access be revoked instantly?
 
+### Cross-platform A2A MVP
+
+The `feature/cross-platform-a2a` path adds the architect-aligned ProGear story without replacing the existing UI baseline:
+
+1. The user signs in against the ProGear Coordinator's Custom Authorization Server and receives a coordinator-resource-bound access token.
+2. The coordinator uses the architect team's O4AA SDK flow to mint a separate target token for the Google Customer Agent and reads Metro Youth League's profile, tier, channel, and consent.
+3. It delegates separately to the AWS Bedrock AgentCore Inventory + Pricing Agent, which invokes the Inventory MCP with `inventory:write`. The MCP re-checks FGA at the state boundary and returns an authoritative inventory/price receipt.
+4. Only that typed receipt can trigger a fresh `customer:notify` call through the Google agent. A denial, malformed receipt, or correlation mismatch stops before notification.
+
+The browser receives only a secret-free execution trace (platform, agent, exact scope, correlation ID, and `act` lineage). Raw tokens and workload private keys remain server-side. Enable this path with `PROGEAR_A2A_ENABLED=true` after the Okta mesh, AWS agent, Google agent, and coordinator URL are configured; see `.env.example` for the required names.
+
 | Layer | Technology | What it does |
 |---|---|---|
 | Identity for the agent | Okta AI Agent Governance | The AI has its own Workload Principal (`wlp`) identity, distinct from any human user |

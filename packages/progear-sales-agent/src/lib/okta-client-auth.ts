@@ -30,11 +30,13 @@ function getPrivateJwk(): JWK {
 }
 
 export function getOktaTokenEndpoint(): string {
-  const issuer = process.env.NEXT_PUBLIC_OKTA_ISSUER?.replace(/\/$/, '');
+  const issuer = (process.env.A2A_USER_ISSUER || process.env.NEXT_PUBLIC_OKTA_ISSUER)?.replace(/\/$/, '');
   if (!issuer) {
-    throw new Error('NEXT_PUBLIC_OKTA_ISSUER is not configured');
+    throw new Error('A2A_USER_ISSUER or NEXT_PUBLIC_OKTA_ISSUER is not configured');
   }
-  return `${issuer}/oauth2/v1/token`;
+  return /\/oauth2\/[^/]+$/.test(issuer)
+    ? `${issuer}/v1/token`
+    : `${issuer}/oauth2/v1/token`;
 }
 
 export function getPrivateJwks(): { keys: Array<Record<string, unknown>> } {

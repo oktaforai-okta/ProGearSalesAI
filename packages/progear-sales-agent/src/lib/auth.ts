@@ -21,17 +21,41 @@ import {
 // the authorization request to include the offline_access scope - see the
 // `authorization.params.scope` below and the deployment note in the repo.
 function getOktaIssuer(): string {
-  return process.env.NEXT_PUBLIC_OKTA_ISSUER!.replace(/\/$/, '');
+  const issuer = process.env.A2A_USER_ISSUER || process.env.NEXT_PUBLIC_OKTA_ISSUER;
+  if (!issuer) throw new Error('A2A_USER_ISSUER or NEXT_PUBLIC_OKTA_ISSUER is not configured');
+  return issuer.replace(/\/$/, '');
+}
+
+function getAuthorizationScopes(): string {
+  return process.env.A2A_USER_SCOPES || 'openid profile email offline_access';
+}
+
+function getResourceParameter(): Record<string, string> {
+  return process.env.A2A_COORDINATOR_RESOURCE
+    ? { resource: process.env.A2A_COORDINATOR_RESOURCE }
+    : {};
+}
+
+function usesCustomAuthorizationServer(): boolean {
+  return /\/oauth2\/[^/]+$/.test(getOktaIssuer());
+}
+
+function getDiscoveryUrl(): string {
+  const issuer = getOktaIssuer();
+  if (usesCustomAuthorizationServer()) {
+    return `${issuer}/.well-known/openid-configuration`;
+  }
+  return `${issuer}/.well-known/openid-configuration?client_id=${encodeURIComponent(process.env.NEXT_PUBLIC_OKTA_CLIENT_ID!)}`;
 }
 
 function getOktaIdTokenJwksUri(): URL {
   const issuer = getOktaIssuer();
   const clientId = process.env.NEXT_PUBLIC_OKTA_CLIENT_ID!;
 
-  // Okta Org AS ID tokens use app-specific signing keys. The standard
-  // discovery document advertises the org-wide JWKS URL, so include the
-  // client_id query parameter to retrieve the key set that signed this app's
-  // ID token. Access-token validation still uses the normal issuer JWKS.
+  if (usesCustomAuthorizationServer()) return new URL(`${issuer}/v1/keys`);
+
+  // Okta Org AS ID tokens use app-specific signing keys. Include client_id to
+  // retrieve the key set that signed this direct-user-access app's ID token.
   return new URL(`${issuer}/oauth2/v1/keys?client_id=${encodeURIComponent(clientId)}`);
 }
 
@@ -57,6 +81,7 @@ async function refreshOktaToken(token: JWT): Promise<JWT> {
       body: new URLSearchParams({
         grant_type: 'refresh_token',
         refresh_token: token.refreshToken || '',
+        ...getResourceParameter(),
         ...clientAuthentication,
       }),
     });
@@ -94,10 +119,10 @@ export const authOptions: NextAuthOptions = {
       // NextAuth v4 requires this property in its provider type, but
       // private_key_jwt authentication never sends or uses this value.
       clientSecret: 'unused-private-key-jwt',
-      issuer: process.env.NEXT_PUBLIC_OKTA_ISSUER!,
+      issuer: getOktaIssuer(),
       // Okta's client-qualified discovery document advertises the
       // app-specific JWKS URI used to sign Org AS ID tokens.
-      wellKnown: `${getOktaIssuer()}/.well-known/openid-configuration?client_id=${encodeURIComponent(process.env.NEXT_PUBLIC_OKTA_CLIENT_ID!)}`,
+      wellKnown: getDiscoveryUrl(),
       client: {
         token_endpoint_auth_method: 'private_key_jwt',
         token_endpoint_auth_signing_alg: 'RS256',
@@ -110,6 +135,7 @@ export const authOptions: NextAuthOptions = {
             params,
             checks,
             {
+              exchangeBody: getResourceParameter(),
               clientAssertionPayload: {
                 aud: getOktaTokenEndpoint(),
               },
@@ -118,7 +144,12 @@ export const authOptions: NextAuthOptions = {
           return { tokens };
         },
       },
-      authorization: { params: { scope: 'openid profile email offline_access' } },
+      authorization: {
+        params: {
+          scope: getAuthorizationScopes(),
+          ...getResourceParameter(),
+        },
+      },
       }),
       // NextAuth's built-in Okta provider reads the discovery document's
       // org-wide JWKS URL. Okta Org AS ID tokens are signed with an

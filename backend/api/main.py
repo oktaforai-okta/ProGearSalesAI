@@ -36,6 +36,10 @@ from dataclasses import asdict
 from data.demo_store import demo_store
 from services.factory import build_approval_service
 from services.okta_oig_client import OIGRateLimited
+from a2a.workflow import ProGearA2AWorkflow
+from a2a.models import A2AAccessDenied
+from a2a.registry import registry_snapshot
+from a2a.user_token import A2AUserTokenVerifier
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -207,6 +211,12 @@ class AgentFlowStep(BaseModel):
     status: str
     color: Optional[str] = None
     agents: Optional[List[str]] = None
+    detail: Optional[str] = None
+    platform: Optional[str] = None
+    agent: Optional[str] = None
+    scope: Optional[str] = None
+    correlation_id: Optional[str] = None
+    act_chain: Optional[List[str]] = None
 
 
 class ChatResponse(BaseModel):
@@ -219,6 +229,8 @@ class ChatResponse(BaseModel):
     # Populated by the OIG approval gate when a high-quantity inventory write
     # is awaiting manager approval. Null for normal responses.
     pending_approval: Optional[Dict[str, Any]] = None
+    # Secret-free cross-platform execution evidence. Raw tokens never leave the backend.
+    a2a_trace: Optional[List[Dict[str, Any]]] = None
 
 
 # --- Health Check ---
@@ -246,12 +258,19 @@ async def root():
     }
 
 
+@app.get("/api/a2a/registry")
+async def a2a_registry():
+    """Return mesh readiness and relationships without IDs, URLs, or secrets."""
+    return registry_snapshot()
+
+
 # --- Chat Endpoint ---
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(
     request: ChatRequest,
-    authorization: Optional[str] = Header(None, alias="Authorization")
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+    delegation_token: Optional[str] = Header(None, alias="X-ProGear-Delegation-Token"),
 ):
     """
     Main chat endpoint.
@@ -273,6 +292,41 @@ async def chat(
     user_token = None
     if authorization and authorization.startswith("Bearer "):
         user_token = authorization[7:]
+
+    # The A2A path trusts only the verified coordinator-bound ACCESS token.
+    # The ID token remains a browser-session artifact and is not an
+    # authorization input for cross-platform work.
+    a2a_enabled = os.getenv("PROGEAR_A2A_ENABLED", "false").lower() == "true"
+    a2a_workflow = ProGearA2AWorkflow()
+    if a2a_enabled and a2a_workflow.matches(request.message):
+        if not delegation_token:
+            raise HTTPException(status_code=401, detail="A delegated user access token is required")
+        try:
+            delegated_user = A2AUserTokenVerifier().verify(delegation_token)
+        except A2AAccessDenied as exc:
+            logger.warning("A2A session token rejected at %s", exc.stage)
+            raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+        user_info = {
+            "sub": delegated_user["sub"],
+            "email": delegated_user.get("email"),
+            "name": delegated_user.get("name"),
+            "groups": delegated_user.get("groups", []),
+        }
+        result = await a2a_workflow.execute(
+            request.message,
+            user_access_token=delegation_token,
+        )
+        trace = result.trace()
+        return ChatResponse(
+            content=result.content,
+            session_id=request.session_id or "session-1",
+            agent_flow=[AgentFlowStep(**event) for event in trace],
+            token_exchanges=[],
+            user_info=user_info,
+            pending_approval=None,
+            a2a_trace=trace,
+        )
 
     # Validate user
     if user_token:
@@ -322,6 +376,7 @@ async def chat(
     else:
         user_info = {"email": "anonymous", "groups": [], "is_manager": False, "is_on_vacation": False, "clearance_level": 0}
 
+    # Legacy one-agent path remains available for non-A2A prompts during the migration.
     # Create orchestrator and process request
     try:
         orchestrator = Orchestrator(
