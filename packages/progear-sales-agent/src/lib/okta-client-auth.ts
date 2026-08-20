@@ -34,7 +34,9 @@ export function getOktaTokenEndpoint(): string {
   if (!issuer) {
     throw new Error('NEXT_PUBLIC_OKTA_ISSUER is not configured');
   }
-  return `${issuer}/oauth2/v1/token`;
+  return issuer.includes('/oauth2/')
+    ? `${issuer}/v1/token`
+    : `${issuer}/oauth2/v1/token`;
 }
 
 export function getPrivateJwks(): { keys: Array<Record<string, unknown>> } {

@@ -36,6 +36,7 @@ from dataclasses import asdict
 from data.demo_store import demo_store
 from services.factory import build_approval_service
 from services.okta_oig_client import OIGRateLimited
+from a2a.api import router as a2a_router
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -46,6 +47,7 @@ app = FastAPI(
     description="Multi-agent AI sales assistant with Okta governance",
     version="0.2.0",
 )
+app.include_router(a2a_router)
 
 # CORS configuration
 cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")

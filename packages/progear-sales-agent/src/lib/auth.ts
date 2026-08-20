@@ -24,9 +24,28 @@ function getOktaIssuer(): string {
   return process.env.NEXT_PUBLIC_OKTA_ISSUER!.replace(/\/$/, '');
 }
 
+function getCoordinatorResource(): string | undefined {
+  return process.env.NEXT_PUBLIC_A2A_COORDINATOR_RESOURCE?.trim() || undefined;
+}
+
+function getAuthorizationParams(): Record<string, string> {
+  const customAuthorizationServer = getOktaIssuer().includes('/oauth2/');
+  const resource = getCoordinatorResource();
+  return {
+    scope: customAuthorizationServer
+      ? 'openid profile email offline_access agent.invoke'
+      : 'openid profile email offline_access',
+    ...(customAuthorizationServer && resource ? { resource } : {}),
+  };
+}
+
 function getOktaIdTokenJwksUri(): URL {
   const issuer = getOktaIssuer();
   const clientId = process.env.NEXT_PUBLIC_OKTA_CLIENT_ID!;
+
+  if (issuer.includes('/oauth2/')) {
+    return new URL(`${issuer}/v1/keys`);
+  }
 
   // Okta Org AS ID tokens use app-specific signing keys. The standard
   // discovery document advertises the org-wide JWKS URL, so include the
@@ -57,6 +76,7 @@ async function refreshOktaToken(token: JWT): Promise<JWT> {
       body: new URLSearchParams({
         grant_type: 'refresh_token',
         refresh_token: token.refreshToken || '',
+        ...(getCoordinatorResource() ? { resource: getCoordinatorResource()! } : {}),
         ...clientAuthentication,
       }),
     });
@@ -97,7 +117,9 @@ export const authOptions: NextAuthOptions = {
       issuer: process.env.NEXT_PUBLIC_OKTA_ISSUER!,
       // Okta's client-qualified discovery document advertises the
       // app-specific JWKS URI used to sign Org AS ID tokens.
-      wellKnown: `${getOktaIssuer()}/.well-known/openid-configuration?client_id=${encodeURIComponent(process.env.NEXT_PUBLIC_OKTA_CLIENT_ID!)}`,
+      wellKnown: getOktaIssuer().includes('/oauth2/')
+        ? `${getOktaIssuer()}/.well-known/openid-configuration`
+        : `${getOktaIssuer()}/.well-known/openid-configuration?client_id=${encodeURIComponent(process.env.NEXT_PUBLIC_OKTA_CLIENT_ID!)}`,
       client: {
         token_endpoint_auth_method: 'private_key_jwt',
         token_endpoint_auth_signing_alg: 'RS256',
@@ -113,12 +135,15 @@ export const authOptions: NextAuthOptions = {
               clientAssertionPayload: {
                 aud: getOktaTokenEndpoint(),
               },
+              ...(getCoordinatorResource()
+                ? { exchangeBody: { resource: getCoordinatorResource() } }
+                : {}),
             }
           );
           return { tokens };
         },
       },
-      authorization: { params: { scope: 'openid profile email offline_access' } },
+      authorization: { params: getAuthorizationParams() },
       }),
       // NextAuth's built-in Okta provider reads the discovery document's
       // org-wide JWKS URL. Okta Org AS ID tokens are signed with an
