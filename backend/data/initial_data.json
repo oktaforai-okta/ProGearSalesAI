@@ -308,7 +308,7 @@
       "name": "Mini Basketball",
       "sku": "BB-MINI-001",
       "category": "Basketballs",
-      "quantity": 3120,
+      "quantity": 3420,
       "status": "good",
       "reorder_point": 500
     },
