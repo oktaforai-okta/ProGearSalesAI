@@ -8,6 +8,7 @@ __pycache__/
 .env
 .env.local
 .env.*.local
+.secrets/
 
 # Build outputs
 dist/
