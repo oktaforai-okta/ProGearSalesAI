@@ -280,7 +280,11 @@ export default function Home() {
 
     const tick = async () => {
       try {
-        const res = await fetch(`${API_BASE_URL}/api/approvals/${pendingApproval.request_id}`);
+        const idToken = session?.idToken;
+        if (!idToken) return;
+        const res = await fetch(`${API_BASE_URL}/api/approvals/${pendingApproval.request_id}`, {
+          headers: { Authorization: `Bearer ${idToken}` },
+        });
         if (res.status === 429) {
           const retryAfter = Number(res.headers.get('Retry-After') || 0) * 1000;
           delay = Math.min(maxDelay, Math.max(retryAfter, delay * 2));
@@ -311,7 +315,7 @@ export default function Home() {
       if (handle) clearTimeout(handle);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingApproval?.request_id, pendingApproval?.status]);
+  }, [pendingApproval?.request_id, pendingApproval?.status, session?.idToken]);
 
   const handleSignOut = async () => {
     // Get the idToken BEFORE signing out (session will be cleared after signOut)

@@ -3,8 +3,8 @@
 Verified endpoint behavior (probed 2026-05-11):
 
 - POST   /governance/api/v1/requests
-    Body: {requestTypeId, subject, requesterFieldValues: [{id, value}]}
-    `requesterId` is inferred from the API token's owner and is NOT sent.
+    Body: {requestTypeId, subject, requesterUserIds, requesterFieldValues}
+    `requesterUserIds` identifies the human on whose behalf the service acts.
     Returns: {id, subject, requestStatus, approvals: [...], ...}
 
 - GET    /governance/api/v1/requests/{id}
@@ -100,6 +100,7 @@ class OktaOIGClient:
         *,
         request_type_id: str,
         subject: str,
+        requester_user_id: str,
         justification_field_id: str,
         justification_value: str,
     ) -> dict[str, Any]:
@@ -107,11 +108,13 @@ class OktaOIGClient:
 
         The justification lives inside requesterFieldValues, keyed by the
         Request Type's custom field ID (see OKTA_OIG_JUSTIFICATION_FIELD_ID).
-        The requester identity is inferred from the API token owner.
+        `createdBy` remains the service credential owner while
+        `requesterUserIds` records the actual signed-in human.
         """
         payload = {
             "requestTypeId": request_type_id,
             "subject": subject,
+            "requesterUserIds": [requester_user_id],
             "requesterFieldValues": [
                 {"id": justification_field_id, "value": justification_value},
             ],

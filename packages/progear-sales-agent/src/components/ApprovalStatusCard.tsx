@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useSession } from 'next-auth/react';
 import {
   CheckCircle,
   ChevronDown,
@@ -78,6 +79,7 @@ const STATUS_STYLES: Record<
 };
 
 export default function ApprovalStatusCard({ initial, onStatusChange }: Props) {
+  const { data: session } = useSession();
   const [status, setStatus] = useState<ApprovalStatus>(initial);
   // Default expanded so the user sees the live transition on first render.
   const [isExpanded, setIsExpanded] = useState(true);
@@ -101,7 +103,11 @@ export default function ApprovalStatusCard({ initial, onStatusChange }: Props) {
 
     const tick = async () => {
       try {
-        const res = await fetch(`${API_BASE_URL}/api/approvals/${id}`);
+        const idToken = session?.idToken;
+        if (!idToken) return;
+        const res = await fetch(`${API_BASE_URL}/api/approvals/${id}`, {
+          headers: { Authorization: `Bearer ${idToken}` },
+        });
         if (res.status === 429) {
           const retryAfter = Number(res.headers.get('Retry-After') || 0) * 1000;
           delay = Math.min(maxDelay, Math.max(retryAfter, delay * 2));
@@ -133,7 +139,7 @@ export default function ApprovalStatusCard({ initial, onStatusChange }: Props) {
       cancelled = true;
       if (handle) clearTimeout(handle);
     };
-  }, [status.request_id, status.status]);
+  }, [status.request_id, status.status, session?.idToken]);
 
   const style = STATUS_STYLES[status.status];
   const intent = status.intent ?? {};

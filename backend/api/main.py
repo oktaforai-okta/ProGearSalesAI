@@ -690,17 +690,19 @@ async def demo_reset(authorization: Optional[str] = Header(None, alias="Authoriz
 # --- Approval Resolver Endpoint ---
 
 @app.get("/api/approvals/{request_id}")
-async def get_approval(request_id: str):
-    """Resolve an OIG approval request.
-
-    Foreground fast-path: if the request is APPROVED and not yet executed,
-    the call synchronously executes the inventory write. Otherwise returns
-    current status without side effects.
-    """
+async def get_approval(
+    request_id: str,
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+):
+    """Return approval status without executing or mutating inventory."""
+    caller = await _resolve_caller_user_id(authorization)
     cache_seconds = int(os.getenv("APPROVAL_STATUS_CACHE_SECONDS", "15"))
     now = time.monotonic()
     cached = _approval_status_cache.get(request_id)
     if cached and now - cached[0] < cache_seconds:
+        cached_user = ((cached[1].get("intent") or {}).get("user_email") or "").lower()
+        if cached_user != caller.lower():
+            raise HTTPException(status_code=403, detail="Approval request does not belong to caller")
         return cached[1]
 
     lock = _approval_status_locks.setdefault(request_id, _approval_asyncio.Lock())
@@ -709,9 +711,14 @@ async def get_approval(request_id: str):
             now = time.monotonic()
             cached = _approval_status_cache.get(request_id)
             if cached and now - cached[0] < cache_seconds:
+                cached_user = ((cached[1].get("intent") or {}).get("user_email") or "").lower()
+                if cached_user != caller.lower():
+                    raise HTTPException(status_code=403, detail="Approval request does not belong to caller")
                 return cached[1]
             svc = _get_approval_service()
-            status = await svc.execute_if_approved(request_id)
+            status = await svc.get_status(request_id)
+            if not status.intent or status.intent.user_email.lower() != caller.lower():
+                raise HTTPException(status_code=403, detail="Approval request does not belong to caller")
             payload = _approval_status_to_json(status)
             _approval_status_cache[request_id] = (now, payload)
             return payload
@@ -726,6 +733,8 @@ async def get_approval(request_id: str):
             detail="Approval status is temporarily rate limited",
             headers={"Retry-After": str(exc.retry_after)},
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error(f"Approval resolve failed for {request_id}: {exc}")
         # Return a JSON error rather than leak a stack trace to the client.
@@ -735,12 +744,18 @@ async def get_approval(request_id: str):
 # --- Approval List Endpoint ---
 
 @app.get("/api/approvals")
-async def list_approvals(user: Optional[str] = None):
+async def list_approvals(
+    user: Optional[str] = None,
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+):
     """List OIG approval requests of the inventory-write type.
 
     Filters by `intent.user_email == user` when the query param is supplied.
     Returns items in OIG's native order; caller may sort/paginate client-side.
     """
+    caller = await _resolve_caller_user_id(authorization)
+    if user and user.lower() != caller.lower():
+        raise HTTPException(status_code=403, detail="Cannot list another user's approvals")
     svc = _get_approval_service()
     req_type_id = os.environ["OKTA_OIG_INVENTORY_REQUEST_TYPE_ID"]
     try:
@@ -754,7 +769,7 @@ async def list_approvals(user: Optional[str] = None):
         if raw.get("requestTypeId") != req_type_id:
             continue
         status = svc._status_from_raw(raw.get("id") or "", raw)
-        if user and status.intent and status.intent.user_email != user:
+        if not status.intent or status.intent.user_email.lower() != caller.lower():
             continue
         items.append(_approval_status_to_json(status))
     return {"items": items}

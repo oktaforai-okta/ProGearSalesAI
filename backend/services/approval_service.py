@@ -68,6 +68,7 @@ class _LedgerEntry:
     closed: bool = False
     last_error: str | None = None
     intent_fingerprint: str | None = None
+    requester_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -81,6 +82,7 @@ class _LedgerEntry:
             "closed": self.closed,
             "last_error": self.last_error,
             "intent_fingerprint": self.intent_fingerprint,
+            "requester_id": self.requester_id,
         }
 
     @classmethod
@@ -96,6 +98,7 @@ class _LedgerEntry:
             closed=bool(data.get("closed")),
             last_error=data.get("last_error"),
             intent_fingerprint=data.get("intent_fingerprint"),
+            requester_id=data.get("requester_id"),
         )
 
 
@@ -153,6 +156,9 @@ class _Ledger:
         self._data[request_id] = entry
         self._save()
 
+    def contains(self, request_id: str) -> bool:
+        return request_id in self._data
+
     def pending_request_ids(self) -> list[str]:
         return [
             request_id
@@ -185,6 +191,7 @@ class ApprovalService:
         justification_field_id: str,
         ledger_path: str | os.PathLike[str],
         quantity_threshold: int = 500,
+        max_request_age_seconds: int = 3600,
         clock: Callable[[], dt.datetime] = lambda: dt.datetime.now(dt.timezone.utc),
     ):
         self._oig = oig
@@ -193,6 +200,7 @@ class ApprovalService:
         self._request_type_id = request_type_id
         self._justification_field_id = justification_field_id
         self._threshold = quantity_threshold
+        self._max_request_age = dt.timedelta(seconds=max_request_age_seconds)
         self._now = clock
         self._locks: dict[str, asyncio.Lock] = {}
         self._creation_locks: dict[str, asyncio.Lock] = {}
@@ -214,7 +222,7 @@ class ApprovalService:
         self,
         *,
         user_email: str,
-        requester_id: str,  # kept for parity with old signature; unused by Okta API
+        requester_id: str,
         approver_group_name: str,
         agent: str,
         scope: str,
@@ -228,7 +236,8 @@ class ApprovalService:
         against Okta before creation. Repeated clicks or duplicate browser tabs
         therefore return the same pending request instead of creating another.
         """
-        _ = requester_id  # explicit: Okta infers requester from API token
+        if not requester_id:
+            raise ValueError("requester_id is required for OIG audit attribution")
         qty = int(parsed_intent["quantity_delta"])
         product = str(parsed_intent["product_name"])
         intent = Intent(
@@ -251,7 +260,7 @@ class ApprovalService:
                 logger.info("Reusing equivalent open OIG request %s", request_id)
                 return request_id, existing_intent
 
-            return await self._create_request(intent, approver_group_name)
+            return await self._create_request(intent, approver_group_name, requester_id)
 
     @staticmethod
     def _intent_fingerprint(intent: Intent) -> str:
@@ -286,7 +295,7 @@ class ApprovalService:
         return None
 
     async def _create_request(
-        self, intent: Intent, approver_group_name: str
+        self, intent: Intent, approver_group_name: str, requester_id: str
     ) -> tuple[str, Intent]:
         qty = intent.quantity_delta
         product = intent.product_name
@@ -304,6 +313,7 @@ class ApprovalService:
             created = await self._oig.create_request(
                 request_type_id=self._request_type_id,
                 subject=subject,
+                requester_user_id=requester_id,
                 justification_field_id=self._justification_field_id,
                 justification_value=justification,
             )
@@ -316,6 +326,7 @@ class ApprovalService:
             raise RuntimeError(f"OIG response missing request id: {created!r}")
         ledger_entry = self._ledger.get(request_id)
         ledger_entry.intent_fingerprint = self._intent_fingerprint(intent)
+        ledger_entry.requester_id = requester_id
         self._ledger.put(request_id, ledger_entry)
         return request_id, intent
 
@@ -341,6 +352,31 @@ class ApprovalService:
                 if decoded is not None:
                     return decoded
         return None
+
+    @staticmethod
+    def _parse_timestamp(value: str | None) -> dt.datetime | None:
+        if not value:
+            return None
+        try:
+            parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=dt.timezone.utc)
+        return parsed.astimezone(dt.timezone.utc)
+
+    def _request_is_expired(self, raw: dict, intent: Intent | None) -> bool:
+        submitted = self._parse_timestamp(
+            (intent.submitted_at if intent else None)
+            or raw.get("created")
+            or raw.get("createdAt")
+        )
+        if submitted is None:
+            return True
+        now = self._now()
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=dt.timezone.utc)
+        return now.astimezone(dt.timezone.utc) - submitted > self._max_request_age
 
     def _derive_approval_decision(self, raw: dict) -> tuple[str, dict | None, str | None, str | None]:
         """Inspect the `approvals` array to determine the decision.
@@ -449,6 +485,10 @@ class ApprovalService:
 
         decision, approver, approved_at, denial_reason = self._derive_approval_decision(raw)
 
+        if decision in ("pending", "approved") and self._request_is_expired(raw, intent):
+            decision = "denied"
+            denial_reason = "Approval request expired before execution"
+
         return ApprovalStatus(
             request_id=request_id,
             status=decision,   # pending | approved | denied
@@ -471,6 +511,8 @@ class ApprovalService:
     async def execute_if_approved(self, request_id: str) -> ApprovalStatus:
         lock = self._lock_for(request_id)
         async with lock:
+            if not self._ledger.contains(request_id):
+                raise ValueError("request is not registered in the local approval ledger")
             raw = await self._oig.get_request(request_id)
             status = self._status_from_raw(request_id, raw)
 
@@ -503,6 +545,35 @@ class ApprovalService:
                 ledger_entry.abandoned = True
                 self._ledger.put(request_id, ledger_entry)
                 status.denial_reason = msg
+                return status
+
+            if raw.get("requestTypeId") != self._request_type_id:
+                ledger_entry.abandoned = True
+                ledger_entry.last_error = "OIG request type does not match the configured approval gate"
+                self._ledger.put(request_id, ledger_entry)
+                status.denial_reason = ledger_entry.last_error
+                return status
+
+            requester_ids = raw.get("requesterUserIds") or []
+            if not ledger_entry.requester_id or requester_ids != [ledger_entry.requester_id]:
+                ledger_entry.abandoned = True
+                ledger_entry.last_error = "OIG requester does not match the signed-in user"
+                self._ledger.put(request_id, ledger_entry)
+                status.denial_reason = ledger_entry.last_error
+                return status
+
+            if self._intent_fingerprint(intent) != ledger_entry.intent_fingerprint:
+                ledger_entry.abandoned = True
+                ledger_entry.last_error = "OIG transaction intent does not match the approval ledger"
+                self._ledger.put(request_id, ledger_entry)
+                status.denial_reason = ledger_entry.last_error
+                return status
+
+            if intent.scope != "inventory:write":
+                ledger_entry.abandoned = True
+                ledger_entry.last_error = "OIG request has an invalid execution scope"
+                self._ledger.put(request_id, ledger_entry)
+                status.denial_reason = ledger_entry.last_error
                 return status
 
             if ledger_entry.failed_attempts >= MAX_EXECUTION_ATTEMPTS:

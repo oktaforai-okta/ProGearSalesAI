@@ -23,6 +23,7 @@ def build_approval_service(store) -> ApprovalService:
     request_type_id = os.environ["OKTA_OIG_INVENTORY_REQUEST_TYPE_ID"]
     justification_field_id = os.environ["OKTA_OIG_JUSTIFICATION_FIELD_ID"]
     threshold = int(os.environ.get("APPROVAL_QUANTITY_THRESHOLD", "500"))
+    max_request_age = int(os.environ.get("APPROVAL_MAX_AGE_SECONDS", "3600"))
     ledger_path = os.environ.get("APPROVALS_LEDGER_PATH") or str(_default_ledger_path())
     oig = OktaOIGClient(base_url=base_url, api_token=api_token)
     return ApprovalService(
@@ -33,4 +34,5 @@ def build_approval_service(store) -> ApprovalService:
         justification_field_id=justification_field_id,
         ledger_path=ledger_path,
         quantity_threshold=threshold,
+        max_request_age_seconds=max_request_age,
     )
