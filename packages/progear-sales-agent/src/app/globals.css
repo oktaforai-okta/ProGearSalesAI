@@ -2,10 +2,15 @@
 @tailwind components;
 @tailwind utilities;
 
-/* CourtEdge ProGear - Basketball Theme */
 body {
-  background: linear-gradient(to bottom, #0d0d14, #1a1a2e);
+  background: #080c12;
+  color: #e2e8f0;
   min-height: 100vh;
+}
+
+::selection {
+  background: rgba(56, 189, 248, 0.28);
+  color: #ffffff;
 }
 
 /* Smooth animations */

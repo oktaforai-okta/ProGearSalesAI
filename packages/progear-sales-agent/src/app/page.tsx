@@ -4,7 +4,18 @@ import { useState, useRef, useEffect, type ReactNode } from 'react';
 import { useSession, signOut } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { GitBranch } from 'lucide-react';
+import {
+  ArrowRight,
+  Bot,
+  Fingerprint,
+  GitBranch,
+  LogOut,
+  Network,
+  Send,
+  ShieldCheck,
+  Sparkles,
+  UserRound,
+} from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { type ApprovalStatus } from '@/components/ApprovalStatusCard';
@@ -73,28 +84,28 @@ function getRouterSummary(agentFlow?: any[]): string | null {
 // rather than pulling in the @tailwindcss/typography plugin for this alone.
 const markdownComponents = {
   p: ({ children }: { children?: ReactNode }) => <p className="mb-2 last:mb-0">{children}</p>,
-  strong: ({ children }: { children?: ReactNode }) => <strong className="font-semibold text-gray-900">{children}</strong>,
+  strong: ({ children }: { children?: ReactNode }) => <strong className="font-semibold text-white">{children}</strong>,
   ul: ({ children }: { children?: ReactNode }) => <ul className="list-disc pl-5 mb-2 space-y-1">{children}</ul>,
   ol: ({ children }: { children?: ReactNode }) => <ol className="list-decimal pl-5 mb-2 space-y-1">{children}</ol>,
   li: ({ children }: { children?: ReactNode }) => <li>{children}</li>,
   code: ({ children }: { children?: ReactNode }) => (
-    <code className="bg-gray-100 text-accent px-1 py-0.5 rounded text-sm font-mono">{children}</code>
+    <code className="rounded bg-white/10 px-1 py-0.5 font-mono text-sm text-sky-300">{children}</code>
   ),
   // Tables need remark-gfm to even parse (plain react-markdown only speaks
   // CommonMark, not GFM tables) - without it, "| Product | Stock |..." shows
   // up as a literal pipe-delimited line of text instead of a real table.
   table: ({ children }: { children?: ReactNode }) => (
     <div className="overflow-x-auto mb-2">
-      <table className="min-w-full border border-neutral-border rounded-lg text-sm">{children}</table>
+      <table className="min-w-full rounded-lg border border-white/10 text-sm">{children}</table>
     </div>
   ),
-  thead: ({ children }: { children?: ReactNode }) => <thead className="bg-gray-50">{children}</thead>,
-  tr: ({ children }: { children?: ReactNode }) => <tr className="border-b border-neutral-border last:border-0">{children}</tr>,
+  thead: ({ children }: { children?: ReactNode }) => <thead className="bg-white/5">{children}</thead>,
+  tr: ({ children }: { children?: ReactNode }) => <tr className="border-b border-white/10 last:border-0">{children}</tr>,
   th: ({ children }: { children?: ReactNode }) => (
-    <th className="px-3 py-2 text-left font-semibold text-gray-700 border-r border-neutral-border last:border-0">{children}</th>
+    <th className="border-r border-white/10 px-3 py-2 text-left font-semibold text-slate-200 last:border-0">{children}</th>
   ),
   td: ({ children }: { children?: ReactNode }) => (
-    <td className="px-3 py-2 border-r border-neutral-border last:border-0">{children}</td>
+    <td className="border-r border-white/10 px-3 py-2 last:border-0">{children}</td>
   ),
 };
 
@@ -456,166 +467,136 @@ export default function Home() {
   // Show loading screen while checking auth status
   if (isLoadingAuth || status === 'unauthenticated') {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary via-primary-light to-court-brown">
-        <div className="flex flex-col items-center space-y-4">
-          <span className="text-6xl animate-bounce">🏀</span>
-          <div className="text-white text-xl font-display">Loading CourtEdge ProGear...</div>
+      <div className="flex min-h-screen items-center justify-center bg-[#080c12]">
+        <div className="flex flex-col items-center gap-4">
+          <div className="relative flex h-14 w-14 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] text-2xl">
+            🏀
+            <span className="absolute -right-1 -top-1 h-3 w-3 animate-pulse rounded-full border-2 border-[#080c12] bg-emerald-400" />
+          </div>
+          <div className="text-xs font-medium uppercase tracking-[0.25em] text-slate-500">Opening ProGear workspace</div>
         </div>
       </div>
     );
   }
 
   return (
-    <main className="h-screen bg-gradient-to-b from-neutral-bg to-primary flex flex-col">
-      {/* Header */}
-      <header className="bg-gradient-to-r from-primary via-court-brown to-primary-light border-b-4 border-accent shadow-lg relative overflow-hidden">
-        {/* Court pattern */}
-        <div className="absolute inset-0 opacity-5">
-          <svg className="w-full h-full" viewBox="0 0 100 30" preserveAspectRatio="none">
-            <line x1="50" y1="0" x2="50" y2="30" stroke="#ff6b35" strokeWidth="0.5"/>
-            <circle cx="50" cy="15" r="8" fill="none" stroke="#ff6b35" strokeWidth="0.3"/>
-          </svg>
-        </div>
+    <main className="relative flex h-screen flex-col overflow-hidden bg-[#080c12] text-slate-100">
+      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_12%_0%,rgba(56,189,248,0.09),transparent_30%),radial-gradient(circle_at_88%_8%,rgba(139,92,246,0.08),transparent_27%)]" />
 
-        <div className="px-6 py-4 flex justify-between items-center relative z-10">
-          <div className="flex items-center space-x-4">
-            {/* Home Button */}
-            <button
-              onClick={handleGoHome}
-              className="p-2 bg-white/10 hover:bg-accent/40 text-white rounded-lg transition border border-white/20 hover:border-accent/50 flex items-center justify-center"
-              title="Go to Home"
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
-              </svg>
-            </button>
+      <header className="relative z-20 border-b border-white/10 bg-[#0b1018]/90 backdrop-blur-xl">
+        <div className="mx-auto flex h-16 max-w-[1500px] items-center justify-between gap-4 px-4 sm:px-6">
+          <button onClick={handleGoHome} className="flex items-center gap-3 text-left" title="Start a new conversation">
+            <span className="relative flex h-9 w-9 items-center justify-center rounded-xl border border-orange-400/20 bg-orange-400/10 text-lg">
+              🏀
+              <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border-2 border-[#0b1018] bg-emerald-400" />
+            </span>
+            <span>
+              <span className="block text-sm font-semibold tracking-tight text-white">CourtEdge ProGear</span>
+              <span className="block text-[10px] text-slate-500">Governed sales operations</span>
+            </span>
+          </button>
 
-            <div className="relative">
-              <span className="text-5xl">🏀</span>
-              <div className="absolute -top-1 -right-1 w-5 h-5 bg-okta-blue rounded-full border-2 border-white flex items-center justify-center">
-                <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                </svg>
+          <nav className="hidden items-center gap-1 rounded-xl border border-white/[0.08] bg-white/[0.025] p-1 md:flex">
+            <button onClick={handleGoHome} className="rounded-lg bg-white/[0.06] px-3 py-1.5 text-[11px] font-medium text-white">Workspace</button>
+            <Link href="/tokens" className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] text-slate-400 hover:bg-white/[0.05] hover:text-white"><Fingerprint className="h-3.5 w-3.5" />Delegation evidence</Link>
+            <Link href="/architecture" className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] text-slate-400 hover:bg-white/[0.05] hover:text-white"><GitBranch className="h-3.5 w-3.5" />Architecture</Link>
+          </nav>
+
+          <div className="flex items-center gap-2">
+            <div className="hidden items-center gap-2 rounded-lg border border-white/[0.08] bg-white/[0.025] px-2.5 py-1.5 sm:flex">
+              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-sky-400/10 text-sky-300"><UserRound className="h-3.5 w-3.5" /></span>
+              <div className="max-w-[170px]">
+                <p className="truncate text-[10px] font-medium text-slate-200">{session?.user?.name || session?.user?.email}</p>
+                <p className="text-[9px] text-emerald-400">Password-authenticated</p>
               </div>
             </div>
-            <div>
-              <h1 className="text-white text-2xl font-bold">CourtEdge ProGear</h1>
-              <p className="text-gray-300 text-sm">AI-Powered Basketball Equipment Sales</p>
-            </div>
-          </div>
-
-          {/* Cross-platform architecture */}
-          <div className="flex items-center space-x-2">
-            <Link
-              href="/architecture"
-              className="px-4 py-2.5 bg-white/10 hover:bg-accent/30 text-white rounded-lg transition border border-white/20 hover:border-accent/50 flex items-center gap-2 text-sm"
-              title="How the system is wired together"
-            >
-              <GitBranch className="w-4 h-4" />
-              <span className="hidden sm:inline">Architecture</span>
-            </Link>
-          </div>
-
-          <div className="flex items-center space-x-3">
-            <div className="flex items-center gap-3">
-              <span className="text-gray-200 text-sm">{session?.user?.email}</span>
-              <button
-                onClick={handleSignOut}
-                className="px-5 py-2.5 bg-white/10 hover:bg-accent/30 text-white rounded-lg transition border border-white/20 hover:border-accent/50 flex items-center space-x-2"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                </svg>
-                <span>Sign Out</span>
-              </button>
-            </div>
+            <button onClick={handleSignOut} className="rounded-lg border border-white/[0.08] p-2 text-slate-500 hover:border-white/20 hover:text-white" title="Sign out"><LogOut className="h-4 w-4" /></button>
           </div>
         </div>
       </header>
 
-      {/* Chat - full width; token/FGA/approval detail lives on /tokens now */}
-      <div className="flex-1 flex overflow-hidden">
-        <div className="w-full flex flex-col bg-gradient-to-b from-neutral-bg to-white">
-          {/* Messages Area */}
-          <div className="flex-1 overflow-y-auto p-6 space-y-4 max-w-3xl mx-auto w-full">
+      <div className="relative z-10 flex min-h-0 flex-1">
+        <div className="flex w-full flex-col">
+          <div className="mx-auto w-full max-w-6xl flex-1 space-y-5 overflow-y-auto px-5 py-6 sm:px-8">
             {chatMessages.length === 0 && (
-              <div className="text-center py-8 max-w-2xl mx-auto">
-                <AgentRegistryPanel />
-                <div className="inline-block mb-4 relative">
-                  <div className="absolute inset-0 bg-accent/20 rounded-full blur-2xl animate-pulse"></div>
-                  <span className="text-6xl relative z-10">🏀</span>
-                </div>
-                <h2 className="text-2xl font-bold text-white mb-2">Welcome, {session?.user?.name || 'Team Member'}!</h2>
-                <p className="text-gray-300 mb-6">
-                  Run the same request as Sarah or Mike. Okta policy decides whether the AWS inventory write is allowed; Google only notifies after an authoritative receipt.
-                </p>
+              <div className="py-4">
+                <div className="grid items-stretch gap-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(330px,0.65fr)]">
+                  <section className="rounded-2xl border border-white/10 bg-gradient-to-br from-white/[0.055] to-white/[0.02] p-6 sm:p-8">
+                    <div className="inline-flex items-center gap-2 rounded-full border border-sky-400/20 bg-sky-400/[0.08] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-sky-300">
+                      <Sparkles className="h-3 w-3" /> Cross-platform agent mesh
+                    </div>
+                    <h2 className="mt-5 max-w-2xl text-3xl font-semibold leading-tight tracking-[-0.035em] text-white sm:text-4xl">
+                      One request. Two clouds. One verifiable custody trail.
+                    </h2>
+                    <p className="mt-4 max-w-2xl text-sm leading-relaxed text-slate-400">
+                      Receive inventory in AWS, refresh a customer price, and notify through Google—while Okta preserves who authorized every hop and the Bridge isolates each MCP resource.
+                    </p>
 
-                {/* Example Questions -- left column = read, right column = write */}
-                <div className="grid grid-cols-2 gap-3 text-left">
-                  {exampleQuestions.map((question, idx) => {
-                    const isWrite = question.action === 'write';
-                    return (
-                      <button
-                        key={idx}
-                        onClick={() => handleSendMessage(question.text)}
-                        className="group p-4 bg-white/95 backdrop-blur-sm border-2 border-accent/20 hover:border-accent hover:shadow-xl rounded-xl transition-all text-left flex items-start space-x-3"
-                      >
-                        <span
-                          className={`flex-shrink-0 px-2 py-1 rounded-md text-[10px] font-bold tracking-wide uppercase ${
-                            isWrite ? 'bg-court-orange/15 text-court-orange' : 'bg-emerald-100 text-emerald-700'
-                          }`}
-                        >
-                          {isWrite ? 'Write' : 'Read'}
-                        </span>
-                        <span className="text-sm text-gray-700 group-hover:text-primary font-medium leading-relaxed">
-                          {question.text}
-                        </span>
-                      </button>
-                    );
-                  })}
+                    <div className="mt-7 grid gap-3 sm:grid-cols-2">
+                      {exampleQuestions.map((question, idx) => {
+                        const isWrite = question.action === 'write';
+                        return (
+                          <button key={idx} onClick={() => handleSendMessage(question.text)} className="group rounded-xl border border-white/10 bg-black/20 p-4 text-left hover:border-sky-400/30 hover:bg-sky-400/[0.04]">
+                            <span className={`inline-flex rounded-md px-2 py-1 text-[9px] font-semibold uppercase tracking-wider ${isWrite ? 'bg-orange-400/10 text-orange-300' : 'bg-emerald-400/10 text-emerald-300'}`}>{isWrite ? 'Cross-cloud write' : 'Inventory read'}</span>
+                            <span className="mt-3 flex items-start justify-between gap-3 text-xs font-medium leading-relaxed text-slate-200">
+                              {question.text}<ArrowRight className="mt-0.5 h-4 w-4 flex-none text-slate-600 transition-transform group-hover:translate-x-0.5 group-hover:text-sky-300" />
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </section>
+
+                  <section className="rounded-2xl border border-white/10 bg-[#0b1018] p-5 sm:p-6">
+                    <div className="flex items-center justify-between">
+                      <h3 className="flex items-center gap-2 text-xs font-semibold text-white"><Network className="h-4 w-4 text-violet-300" />The story, in order</h3>
+                      <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2 py-1 text-[9px] font-semibold uppercase tracking-wider text-emerald-300">Live mesh</span>
+                    </div>
+                    <ol className="mt-5 space-y-4">
+                      {[
+                        ['01', 'Human signs in', 'Sarah Sales or Mike Manager establishes the root authority.'],
+                        ['02', 'Google reads context', 'The Customer Agent checks tier, channel, and consent through its MCP resource.'],
+                        ['03', 'AWS commits inventory', 'AgentCore writes stock and returns an authoritative price receipt.'],
+                        ['04', 'Google notifies', 'Notification is accepted only when bound to the AWS receipt.'],
+                      ].map(([number, title, copy]) => (
+                        <li key={number} className="flex gap-3">
+                          <span className="font-mono text-[10px] text-sky-400">{number}</span>
+                          <div><p className="text-[11px] font-medium text-slate-200">{title}</p><p className="mt-1 text-[10px] leading-relaxed text-slate-500">{copy}</p></div>
+                        </li>
+                      ))}
+                    </ol>
+                    <div className="mt-5 border-t border-white/10 pt-4 text-[10px] leading-relaxed text-slate-500">
+                      <ShieldCheck className="mr-1.5 inline h-3.5 w-3.5 text-emerald-300" />Separate target tokens. Nested actor evidence. No raw credentials in the UI.
+                    </div>
+                  </section>
                 </div>
+
+                <div className="mt-5"><AgentRegistryPanel /></div>
               </div>
             )}
 
             {chatMessages.map((msg) => (
-              <div
-                key={msg.id}
-                className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-              >
-                <div className={`flex items-start space-x-3 max-w-2xl ${msg.role === 'user' ? 'flex-row-reverse space-x-reverse' : ''}`}>
-                  <div className={`flex-shrink-0 w-10 h-10 rounded-lg flex items-center justify-center ${
-                    msg.role === 'user'
-                      ? 'bg-gradient-to-br from-court-orange to-accent'
-                      : 'bg-gradient-to-br from-primary to-court-brown'
-                  }`}>
-                    {msg.role === 'user' ? (
-                      <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                      </svg>
-                    ) : (
-                      <span className="text-xl">🏀</span>
-                    )}
+              <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div className={`flex w-full items-start gap-3 ${msg.role === 'user' ? 'max-w-2xl flex-row-reverse' : 'max-w-5xl'}`}>
+                  <div className={`flex h-9 w-9 flex-none items-center justify-center rounded-xl border ${msg.role === 'user' ? 'border-orange-400/20 bg-orange-400/10 text-orange-300' : 'border-sky-400/20 bg-sky-400/10 text-sky-300'}`}>
+                    {msg.role === 'user' ? <UserRound className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
                   </div>
 
-                  <div className={`rounded-xl p-4 shadow-md ${
-                    msg.role === 'user'
-                      ? 'bg-gradient-to-br from-accent to-court-orange text-white'
-                      : 'bg-white border-2 border-neutral-border'
-                  }`}>
+                  <div className={`min-w-0 rounded-2xl border p-4 sm:p-5 ${msg.role === 'user' ? 'border-orange-400/15 bg-orange-400/[0.08] text-slate-100' : 'w-full border-white/10 bg-white/[0.035]'}`}>
                     {msg.role === 'assistant' ? (
-                      <div className="text-gray-700 text-sm [&_p:last-child]:mb-0">
+                      <div className="text-sm leading-relaxed text-slate-300 [&_p:last-child]:mb-0">
                         <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{msg.content}</ReactMarkdown>
                       </div>
                     ) : (
-                      <p className="whitespace-pre-wrap">{msg.content}</p>
+                      <p className="whitespace-pre-wrap text-sm leading-relaxed">{msg.content}</p>
                     )}
                     {msg.role === 'assistant' && getRouterSummary(msg.agentFlow) && (
-                      <div className="text-[11px] font-mono text-okta-blue/80 mt-2 pt-2 border-t border-neutral-border/60">
+                      <div className="mt-3 border-t border-white/10 pt-3 font-mono text-[10px] text-sky-400/80">
                         {getRouterSummary(msg.agentFlow)}
                       </div>
                     )}
-                    {msg.role === 'assistant' && <A2AExecutionCard events={msg.a2aTrace} />}
-                    <div className={`text-xs mt-2 ${msg.role === 'user' ? 'text-white/70' : 'text-gray-400'}`}>
+                    {msg.role === 'assistant' && <A2AExecutionCard events={msg.a2aTrace} subject={session?.user?.name || session?.user?.email} />}
+                    <div className="mt-2 text-[9px] uppercase tracking-wider text-slate-600">
                       {new Date(msg.timestamp).toLocaleTimeString()}
                     </div>
                   </div>
@@ -625,18 +606,16 @@ export default function Home() {
 
             {isLoading && (
               <div className="flex justify-start">
-                <div className="flex items-start space-x-3">
-                  <div className="flex-shrink-0 w-10 h-10 bg-gradient-to-br from-primary to-court-brown rounded-lg flex items-center justify-center">
-                    <span className="text-xl animate-bounce">🏀</span>
-                  </div>
-                  <div className="bg-white border-2 border-accent/30 rounded-xl p-4 shadow-md">
-                    <div className="flex items-center space-x-3">
-                      <div className="flex space-x-2">
-                        <div className="w-2.5 h-2.5 bg-accent rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                        <div className="w-2.5 h-2.5 bg-court-orange rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                        <div className="w-2.5 h-2.5 bg-court-brown rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                <div className="flex items-start gap-3">
+                  <div className="flex h-9 w-9 flex-none items-center justify-center rounded-xl border border-sky-400/20 bg-sky-400/10 text-sky-300"><Bot className="h-4 w-4" /></div>
+                  <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4">
+                    <div className="flex items-center gap-3">
+                      <div className="flex gap-1.5">
+                        <div className="h-1.5 w-1.5 animate-bounce rounded-full bg-sky-300" style={{ animationDelay: '0ms' }} />
+                        <div className="h-1.5 w-1.5 animate-bounce rounded-full bg-violet-300" style={{ animationDelay: '150ms' }} />
+                        <div className="h-1.5 w-1.5 animate-bounce rounded-full bg-emerald-300" style={{ animationDelay: '300ms' }} />
                       </div>
-                      <span className="text-sm text-gray-500">Coordinating governed AWS and Google agents...</span>
+                      <span className="text-xs text-slate-500">Coordinating governed AWS and Google agents…</span>
                     </div>
                   </div>
                 </div>
@@ -646,33 +625,28 @@ export default function Home() {
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Input Area */}
-          <div className="border-t-4 border-accent bg-gradient-to-r from-white via-accent/5 to-white px-6 py-4 shadow-2xl">
-            <form onSubmit={(e) => { e.preventDefault(); handleSendMessage(); }} className="flex space-x-3 max-w-4xl mx-auto">
-              <div className="flex-1 relative">
+          <div className="border-t border-white/10 bg-[#0b1018]/95 px-5 py-4 backdrop-blur-xl sm:px-8">
+            <form onSubmit={(e) => { e.preventDefault(); handleSendMessage(); }} className="mx-auto flex max-w-5xl gap-3">
+              <div className="relative flex-1">
                 <input
                   type="text"
                   value={message}
                   onChange={(e) => setMessage(e.target.value)}
                   placeholder="Ask ProGear to receive inventory, refresh Metro pricing, and notify the buyer..."
-                  className="w-full px-5 py-3 border-2 border-neutral-border rounded-xl focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 transition text-gray-700 placeholder-gray-400"
+                  className="w-full rounded-xl border border-white/10 bg-white/[0.045] px-4 py-3 pr-12 text-sm text-slate-200 outline-none placeholder:text-slate-600 focus:border-sky-400/40 focus:ring-2 focus:ring-sky-400/10"
                   disabled={isLoading}
                 />
-                <div className="absolute right-4 top-1/2 -translate-y-1/2 opacity-30">
-                  🏀
-                </div>
+                <ShieldCheck className="absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-emerald-400/50" />
               </div>
               <button
                 type="submit"
                 disabled={isLoading || !message.trim()}
-                className="px-6 py-3 bg-gradient-to-r from-accent to-court-orange hover:from-court-orange hover:to-accent text-white rounded-xl font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition shadow-lg hover:shadow-xl flex items-center space-x-2 border-b-4 border-court-brown/50"
+                className="inline-flex items-center gap-2 rounded-xl bg-sky-400 px-5 py-3 text-xs font-semibold text-slate-950 shadow-lg shadow-sky-400/10 hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-40"
               >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                </svg>
-                <span>Send</span>
+                <Send className="h-4 w-4" /><span className="hidden sm:inline">Send</span>
               </button>
             </form>
+            <p className="mx-auto mt-2 max-w-5xl text-center text-[9px] text-slate-600">Authority is evaluated per target. Credentials are never sent to the model or displayed in this workspace.</p>
           </div>
         </div>
       </div>

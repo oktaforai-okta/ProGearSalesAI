@@ -42,17 +42,17 @@ export function AgentRegistryPanel() {
   if (!registry) return null;
 
   return (
-    <section className="mb-6 overflow-hidden rounded-2xl border border-primary/15 bg-white text-left shadow-sm">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-border bg-primary/[0.035] px-5 py-4">
+    <section className="overflow-hidden rounded-2xl border border-white/10 bg-[#0b1018] text-left shadow-2xl shadow-black/10">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-white/[0.025] px-5 py-4">
         <div className="flex items-center gap-3">
-          <div className="rounded-xl bg-primary p-2 text-white"><Network className="h-4 w-4" /></div>
+          <div className="rounded-xl bg-sky-400/10 p-2 text-sky-300"><Network className="h-4 w-4" /></div>
           <div>
-            <h3 className="text-sm font-bold text-primary">Okta Agent Registry</h3>
-            <p className="text-xs text-gray-500">Governed identities, delegations, and resource connections</p>
+            <h3 className="text-sm font-semibold text-white">Okta Agent Registry</h3>
+            <p className="text-[11px] text-slate-500">Governed identities, inbound delegations, and resource connections</p>
           </div>
         </div>
         <span className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-wide ${
-          registry.enabled ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
+          registry.enabled ? 'border border-emerald-400/20 bg-emerald-400/10 text-emerald-300' : 'border border-amber-400/20 bg-amber-400/10 text-amber-300'
         }`}>
           {registry.enabled ? 'Mesh enabled' : 'Design mode'}
         </span>
@@ -60,25 +60,25 @@ export function AgentRegistryPanel() {
 
       <div className="grid gap-3 p-4 lg:grid-cols-3">
         {registry.agents.map((agent) => (
-          <article key={agent.key} className="rounded-xl border border-neutral-border bg-neutral-bg/60 p-4">
+          <article key={agent.key} className="rounded-xl border border-white/10 bg-white/[0.025] p-4">
             <div className="flex items-start justify-between gap-2">
               <div className="flex min-w-0 items-center gap-2">
                 <Bot className="h-4 w-4 flex-none text-accent" />
                 <div className="min-w-0">
-                  <h4 className="truncate text-xs font-bold text-primary">{agent.name}</h4>
-                  <p className="truncate text-[10px] text-gray-500">{agent.platform}</p>
+                  <h4 className="truncate text-xs font-semibold text-slate-100">{agent.name}</h4>
+                  <p className="truncate text-[10px] text-slate-500">{agent.platform}</p>
                 </div>
               </div>
               <span className={`rounded-full px-2 py-0.5 text-[9px] font-bold uppercase ${
                 agent.status === 'configured'
-                  ? 'bg-emerald-100 text-emerald-700'
-                  : 'bg-slate-200 text-slate-600'
+                  ? 'bg-emerald-400/10 text-emerald-300'
+                  : 'bg-slate-400/10 text-slate-400'
               }`}>
                 {agent.status}
               </span>
             </div>
-            <p className="mt-3 text-[11px] leading-relaxed text-gray-600">{agent.role}</p>
-            <div className="mt-3 space-y-1.5 text-[10px] text-gray-500">
+            <p className="mt-3 text-[11px] leading-relaxed text-slate-400">{agent.role}</p>
+            <div className="mt-3 space-y-1.5 text-[10px] text-slate-500">
               <p className="flex gap-1.5"><ArrowRight className="h-3 w-3 flex-none rotate-180 text-sky-600" />{agent.inbound.join(', ')}</p>
               <p className="flex gap-1.5"><ArrowRight className="h-3 w-3 flex-none text-violet-600" />{agent.outbound.join(', ')}</p>
             </div>
@@ -91,14 +91,14 @@ export function AgentRegistryPanel() {
         ))}
       </div>
 
-      <div className="grid gap-3 border-t border-neutral-border bg-slate-50 px-4 py-3 md:grid-cols-2">
+      <div className="grid gap-3 border-t border-white/10 bg-black/20 px-4 py-3 md:grid-cols-2">
         {registry.resources.map((resource) => (
-          <div key={resource.name} className="flex gap-3 rounded-lg bg-white p-3 ring-1 ring-slate-200">
+          <div key={resource.name} className="flex gap-3 rounded-lg border border-white/[0.08] bg-white/[0.025] p-3">
             <Database className="mt-0.5 h-4 w-4 flex-none text-court-orange" />
             <div className="min-w-0">
-              <p className="text-[11px] font-bold text-primary">{resource.name}</p>
-              <p className="mt-0.5 text-[10px] text-gray-500">Immediate actor: {resource.expected_actor}</p>
-              <p className="mt-1 font-mono text-[9px] text-okta-blue">{resource.scopes.join(' · ')}</p>
+              <p className="text-[11px] font-semibold text-slate-100">{resource.name}</p>
+              <p className="mt-0.5 text-[10px] text-slate-500">Immediate actor: {resource.expected_actor}</p>
+              <p className="mt-1 font-mono text-[9px] text-sky-300">{resource.scopes.join(' · ')}</p>
             </div>
           </div>
         ))}
