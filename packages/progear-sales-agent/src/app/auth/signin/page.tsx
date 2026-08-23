@@ -23,8 +23,8 @@ function SignInContent() {
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_15%_5%,rgba(56,189,248,0.13),transparent_34%),radial-gradient(circle_at_88%_18%,rgba(139,92,246,0.12),transparent_30%)]" />
       <div className="pointer-events-none absolute inset-0 opacity-[0.035] [background-image:linear-gradient(rgba(255,255,255,.5)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.5)_1px,transparent_1px)] [background-size:44px_44px]" />
 
-      <div className="relative mx-auto grid min-h-screen max-w-7xl items-center gap-10 px-6 py-10 lg:grid-cols-[1.1fr_0.9fr] lg:px-10">
-        <section className="max-w-2xl">
+      <div className="relative mx-auto grid min-h-screen w-full max-w-7xl grid-cols-1 items-center gap-8 px-4 py-8 sm:gap-10 sm:px-6 sm:py-10 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)] lg:px-10">
+        <section className="min-w-0 max-w-2xl">
           <div className="flex items-center gap-3">
             <span className="relative flex h-11 w-11 items-center justify-center rounded-2xl border border-orange-400/20 bg-orange-400/10 text-xl">
               🏀
@@ -36,7 +36,7 @@ function SignInContent() {
             </div>
           </div>
 
-          <div className="mt-14 inline-flex items-center gap-2 rounded-full border border-sky-400/20 bg-sky-400/[0.08] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-sky-300">
+          <div className="mt-8 inline-flex max-w-full items-center gap-2 rounded-full border border-sky-400/20 bg-sky-400/[0.08] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-sky-300 sm:mt-14">
             <CloudCog className="h-3.5 w-3.5" /> Google ADK × AWS AgentCore
           </div>
           <h1 className="mt-5 text-4xl font-semibold leading-[1.08] tracking-[-0.04em] text-white sm:text-5xl">
@@ -46,7 +46,7 @@ function SignInContent() {
             ProGear coordinates customer work in Google Cloud and inventory operations in AWS. Okta keeps the human at the root of authority and records the delegation trail end to end.
           </p>
 
-          <div className="mt-9 grid max-w-xl gap-3 sm:grid-cols-3">
+          <div className="mt-9 hidden max-w-xl gap-3 sm:grid sm:grid-cols-3">
             {[
               [Fingerprint, 'Human subject', 'Sarah or Mike remains the root identity.'],
               [KeyRound, 'Scoped hops', 'Each agent receives target-bound authority.'],
@@ -64,7 +64,7 @@ function SignInContent() {
           </div>
         </section>
 
-        <section className="mx-auto w-full max-w-md rounded-3xl border border-white/10 bg-[#0b1018]/95 p-6 shadow-2xl shadow-black/30 backdrop-blur-xl sm:p-8">
+        <section className="mx-auto min-w-0 w-full max-w-md rounded-3xl border border-white/10 bg-[#0b1018]/95 p-5 shadow-2xl shadow-black/30 backdrop-blur-xl sm:p-8">
           <div className="flex items-start justify-between gap-4">
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-sky-300">Secure workspace</p>
